@@ -203,3 +203,66 @@ staging population.
   failover, and operational recovery remain unmeasured.
 
 The next task is **Phase 4 Prompt 3 — Shared State Storage Readiness**.
+
+## Windows Host Recheck — 2026-09-27
+
+The persistence decision was rechecked on the current development machine rather than
+inferred from the earlier macOS result.
+
+### Environment
+
+- Windows 11 Pro, 64-bit, NTFS
+- Python 3.14.7 (the project minimum remains Python 3.12)
+- SQLite 3.50.4, threadsafety level 3
+- SQLite file defaults: `journal_mode=delete`, `synchronous=2` (`FULL`)
+- Approximately 16.47 GB free on the benchmark volume at the time of the check
+- No `.env` and no root-level `*.sqlite3` project database existed in this checkout;
+  the effective setting remains `sqlite:///queue_load_test.sqlite3`
+
+The same temporary 10,000-row benchmark ran twice with 6,000 eligible due sessions,
+50-row claims, and 20 samples per operation. Each run used a newly created database.
+
+| Metric | Windows run 1 | Windows run 2 |
+|---|---:|---:|
+| Seed duration | 33,387.926 ms | 33,392.885 ms |
+| Approximate seed rate | 299.51 rows/s | 299.46 rows/s |
+| Database size | 4,386,816 bytes | 4,386,816 bytes |
+| Due count p50 / p95 | 4.005 / 4.309 ms | 4.111 / 4.601 ms |
+| Claim 50 p50 / p95 | 4.246 / 4.866 ms | 4.321 / 4.898 ms |
+| Update p50 / p95 | 3.076 / 3.326 ms | 3.216 / 3.971 ms |
+| Lease release p50 / p95 | 2.780 / 3.124 ms | 2.801 / 2.973 ms |
+| Scheduler iteration p50 / p95 | 8.840 / 9.503 ms | 8.791 / 9.263 ms |
+
+Both query plans reported:
+
+```text
+SEARCH queue_sessions USING INDEX idx_queue_sessions_due (<expr><?)
+```
+
+No temporary ordering B-tree appeared. The Windows host is materially slower at
+individual durable commits than the earlier macOS host, especially during 10,000
+one-row seed transactions. This does not currently justify PostgreSQL: creation is
+browser-bound, the measured claim/update/release operations remain small relative to
+browser restoration and navigation, and neither the real due-session mix nor a
+required sustained write cadence has been measured. The worst-case planning example
+of all 10,000 sessions due every 30 seconds would require about 333 completed checks/s,
+but that is not the configured adaptive lifecycle workload and has not been validated
+as a service objective.
+
+Repository and monitoring tests passed on this host, including Queue ID uniqueness,
+bounded/disjoint claims through separate repository connections, active-lease
+exclusion, expired-lease takeover, stale-owner fencing, owner-checked release,
+terminal-state exclusion, index migration, restart persistence, bounded queues, and
+shutdown lease release.
+
+### Recheck Decision
+
+**PostgreSQL remains optional and deferred. No database migration is needed on this
+machine.** There is no existing local database to migrate, and a first application run
+will create the current SQLite schema and due index. Existing older SQLite databases
+remain covered by the idempotent column/index initialization path.
+
+Reopen the PostgreSQL gate if sustained browser-backed measurement shows SQLite write
+serialization, lock waits, claim/update/release latency, backlog recovery, or a
+multi-node ownership requirement missing the agreed cadence. The current check does
+not measure PostgreSQL, multi-process contention, or real Queue-it write rates.

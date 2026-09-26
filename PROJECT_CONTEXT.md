@@ -29,6 +29,13 @@ live monitoring.
   and measured 0.940/0.999 ms due-count p50/p95, 0.538/0.691 ms claim-50, and
   1.550/1.667 ms scheduler-iteration latency. PostgreSQL remains optional and deferred;
   sustained SQLite writes and distributed PostgreSQL leasing remain UNKNOWN.
+- A 2026-09-27 recheck on the current Windows/NTFS host repeated the 10,000-row
+  benchmark twice. Due-count p95 was 4.309/4.601 ms, claim-50 p95 4.866/4.898 ms,
+  update p95 3.326/3.971 ms, release p95 3.124/2.973 ms, and scheduler-iteration p95
+  9.503/9.263 ms. The ordered index remained selected with no temporary sort. Seeding
+  10,000 separately committed rows took about 33.39 seconds (~299 rows/s), highlighting
+  slower durable commits but not a measured PostgreSQL trigger. No local project
+  database exists in this checkout, so no on-machine migration is required.
 - Lease updates are now owner-fenced. A stale worker cannot overwrite a row after an
   expired lease is reclaimed, and an unleased stale snapshot cannot clear a new lease.
 - State storage decision: Phase 4 stays single-machine, so `FileSystemStateStore`

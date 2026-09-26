@@ -2236,3 +2236,81 @@ Phase 4 Prompt 5 — Acquire 10,000 Queue IDs
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: distribution decision, Windows portability fixes, and project records
+
+## 2026-09-27 — Phase 4 Prompt 2 Recheck — SQLite and PostgreSQL Gate
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Recheck the Phase 4 persistence decision and important database metrics on the current
+Windows machine, implementing PostgreSQL only if local evidence justified migration.
+
+### Changes Made
+
+- Re-audited the repository protocol, SQLite schema and index, claim transaction,
+  owner fencing, lease expiry, scheduler boundary, configuration, and persistence tests.
+- Ran two independent 10,000-row SQLite benchmarks on Windows/NTFS with 6,000 due rows,
+  50-row claims, and 20 samples per operation.
+- Added the host environment, both measurement sets, query plan, comparison caveats,
+  and migration decision to `docs/phase4_postgresql_readiness.md`.
+- Updated `PROJECT_CONTEXT.md` with the current-machine evidence.
+- Did not implement PostgreSQL or change database behavior. No measured migration
+  trigger exists, and no local project database exists to migrate.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `docs/phase4_postgresql_readiness.md`
+- `PROJECT_CONTEXT.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_repository.py tests/unit/test_phase3_repository_benchmark.py tests/unit/test_monitoring.py -q`
+  — 41 passed in 23.32 seconds.
+- Two `python -m queue_load_test.harness.phase3_repository --sessions 10000
+  --batch-size 50 --samples 20` runs — completed successfully.
+
+### PostgreSQL Tests
+
+- NOT RUN. PostgreSQL remains unimplemented and no PostgreSQL test database is
+  configured. No PostgreSQL performance or `SKIP LOCKED` result is claimed.
+
+### Important Decisions
+
+- SQLite remains the recommended current single-machine backend; PostgreSQL remains
+  optional and evidence-gated.
+- Windows durable commits were slower than the earlier macOS measurement, but query,
+  claim, update, release, and scheduler p95 values remained below 10 ms and did not
+  establish a real workload shortfall.
+- The existing repository abstraction, short committed claims, lease expiry, and
+  stale-owner fencing remain sufficient preparation for a future backend.
+- No new index was added: the partial ordered due index was used in both 10,000-row
+  runs, and Queue ID uniqueness already supplies its identity index.
+
+### Known Issues
+
+- Sustained multi-process write contention and actual browser-driven update rates are
+  unmeasured.
+- Real required check cadence and due-session lifecycle mix remain undefined.
+- PostgreSQL schema, migration, pooling, `SKIP LOCKED`, failover, and performance remain
+  UNKNOWN.
+- The benchmark volume had about 16.47 GB free; this is ample for the measured 4.39 MB
+  database but should be watched during browser/state benchmarks.
+
+### Follow-Up
+
+This was a historical Prompt 2 recheck. Phase 4 Prompts 3 and 4 are already complete;
+the current roadmap remains Phase 4 Prompt 5 — Acquire 10,000 Queue IDs.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: persistence recheck documentation
