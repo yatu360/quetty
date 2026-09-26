@@ -46,7 +46,8 @@ class Settings(BaseSettings):
     @classmethod
     def parse_session_mode(cls, value: object) -> SessionMode:
         if not isinstance(value, str | SessionMode):
-            raise ValueError("SESSION_MODE must be a string")
+            # Pydantic reports ValueError as configuration validation failure.
+            raise ValueError("SESSION_MODE must be a string")  # noqa: TRY004
         return SessionMode.parse(value)
 
     @model_validator(mode="after")

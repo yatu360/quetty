@@ -5,11 +5,15 @@ Phase 1 foundation for an authorised Queue-it staging test system.
 This phase intentionally implements only:
 
 - typed configuration and startup validation
-- core Queue-it session/progress domain models
-- project structure for future browser, scheduler, repository, state, monitoring, transfer, metrics, and utility code
-- unit tests for configuration and model behavior
+- Queue-it session/progress domain models and lifecycle validation
+- defensive, browser-independent Queue-it progress parsing
+- SQLite session persistence with lightweight work leases
+- atomic local JSON browser-state persistence
+- project structure for future browser, scheduler, transfer, and metrics code
+- unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement browser automation, queue polling, persistence, scheduling, transfer logic, or metrics.
+It does not implement browser automation, queue polling, scheduling, transfer
+logic, PostgreSQL, or metrics.
 
 ## Install
 
@@ -29,6 +33,10 @@ The application is configured through environment variables. Start from:
 ```powershell
 Copy-Item .env.example .env
 ```
+
+The SQLite database, transfer URLs, and browser-state files contain sensitive
+session data. The default local files are git-ignored and should not be logged
+or shared.
 
 ## Test
 

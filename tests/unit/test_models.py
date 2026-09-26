@@ -74,7 +74,9 @@ def test_progress_values_are_optional() -> None:
     assert progress.progress_percentage is None
     assert progress.estimated_wait_text is None
     assert progress.expected_service_time is None
+    assert progress.last_updated_at is None
     assert progress.queue_paused is None
+    assert progress.first_in_line is None
     assert progress.serviced_soon is None
     assert progress.turn_started is None
     assert progress.connection_lost is None

@@ -16,7 +16,7 @@ class ParseableStrEnum(StrEnum):
         if isinstance(value, cls):
             return value
         if not isinstance(value, str):
-            raise ValueError(f"{cls.__name__} must be parsed from a string")
+            raise TypeError(f"{cls.__name__} must be parsed from a string")
 
         normalized = value.strip().upper().replace("-", "_").replace(" ", "_")
         try:
@@ -60,13 +60,15 @@ class QueueSession:
     live in QueueProgress so code does not infer lifecycle from a queue id.
     """
 
-    queue_id: str
-    transfer_url: str
+    transfer_url: str = field(repr=False)
     mode: SessionMode
-    state_path: Path
+    state_path: Path = field(repr=False)
+    queue_id: str | None = None
     session_id: str = field(default_factory=lambda: str(uuid4()))
     status: QueueStatus = QueueStatus.NEW
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_checked_at: datetime | None = None
+    next_check_at: datetime | None = None
     attempt_count: int = 0
     last_error: str | None = None
     worker_id: str | None = None
@@ -76,5 +78,7 @@ class QueueSession:
         self.mode = SessionMode.parse(self.mode)
         self.status = QueueStatus.parse(self.status)
         self.state_path = Path(self.state_path)
+        if self.queue_id is not None and not self.queue_id.strip():
+            raise ValueError("queue_id cannot be blank")
         if self.attempt_count < 0:
             raise ValueError("attempt_count cannot be negative")
