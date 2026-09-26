@@ -288,7 +288,7 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: Prompts 1–2 completed locally; browser and staging scalability remain
+**Status: Prompts 1–3 completed locally; Queue-it staging scalability remains
 unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
 
 Target profile:
@@ -322,9 +322,14 @@ Planned prompt breakdown:
    claim, 0.365 ms for update, 0.279 ms for lease release, and 0.668 ms for a scheduler
    iteration. Two repository connections claimed disjoint batches, expired leases
    recovered, and queues remained bounded. SQLite remains selected.
-3. **Browser capacity benchmark at 50–100 contexts** — measure installed-Chrome context
-   creation, allocation contention, resource use, and stability without declaring 100
-   contexts safe in advance.
+3. **Browser capacity benchmark at 50–100 contexts** — **completed locally on
+   2026-09-26.** Installed Google Chrome completed proportional 50/2, 75/3, and 100/4
+   context/process cases against an in-memory page with zero recorded creation,
+   navigation, crash, or cleanup failures. p95 navigation increased from 0.377 to 0.511
+   to 0.635 seconds. Summed peak process RSS crossed the conservative 80%-of-host
+   pressure indicator at 75 and 100, with the explicit caveat that shared Chrome pages
+   may be double-counted. Queue-it staging is NOT RUN; no optimal or staging-safe
+   active-context value has been selected.
 4. **1,000-session acquisition run** — acquire unique identities with bounded creation
    and record throughput/failure/resource data.
 5. **Large-population scheduler fairness** — measure due ordering, lease contention,

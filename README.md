@@ -159,6 +159,24 @@ aggregate JSON output. See
 [the Phase 3 repository benchmark](docs/phase3-repository-benchmark.md) for the current
 local measurements, query plan, synthetic population, and SQLite decision.
 
+## Phase 3 Browser Capacity Benchmark
+
+The controlled browser harness runs the proportional 50/2, 75/3, and 100/4
+context/process cases sequentially using installed Google Chrome. Local mode navigates
+an in-memory page and needs no staging access:
+
+```powershell
+queue-load-test-phase3-browser-capacity --hold-seconds 2 --sample-interval-seconds 0.25 --report phase3-browser-capacity-benchmark.json
+```
+
+Queue-it navigation additionally requires `RUN_STAGING_TESTS=1`,
+`RUN_PHASE3_BROWSER_BENCHMARK=1`, `--staging`, and
+`--confirm-authorized-staging`. The machine-readable report is git-ignored. See
+[the Phase 3 browser-capacity benchmark](docs/phase3-browser-capacity-benchmark.md) for
+the verified local comparison, resource-measurement caveats, and current staging
+`NOT RUN` result. Completing a case does not make its context count a recommended
+operating point.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

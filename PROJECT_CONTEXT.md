@@ -9,16 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–2 complete locally.
-- Last completed work: Phase 3 Prompt 2 — repository and scheduler performance at
-  1,000 synthetic sessions.
-- Completion: local configuration, bounded-concurrency, SQLite query, lease, and
-  scheduler evidence only. No Phase 3 browser or staging benchmark has run, and Phase 2
-  measurement gaps remain.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–3 complete locally.
+- Last completed work: Phase 3 Prompt 3 — controlled installed-Chrome capacity
+  benchmark at 50, 75, and 100 active contexts.
+- Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
+  and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
+  benchmark has run, and Phase 2 measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100
-  Contexts**. Values in this range remain candidates, not safe operating points.
+- Next planned work: **Phase 3 Prompt 4 — Queue ID Acquisition to 1,000**. The browser
+  results do not by themselves authorize or establish a safe 1,000-ID staging run.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -148,9 +148,11 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 
 The Phase 3 readiness defaults are two Chrome processes, 25 contexts per browser, and
 a 50-context global ceiling, with only one creation and one monitoring worker enabled
-by default. Structurally validated benchmark candidates use 2/3/4 Chrome processes at
-25 contexts each for 50/75/100 global ceilings. These are unmeasured candidates, not
-safe operating-point claims, and the Phase 3 configuration rejects ceilings above 100.
+by default. The controlled local benchmark exercised 2/3/4 Chrome processes at 25
+contexts each for 50/75/100 global ceilings. All three short in-memory-page cases
+completed with exact per-process accounting, zero recorded failures, and full cleanup.
+This is local installed-Chrome evidence, not a safe operating-point or Queue-it staging
+claim; the Phase 3 configuration rejects ceilings above 100.
 `BrowserManager` launches Chromium with
 `channel="chrome"`, selects the least-loaded connected process, and rejects allocations
 above either capacity. Browser slot IDs remain stable when only a failed Chrome process
@@ -303,6 +305,11 @@ releases active/queued leases without deleting persisted identities.
   configurable saturation symptoms without ranking cases or choosing a winner.
   BrowserManager context-acquisition and page-navigation durations are aggregate
   histograms without session labels.
+- The Phase 3 browser-capacity harness adds separate context-creation and manager-lock
+  wait timings, cleanup failure accounting, raw fixed-interval application/Chrome
+  CPU/RSS samples, managed and observed process counts, machine-readable JSON, and a
+  concise comparison. CPU is aggregate core-percent; summed Chrome RSS can double-count
+  shared pages and is treated as a pressure indicator rather than unique memory.
 
 ## Tests
 
@@ -314,9 +321,10 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/python -m pytest -q` reported **242 passed,
-  4 deselected in 10.59 seconds** on Python 3.14.7/macOS arm64. The deselected tests were
-  the four explicitly gated staging harnesses. Ruff and strict mypy passed.
+- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **251 passed, 4 deselected
+  in 11.47 seconds**. The deselected tests were explicitly gated staging harnesses.
+  Phase 3 Prompt 3 focused browser/harness/observability tests reported 32 passed; Ruff
+  and strict mypy passed.
 
 ## Phase 1 Acceptance Results
 
@@ -365,7 +373,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - No real authorised staging run or generated performance JSON is checked in; all
   vendor-, theme-, event-timing-, and destination-specific acceptance remains unknown.
 - Real transfer and storage-state restore rates, `lastUpdated` cadence, lifecycle timing,
-  CPU/RAM headroom, browser crash rate, and monitoring sweep time have not been measured.
+  Queue-it CPU/RAM headroom, browser crash rate, and monitoring sweep time have not been
+  measured.
 - The Phase 2 HYBRID restore benchmark is implemented but **NOT RUN**. Both staging
   environment gates were absent, so transfer/storage success rates, fallback frequency,
   latency percentiles, error distribution, and identity mismatches remain UNKNOWN.
@@ -384,9 +393,12 @@ mechanics only; they are not Queue-it staging or performance measurements.
   tests. Acquisition correctness is verified for targets 1, 10, and 100, including a
   restart from 90 persisted IDs and 99/100 near-target scheduling, but no 100-session
   browser/staging run or performance tuning has been performed.
-- Two-process allocation, the 25-context global cap, isolated process restart, and
-  capacity recovery are verified with fakes. Actual two-process installed-Chrome
-  behavior and crash recovery still require authorised staging observation.
+- Installed Chrome completed short local 50/75/100-context cases using 2/3/4 managed
+  processes with no recorded failures. Summed peak process RSS crossed the conservative
+  80%-of-host indicator at 75 and 100 contexts, although shared Chrome pages can be
+  double-counted. Sustained operation, Queue-it navigation, and real crash recovery
+  still require authorised staging observation; no optimal or staging-safe value is
+  selected.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
@@ -437,6 +449,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase2-acceptance.md` — final Phase 2 PASS/FAIL/UNKNOWN decision and evidence.
 - `docs/phase3-repository-benchmark.md` — synthetic population, query plan, latency,
   and SQLite decision for Phase 3 Prompt 2.
+- `docs/phase3-browser-capacity-benchmark.md` — local installed-Chrome comparison,
+  resource caveats, and staging NOT RUN status for Phase 3 Prompt 3.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -528,6 +542,12 @@ Local synthetic Phase 3 repository benchmark:
 queue-load-test-phase3-repository --sessions 1000 --batch-size 50 --samples 20
 ```
 
+Local installed-Chrome Phase 3 browser-capacity benchmark:
+
+```powershell
+queue-load-test-phase3-browser-capacity --hold-seconds 2 --sample-interval-seconds 0.25 --report phase3-browser-capacity-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -537,9 +557,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100 Contexts.** Measure actual
-installed-Chrome capacity, allocation contention, CPU/RAM, failures, and cleanup at
-controlled candidate levels. Do not assume 100 contexts is safe.
+**Phase 3 Prompt 4 — Queue ID Acquisition to 1,000.** Exercise bounded acquisition and
+record unique-ID, throughput, latency, resource, failure, and cleanup evidence without
+turning 1,000 persisted sessions into 1,000 live contexts.
 
 ## Instructions for Future AI Sessions
 

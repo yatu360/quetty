@@ -8,6 +8,7 @@ from queue_load_test.browser import (
     BrowserManager,
 )
 from queue_load_test.browser.manager import PlaywrightStarter
+from queue_load_test.metrics import PrometheusMetrics
 
 
 class FakeContext:
@@ -80,6 +81,7 @@ def manager_and_playwright(
     processes: int = 1,
     per_browser: int = 5,
     global_limit: int = 5,
+    observability: PrometheusMetrics | None = None,
 ) -> tuple[BrowserManager, FakePlaywright]:
     playwright = FakePlaywright()
 
@@ -91,6 +93,7 @@ def manager_and_playwright(
         max_contexts_per_browser=per_browser,
         max_active_contexts=global_limit,
         playwright_starter=cast(PlaywrightStarter, starter),
+        observability=observability,
     )
     return manager, playwright
 
@@ -130,6 +133,25 @@ async def test_fresh_context_has_no_shared_storage_state() -> None:
     assert playwright.chromium.browsers[0].contexts[1].options == {}
     await first.close()
     await second.close()
+    await manager.shutdown()
+
+
+async def test_context_reports_creation_and_allocation_wait_duration() -> None:
+    metrics = PrometheusMetrics()
+    manager, _ = manager_and_playwright(observability=metrics)
+    await manager.start()
+
+    owned = await manager.create_context()
+
+    assert owned.creation_duration_seconds >= 0
+    assert owned.acquisition_wait_seconds >= 0
+    assert (
+        metrics.registry.get_sample_value(
+            "browser_context_creation_duration_seconds_count"
+        )
+        == 1
+    )
+    await owned.close()
     await manager.shutdown()
 
 
@@ -240,7 +262,8 @@ async def test_release_updates_capacity_and_is_idempotent() -> None:
 
 
 async def test_close_failure_does_not_leak_manager_capacity() -> None:
-    manager, playwright = manager_and_playwright()
+    metrics = PrometheusMetrics()
+    manager, playwright = manager_and_playwright(observability=metrics)
     await manager.start()
     owned = await manager.create_context()
     playwright.chromium.browsers[0].contexts[0].fail_close = True
@@ -249,6 +272,7 @@ async def test_close_failure_does_not_leak_manager_capacity() -> None:
 
     assert owned.closed
     assert (await manager.capacity()).active_contexts == 0
+    assert metrics.registry.get_sample_value("browser_cleanup_failures_total") == 1
     await manager.shutdown()
 
 

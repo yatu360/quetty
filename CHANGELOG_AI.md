@@ -1278,3 +1278,111 @@ Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100 Contexts
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 2 implementation, tests, benchmark, and documentation
+
+## 2026-09-26 — Phase 3 Prompt 3 — Browser Capacity Benchmark
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Create and run a small, controlled installed-Chrome comparison at 50, 75, and 100
+active contexts while preserving bounded multi-context browser ownership and making no
+unmeasured Queue-it staging or optimal-capacity claim.
+
+### Changes Made
+
+- Added a Phase 3 browser-capacity harness with fixed allocation/cleanup worker pools,
+  a bounded per-case queue, sequential cases, installed Chrome through the existing
+  `BrowserManager`, local in-memory navigation, and explicitly gated staging mode.
+- Added machine-readable JSON and concise comparison output for context creation,
+  total acquisition, manager-lock wait, navigation, application/Chrome CPU and RSS,
+  managed/observed processes, crashes, creation/navigation/cleanup failures, and full
+  cleanup.
+- Instrumented `BrowserManager` context-creation and allocation-lock timing and added
+  aggregate cleanup-failure and context-creation-duration metrics without session or
+  Queue ID labels.
+- Added objective symptom detection for adjacent latency/RSS growth, allocation stalls,
+  failures, multicore-normalized CPU pressure, and conservative host-RAM pressure.
+- Added tests for exact case generation, invalid capacity, count enforcement, managed
+  versus observed process accounting, resource aggregation, JSON/text serialization,
+  and cleanup after a partially failed case.
+- Documented the local comparison, RSS/CPU interpretation, staging gates, limitations,
+  and the next Phase 3 prompt.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase3_browser_capacity.py`
+- `tests/unit/test_phase3_browser_capacity.py`
+- `docs/phase3-browser-capacity-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `tests/unit/test_browser_manager.py`
+
+### Tests and Checks Run
+
+- Focused browser/harness/observability tests — 32 passed in 0.13 seconds.
+- Full non-staging suite — 251 passed, 4 deselected in 11.47 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 43 source files.
+- `git diff --check` — passed.
+
+### Controlled Local Benchmark
+
+- Command: `.venv/bin/python -m queue_load_test.harness.phase3_browser_capacity
+  --hold-seconds 2 --sample-interval-seconds 0.25 --allocation-workers 10 --report
+  phase3-browser-capacity-benchmark.json`.
+- Host: 15 logical CPUs and 25,769,803,776 bytes RAM; navigation used an in-memory
+  page, not Queue-it staging.
+- 50 contexts / 2 Chrome processes: 50/50 achieved; p95 create 0.100 seconds, p95 lock
+  wait 0.320 seconds, p95 navigation 0.377 seconds; Chrome CPU average/peak
+  153.1%/601.9%; summed Chrome RSS average/peak 13.38/17.80 GB.
+- 75 contexts / 3 Chrome processes: 75/75 achieved; p95 create 0.118 seconds, p95 lock
+  wait 0.243 seconds, p95 navigation 0.511 seconds; Chrome CPU average/peak
+  206.5%/490.0%; summed Chrome RSS average/peak 16.75/22.14 GB.
+- 100 contexts / 4 Chrome processes: 100/100 achieved; p95 create 0.112 seconds, p95
+  lock wait 0.189 seconds, p95 navigation 0.635 seconds; Chrome CPU average/peak
+  293.2%/553.1%; summed Chrome RSS average/peak 20.64/27.92 GB.
+- Every case had zero recorded browser crashes, context creation failures, navigation
+  failures, and cleanup failures, and returned active-context capacity to zero.
+- The 75- and 100-context cases crossed the conservative summed-RSS 80%-of-host
+  indicator. Chrome shared pages may be counted more than once, so this is a pressure
+  signal rather than unique-memory proof. No context count is selected as optimal.
+
+### Staging Tests
+
+- Queue-it staging benchmark — **NOT RUN**. No `.env` or explicit staging authorization
+  gates were available. No staging traffic was sent.
+
+### Known Issues / Unknowns
+
+- Queue-it page navigation latency, identity acquisition behavior, long-duration
+  stability, real crash recovery, and a staging-safe 50–100 context range remain
+  UNKNOWN.
+- Summed per-process RSS can double-count shared Chrome pages; host-level memory pressure
+  should be corroborated during a longer authorised run.
+- The BrowserManager still holds its global allocation lock while Chrome creates a
+  context. This run showed no configured stall symptom, but sustained acquisition and
+  monitoring contention remain unmeasured.
+- The benchmark is short and local. It neither proves Phase 3 scalability nor predicts
+  10,000-session behavior.
+
+### Follow-Up
+
+Phase 3 Prompt 4 — Queue ID Acquisition to 1,000
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 3 implementation, tests, benchmark, and documentation

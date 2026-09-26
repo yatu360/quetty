@@ -68,18 +68,30 @@ class _BrowserSlot:
 class OwnedBrowserContext:
     """An idempotently closable context owned by a BrowserManager."""
 
-    __slots__ = ("_closed", "_context", "_manager", "_slot")
+    __slots__ = (
+        "_acquisition_wait_seconds",
+        "_closed",
+        "_context",
+        "_creation_duration_seconds",
+        "_manager",
+        "_slot",
+    )
 
     def __init__(
         self,
         manager: BrowserManager,
         slot: _BrowserSlot,
         context: BrowserContext,
+        *,
+        creation_duration_seconds: float = 0.0,
+        acquisition_wait_seconds: float = 0.0,
     ) -> None:
         self._manager = manager
         self._slot = slot
         self._context = context
         self._closed = False
+        self._creation_duration_seconds = creation_duration_seconds
+        self._acquisition_wait_seconds = acquisition_wait_seconds
 
     @property
     def context(self) -> BrowserContext:
@@ -94,6 +106,18 @@ class OwnedBrowserContext:
         """Return the stable identifier of the Chrome slot owning this context."""
 
         return self._slot.index
+
+    @property
+    def creation_duration_seconds(self) -> float:
+        """Time spent asking Chrome to create this context."""
+
+        return self._creation_duration_seconds
+
+    @property
+    def acquisition_wait_seconds(self) -> float:
+        """Time spent waiting for BrowserManager allocation locks."""
+
+        return self._acquisition_wait_seconds
 
     async def close(self) -> None:
         await self._manager.close_context(self)
@@ -224,10 +248,13 @@ class BrowserManager:
     ) -> OwnedBrowserContext:
         """Implement allocation separately so all exits receive timing instrumentation."""
 
+        acquisition_wait_seconds = 0.0
         while True:
             restart_tasks: tuple[asyncio.Task[bool], ...] = ()
             wait_for_restart = False
+            lock_started = time.perf_counter()
             async with self._lock:
+                acquisition_wait_seconds += time.perf_counter() - lock_started
                 self._require_started()
                 restart_tasks = self._schedule_failed_restarts_locked()
                 if self._active_context_count() >= self._max_active_contexts:
@@ -245,11 +272,16 @@ class BrowserManager:
                         candidates,
                         key=lambda candidate: (len(candidate.contexts), candidate.index),
                     )
+                    creation_started = time.perf_counter()
                     try:
                         context = await self._new_context(slot.browser, storage_state)
                     except Exception:
+                        creation_duration = time.perf_counter() - creation_started
                         if self._observability is not None:
                             self._observability.record_context_creation_failure()
+                            self._observability.record_context_creation_duration(
+                                creation_duration
+                            )
                         if slot.browser.is_connected():
                             raise
                         restart_tasks = self._schedule_failed_restarts_locked()
@@ -260,7 +292,18 @@ class BrowserManager:
                             for candidate in self._slots
                         )
                     else:
-                        owned_context = OwnedBrowserContext(self, slot, context)
+                        creation_duration = time.perf_counter() - creation_started
+                        if self._observability is not None:
+                            self._observability.record_context_creation_duration(
+                                creation_duration
+                            )
+                        owned_context = OwnedBrowserContext(
+                            self,
+                            slot,
+                            context,
+                            creation_duration_seconds=creation_duration,
+                            acquisition_wait_seconds=acquisition_wait_seconds,
+                        )
                         slot.contexts.add(owned_context)
                         self._update_capacity_metrics()
                         log_event(
@@ -321,6 +364,8 @@ class BrowserManager:
         try:
             await owned_context.context.close()
         except Exception as exc:  # noqa: BLE001
+            if self._observability is not None:
+                self._observability.record_browser_cleanup_failure()
             log_event(
                 logger,
                 logging.WARNING,
@@ -376,6 +421,8 @@ class BrowserManager:
             try:
                 await owned_context.context.close()
             except Exception as exc:  # noqa: BLE001
+                if self._observability is not None:
+                    self._observability.record_browser_cleanup_failure()
                 log_event(
                     logger,
                     logging.WARNING,
@@ -386,6 +433,8 @@ class BrowserManager:
         try:
             await old_browser.close()
         except Exception as exc:  # noqa: BLE001
+            if self._observability is not None:
+                self._observability.record_browser_cleanup_failure()
             log_event(
                 logger,
                 logging.WARNING,
@@ -420,6 +469,8 @@ class BrowserManager:
             try:
                 await replacement.close()
             except Exception as exc:  # noqa: BLE001
+                if self._observability is not None:
+                    self._observability.record_browser_cleanup_failure()
                 log_event(
                     logger,
                     logging.WARNING,
@@ -493,6 +544,8 @@ class BrowserManager:
                 try:
                     await owned_context.context.close()
                 except Exception as exc:  # noqa: BLE001
+                    if self._observability is not None:
+                        self._observability.record_browser_cleanup_failure()
                     log_event(
                         logger,
                         logging.WARNING,
@@ -504,6 +557,8 @@ class BrowserManager:
             try:
                 await slot.browser.close()
             except Exception as exc:  # noqa: BLE001
+                if self._observability is not None:
+                    self._observability.record_browser_cleanup_failure()
                 log_event(
                     logger,
                     logging.WARNING,
@@ -516,6 +571,8 @@ class BrowserManager:
             try:
                 await self._playwright.stop()
             except Exception as exc:  # noqa: BLE001
+                if self._observability is not None:
+                    self._observability.record_browser_cleanup_failure()
                 log_event(
                     logger,
                     logging.WARNING,

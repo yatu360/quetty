@@ -104,6 +104,17 @@ class PrometheusMetrics:
             "BrowserContext creation calls that failed.",
             registry=self.registry,
         )
+        self.browser_cleanup_failures_total = Counter(
+            "browser_cleanup_failures_total",
+            "BrowserContext, browser process, or Playwright cleanup calls that failed.",
+            registry=self.registry,
+        )
+        self.browser_context_creation_duration_seconds = Histogram(
+            "browser_context_creation_duration_seconds",
+            "Time spent inside the selected Chrome process creating a BrowserContext.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
         self.browser_context_acquisition_duration_seconds = Histogram(
             "browser_context_acquisition_duration_seconds",
             "Time spent acquiring a BrowserContext, including manager contention.",
@@ -334,6 +345,12 @@ class PrometheusMetrics:
 
     def record_context_creation_failure(self) -> None:
         self.browser_context_creation_failures_total.inc()
+
+    def record_browser_cleanup_failure(self) -> None:
+        self.browser_cleanup_failures_total.inc()
+
+    def record_context_creation_duration(self, duration_seconds: float) -> None:
+        self.browser_context_creation_duration_seconds.observe(duration_seconds)
 
     def record_context_acquisition_duration(self, duration_seconds: float) -> None:
         self.browser_context_acquisition_duration_seconds.observe(duration_seconds)
