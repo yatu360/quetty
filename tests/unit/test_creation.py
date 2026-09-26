@@ -224,6 +224,34 @@ async def test_target_ten_ignores_duplicates_and_failures(tmp_path: Path) -> Non
     await repository.close()
 
 
+async def test_target_one_hundred_uses_fixed_worker_concurrency(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "target-one-hundred.sqlite3")
+    handler = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"queue-{index}")
+            for index in range(100)
+        ],
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=100,
+        worker_count=10,
+        queue_capacity=10,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.successful_unique_ids == 100
+    assert metrics.attempts == 100
+    assert metrics.currently_creating == 0
+    assert handler.calls == 100
+    assert 1 < handler.maximum_active <= 10
+    assert await repository.count_successful_queue_ids() == 100
+    await repository.close()
+
+
 class FakeResponse:
     def __init__(self, status: int) -> None:
         self.status = status

@@ -1,6 +1,7 @@
 # Queue Load Test
 
-Phase 1 foundation for an authorised Queue-it staging test system.
+Phase 1 foundation and Phase 2 scaling-ready configuration for an authorised Queue-it
+staging test system.
 
 This phase intentionally implements only:
 
@@ -90,6 +91,10 @@ flag:
 ```powershell
 $env:RUN_STAGING_TESTS = "1"
 $env:PHASE1_OBSERVE_SECONDS = "600"
+$env:TARGET_QUEUE_IDS = "10"
+$env:CHROME_PROCESS_COUNT = "1"
+$env:MAX_CONTEXTS_PER_BROWSER = "5"
+$env:MAX_ACTIVE_CONTEXTS = "5"
 queue-load-test-phase1 --confirm-authorized-staging --observe-seconds 600 --report phase1-acceptance.json
 ```
 
@@ -110,15 +115,23 @@ python -m pytest -o addopts="" -m staging tests/staging
 See [the Phase 1 acceptance report](docs/phase1-acceptance-report.md) for the
 controlled evidence and the staging assumptions that remain unknown.
 
-## Initial Phase 1 Defaults
+## Current Phase 2 Readiness Defaults
 
-- `TARGET_QUEUE_IDS=10`
+- `TARGET_QUEUE_IDS=100`
 - `SESSION_MODE=HYBRID`
 - `CHROME_PROCESS_COUNT=1`
-- `MAX_CONTEXTS_PER_BROWSER=5`
-- `MAX_ACTIVE_CONTEXTS=5`
+- `MAX_CONTEXTS_PER_BROWSER=25`
+- `MAX_ACTIVE_CONTEXTS=25`
+- `CREATION_WORKERS=1`
+- `MONITOR_WORKERS=1`
 - `QUEUE_POLL_SECONDS=30`
 - adaptive pre-queue, active-queue, serviced-soon, and turn-started intervals
 - SQLite via `DATABASE_URL`
 - local browser state files in `STATE_DIRECTORY`
 - browser-based Queue-it extraction and bounded polling orchestration
+
+The Phase 2 profile can use two Chrome processes by setting
+`CHROME_PROCESS_COUNT=2` and choosing a per-browser limit whose combined capacity is at
+least `MAX_ACTIVE_CONTEXTS` (for example, 13 contexts per browser for a global limit of
+25). Creation and monitoring worker counts are independently configurable, but each
+count and their combined maximum demand must fit within the global context limit.

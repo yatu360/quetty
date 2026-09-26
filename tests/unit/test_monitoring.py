@@ -143,6 +143,36 @@ async def test_bounded_queue_applies_backpressure_before_claiming_more(tmp_path:
     await repository.close()
 
 
+async def test_one_hundred_persisted_sessions_claim_only_bounded_queue_capacity(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    for index in range(100):
+        await repository.create(make_session(f"session-{index:03d}"))
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=ReparkingHandler(repository),
+        worker_count=5,
+        queue_capacity=25,
+        claim_batch_size=25,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    claimed = await scheduler.schedule_due()
+    sessions = await repository.list()
+
+    assert claimed == 25
+    assert scheduler.queue_size == scheduler.queue_capacity == 25
+    assert await scheduler.schedule_due() == 0
+    assert sum(item.worker_id == "scheduler-1" for item in sessions) == 25
+    assert sum(item.worker_id is None for item in sessions) == 75
+    await scheduler.shutdown()
+    await repository.close()
+
+
 async def test_fixed_worker_reparks_and_releases_lease(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
     await repository.create(make_session("due"))

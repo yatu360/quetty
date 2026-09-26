@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     """Environment-backed application settings."""
 
     staging_url: HttpUrl = Field(alias="STAGING_URL")
-    target_queue_ids: int = Field(default=10, alias="TARGET_QUEUE_IDS", ge=1)
+    target_queue_ids: int = Field(default=100, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
     chrome_process_count: int = Field(default=1, alias="CHROME_PROCESS_COUNT", ge=1)
-    max_contexts_per_browser: int = Field(default=5, alias="MAX_CONTEXTS_PER_BROWSER", ge=1)
-    max_active_contexts: int = Field(default=5, alias="MAX_ACTIVE_CONTEXTS", ge=1)
+    max_contexts_per_browser: int = Field(default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1)
+    max_active_contexts: int = Field(default=25, alias="MAX_ACTIVE_CONTEXTS", ge=1)
     creation_workers: int = Field(default=1, alias="CREATION_WORKERS", ge=1)
     monitor_workers: int = Field(default=1, alias="MONITOR_WORKERS", ge=1)
     monitor_queue_capacity: int = Field(default=5, alias="MONITOR_QUEUE_CAPACITY", ge=1)
@@ -102,8 +102,7 @@ class Settings(BaseSettings):
         total_capacity = self.chrome_process_count * self.max_contexts_per_browser
         if self.max_active_contexts > total_capacity:
             raise ValueError(
-                "MAX_ACTIVE_CONTEXTS cannot exceed "
-                "CHROME_PROCESS_COUNT * MAX_CONTEXTS_PER_BROWSER"
+                "MAX_ACTIVE_CONTEXTS cannot exceed CHROME_PROCESS_COUNT * MAX_CONTEXTS_PER_BROWSER"
             )
 
         if self.creation_workers > self.max_active_contexts:
@@ -111,6 +110,9 @@ class Settings(BaseSettings):
 
         if self.monitor_workers > self.max_active_contexts:
             raise ValueError("MONITOR_WORKERS cannot exceed MAX_ACTIVE_CONTEXTS")
+
+        if self.creation_workers + self.monitor_workers > self.max_active_contexts:
+            raise ValueError("CREATION_WORKERS + MONITOR_WORKERS cannot exceed MAX_ACTIVE_CONTEXTS")
 
         if self.monitor_claim_batch_size > self.monitor_queue_capacity:
             raise ValueError("MONITOR_CLAIM_BATCH_SIZE cannot exceed MONITOR_QUEUE_CAPACITY")

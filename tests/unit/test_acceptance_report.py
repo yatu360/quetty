@@ -70,6 +70,9 @@ async def test_staging_harness_requires_explicit_environment_gate(
     monkeypatch.delenv("RUN_STAGING_TESTS", raising=False)
     settings = Settings(
         STAGING_URL="https://staging.example.test",
+        TARGET_QUEUE_IDS=10,
+        MAX_CONTEXTS_PER_BROWSER=5,
+        MAX_ACTIVE_CONTEXTS=5,
         DATABASE_URL=f"sqlite:///{tmp_path / 'acceptance.sqlite3'}",
         STATE_DIRECTORY=tmp_path / "state",
     )
@@ -82,6 +85,8 @@ async def test_staging_harness_rejects_non_phase1_profile(tmp_path: Path) -> Non
     settings = Settings(
         STAGING_URL="https://staging.example.test",
         TARGET_QUEUE_IDS=9,
+        MAX_CONTEXTS_PER_BROWSER=5,
+        MAX_ACTIVE_CONTEXTS=5,
         DATABASE_URL=f"sqlite:///{tmp_path / 'acceptance.sqlite3'}",
         STATE_DIRECTORY=tmp_path / "state",
     )

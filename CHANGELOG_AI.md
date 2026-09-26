@@ -251,3 +251,96 @@ Phase 2 Prompt 1 — Phase 2 Configuration and Scaling Readiness
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: documentation-only additions; clean before this task
+
+## 2026-09-26 — Phase 2 Prompt 1 — Phase 2 Configuration and Scaling Readiness
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Prepare the existing parked-session architecture for a 100-session Phase 2 profile with
+up to 25 live contexts and one or two Chrome processes, without performance tuning,
+PostgreSQL, distributed workers, or Phase 3 behavior.
+
+### Changes Made
+
+- Changed runtime and example-environment defaults to 100 target Queue IDs, HYBRID
+  mode, one Chrome process, 25 contexts per browser, and 25 global active contexts.
+- Kept creation and monitoring worker defaults at one to avoid unmeasured concurrency
+  tuning; both remain configurable.
+- Added validation that the configured browser processes can supply the global context
+  limit, that each worker count fits the limit, and that combined creation/monitor
+  worker demand cannot exceed global context capacity.
+- Added explicit one- and two-browser Phase 2 configuration tests plus zero/invalid and
+  contradictory-capacity cases.
+- Added a 100-target creation test proving the controller uses only its fixed worker
+  pool and bounded queues.
+- Added a 100-row parked-session test proving the scheduler claims only the 25 available
+  bounded-queue slots rather than creating work for the entire population.
+- Updated README and persistent handoff/phase-plan truth for the Phase 2 profile.
+- Audited `create_task`, `gather`, queue, context, browser-launch, and repository-list
+  call sites. Population-related gathers remain limited to fixed workers/tasks; no
+  application path creates a task, context, or Chrome process per persisted session.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `.env.example`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `src/queue_load_test/config.py`
+- `tests/unit/test_config.py`
+- `tests/unit/test_creation.py`
+- `tests/unit/test_monitoring.py`
+- `tests/unit/test_acceptance_report.py`
+
+### Tests Run
+
+- `python -m pytest -q tests/unit/test_config.py tests/unit/test_creation.py tests/unit/test_monitoring.py tests/unit/test_acceptance_report.py tests/unit/test_browser_manager.py` — 58 passed.
+- `python -m pytest -q` — 187 passed, 1 deselected.
+- `python -m ruff check src tests` — passed.
+- `python -m mypy src` — passed with no issues in 35 source files.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN**.
+- Reason: this prompt changes and validates configuration/readiness only; no authorised
+  staging run or performance tuning was requested. The normal suite deselected the
+  staging test.
+
+### Important Decisions
+
+- Selected one Chrome process with a per-browser/global limit of 25 as the conservative
+  default. A two-process profile with 13 contexts per browser and 25 globally is valid.
+- Left worker defaults at one because concurrency tuning belongs to Phase 2 Prompt 7;
+  operators can configure higher bounded counts within the validated global limit.
+- Added combined worker validation because creation and monitoring run concurrently and
+  share the same `BrowserManager` capacity.
+- Preserved the repository, SQLite, local state, lifecycle, transfer, restoration, and
+  parked-session design unchanged.
+
+### Known Issues
+
+- No 100-session real-staging run or performance/resource benchmark has been performed.
+- Phase 1 real-staging acceptance remains PARTIAL/UNKNOWN as documented previously.
+- The Phase 1 staging harness now requires explicit Phase 1 target/context overrides
+  when starting from the Phase 2 `.env.example` profile.
+- Dedicated multi-browser allocation/failure validation is intentionally deferred to
+  the next prompt.
+
+### Follow-Up
+
+Phase 2 Prompt 2 — Multi-Browser BrowserManager
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 1 changes present; clean before this prompt

@@ -34,7 +34,8 @@ proceed without it.
 
 ## Phase 2 — 100 Sessions
 
-**Status: planned, not started.**
+**Status: in progress. Prompt 1 configuration/scaling readiness is complete; Prompt 2
+is next. No 100-session staging run or performance tuning has started.**
 
 Target profile:
 
@@ -54,6 +55,8 @@ Goals:
 
 ### Prompt 1 — Phase 2 Configuration and Scaling Readiness
 
+**Status: completed on 2026-09-26.**
+
 Objective: define an explicit, validated 100-session profile and decide whether Phase 1
 staging evidence is sufficient to begin scale testing.
 
@@ -72,6 +75,14 @@ Exit criteria:
 - Any unresolved Phase 1 staging evidence is either collected or explicitly blocks the
   100-session traffic run.
 - No Phase 2 traffic is sent before the authorised target/profile is confirmed.
+
+Implemented evidence: defaults now describe 100 targets, one Chrome process, 25
+per-browser/global contexts, HYBRID mode, and conservative fixed worker counts. A
+two-process 13-per-browser/25-global profile validates successfully. Contradictory
+capacity and worker combinations are rejected. Tests prove 100-target creation retains
+fixed worker concurrency and a 100-session persisted population fills only a bounded
+25-item monitoring queue. Real-staging readiness remains unresolved and still gates
+traffic execution, not Prompt 2's local BrowserManager work.
 
 ### Prompt 2 — Multi-Browser BrowserManager
 

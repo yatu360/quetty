@@ -10,11 +10,11 @@ from queue_load_test.models import SessionMode
 def settings_kwargs(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "STAGING_URL": "https://staging.example.test",
-        "TARGET_QUEUE_IDS": 10,
+        "TARGET_QUEUE_IDS": 100,
         "SESSION_MODE": "HYBRID",
         "CHROME_PROCESS_COUNT": 1,
-        "MAX_CONTEXTS_PER_BROWSER": 5,
-        "MAX_ACTIVE_CONTEXTS": 5,
+        "MAX_CONTEXTS_PER_BROWSER": 25,
+        "MAX_ACTIVE_CONTEXTS": 25,
         "CREATION_WORKERS": 1,
         "MONITOR_WORKERS": 1,
         "QUEUE_POLL_SECONDS": 30.0,
@@ -28,20 +28,61 @@ def settings_kwargs(**overrides: object) -> dict[str, object]:
     return values
 
 
-def test_valid_initial_configuration() -> None:
-    settings = Settings(**settings_kwargs())
+def test_phase_two_defaults() -> None:
+    settings = Settings(_env_file=None, STAGING_URL="https://staging.example.test")
 
-    assert settings.target_queue_ids == 10
+    assert settings.target_queue_ids == 100
     assert settings.session_mode is SessionMode.HYBRID
     assert settings.chrome_process_count == 1
-    assert settings.max_active_contexts == 5
+    assert settings.max_contexts_per_browser == 25
+    assert settings.max_active_contexts == 25
+    assert settings.creation_workers == 1
+    assert settings.monitor_workers == 1
+
+
+def test_valid_phase_two_single_browser_configuration() -> None:
+    settings = Settings(**settings_kwargs())
+
+    assert settings.target_queue_ids == 100
+    assert settings.session_mode is SessionMode.HYBRID
+    assert settings.chrome_process_count == 1
+    assert settings.max_contexts_per_browser == 25
+    assert settings.max_active_contexts == 25
     assert settings.queue_poll_seconds == 30
     assert settings.state_directory == Path(".browser-state")
 
 
+def test_valid_phase_two_two_browser_configuration() -> None:
+    settings = Settings(
+        **settings_kwargs(
+            CHROME_PROCESS_COUNT=2,
+            MAX_CONTEXTS_PER_BROWSER=13,
+            MAX_ACTIVE_CONTEXTS=25,
+            CREATION_WORKERS=12,
+            MONITOR_WORKERS=13,
+        )
+    )
+
+    assert settings.chrome_process_count == 2
+    assert settings.max_contexts_per_browser == 13
+    assert settings.max_active_contexts == 25
+    assert settings.creation_workers + settings.monitor_workers == 25
+
+
 def test_rejects_active_contexts_above_browser_capacity() -> None:
     with pytest.raises(ValidationError, match="MAX_ACTIVE_CONTEXTS"):
-        Settings(**settings_kwargs(MAX_ACTIVE_CONTEXTS=6))
+        Settings(**settings_kwargs(MAX_ACTIVE_CONTEXTS=26))
+
+
+def test_rejects_two_browser_capacity_below_global_limit() -> None:
+    with pytest.raises(ValidationError, match="MAX_ACTIVE_CONTEXTS"):
+        Settings(
+            **settings_kwargs(
+                CHROME_PROCESS_COUNT=2,
+                MAX_CONTEXTS_PER_BROWSER=12,
+                MAX_ACTIVE_CONTEXTS=25,
+            )
+        )
 
 
 def test_rejects_non_sqlite_database_url() -> None:
@@ -90,16 +131,33 @@ def test_hybrid_and_transfer_only_mode_parsing() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
+        ("TARGET_QUEUE_IDS", 0),
         ("CHROME_PROCESS_COUNT", 0),
         ("MAX_CONTEXTS_PER_BROWSER", 0),
-        ("CREATION_WORKERS", 6),
-        ("MONITOR_WORKERS", 6),
+        ("MAX_ACTIVE_CONTEXTS", 0),
+        ("CREATION_WORKERS", 0),
+        ("MONITOR_WORKERS", 0),
         ("PROMETHEUS_PORT", 65_536),
     ],
 )
 def test_rejects_invalid_or_contradictory_values(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
         Settings(**settings_kwargs(**{field: value}))
+
+
+def test_rejects_creation_workers_above_active_context_capacity() -> None:
+    with pytest.raises(ValidationError, match="CREATION_WORKERS"):
+        Settings(**settings_kwargs(CREATION_WORKERS=26))
+
+
+def test_rejects_monitor_workers_above_active_context_capacity() -> None:
+    with pytest.raises(ValidationError, match="MONITOR_WORKERS"):
+        Settings(**settings_kwargs(MONITOR_WORKERS=26))
+
+
+def test_rejects_combined_workers_above_active_context_capacity() -> None:
+    with pytest.raises(ValidationError, match=r"CREATION_WORKERS \+ MONITOR_WORKERS"):
+        Settings(**settings_kwargs(CREATION_WORKERS=13, MONITOR_WORKERS=13))
 
 
 def test_rejects_unknown_session_mode() -> None:

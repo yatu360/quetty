@@ -9,12 +9,13 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 1 — Core Validation.
-- Last completed work: Phase 1 Prompt 12 — integration-test and controlled-run harness.
-- Completion: Phase 1 implementation is complete through Prompt 12.
+- Current phase: Phase 2 — 100 Sessions.
+- Last completed work: Phase 2 Prompt 1 — Configuration and Scaling Readiness.
+- Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
+  configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned phase: Phase 2 — 100 Sessions.
+- Next planned work: Phase 2 Prompt 2 — Multi-Browser BrowserManager.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -128,9 +129,11 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 
 ## Browser Model
 
-Phase 1 defaults to one Chrome process, five contexts per browser, and five total active
-contexts. `BrowserManager` launches Chromium with `channel="chrome"`, selects the
-least-loaded connected process, and rejects allocations above either capacity.
+The current Phase 2 readiness defaults are one Chrome process, 25 contexts per browser,
+and 25 total active contexts. A supported two-process profile can use 13 contexts per
+browser and a global limit of 25. `BrowserManager` launches Chromium with
+`channel="chrome"`, selects the least-loaded connected process, and rejects allocations
+above either capacity.
 
 A fresh context is created without storage state; state is supplied only for explicit
 restoration. `OwnedBrowserContext`, the manager's async context manager, idempotent
@@ -227,7 +230,7 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **177 passed, 1 deselected**. The deselected test was the staging test.
+  **187 passed, 1 deselected**. The deselected test was the opt-in staging test.
 
 ## Phase 1 Acceptance Results
 
@@ -259,8 +262,12 @@ PASS for the corresponding mechanisms.
 - The normal `queue-load-test` CLI validates settings and exits unless code injects an
   assembled `ApplicationRuntime`. The Phase 1 acceptance CLI is fully assembled for its
   narrower controlled purpose.
-- PostgreSQL, distributed workers, shared/object state storage, and Phase 2 scaling are
-  not implemented.
+- The 100-session configuration and bounded controller/scheduler behavior are covered by
+  tests, but no 100-session browser/staging run or performance tuning has been performed.
+- Multi-browser Phase 2 validation is the next prompt; the current manager already
+  supports configurable process counts but has not received the dedicated Phase 2
+  failure/allocation exercise.
+- PostgreSQL, distributed workers, and shared/object state storage are not implemented.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 
 ## Important Files
@@ -314,6 +321,10 @@ Authorised staging test:
 
 ```powershell
 $env:RUN_STAGING_TESTS = "1"
+$env:TARGET_QUEUE_IDS = "10"
+$env:CHROME_PROCESS_COUNT = "1"
+$env:MAX_CONTEXTS_PER_BROWSER = "5"
+$env:MAX_ACTIVE_CONTEXTS = "5"
 $env:PHASE1_OBSERVE_SECONDS = "600"
 python -m pytest -o addopts="" -m staging tests/staging
 ```
@@ -322,6 +333,10 @@ Phase 1 acceptance run using an empty dedicated SQLite database/state directory:
 
 ```powershell
 $env:RUN_STAGING_TESTS = "1"
+$env:TARGET_QUEUE_IDS = "10"
+$env:CHROME_PROCESS_COUNT = "1"
+$env:MAX_CONTEXTS_PER_BROWSER = "5"
+$env:MAX_ACTIVE_CONTEXTS = "5"
 queue-load-test-phase1 --confirm-authorized-staging --observe-seconds 600 --report phase1-acceptance.json
 ```
 
@@ -334,11 +349,9 @@ python -m mypy src
 
 ## Next Task
 
-Phase 2 begins next.
-
 The next task is:
 
-**Phase 2 Prompt 1 — Phase 2 Configuration and Scaling Readiness**
+**Phase 2 Prompt 2 — Multi-Browser BrowserManager**
 
 Do not implement it as part of this handoff.
 
