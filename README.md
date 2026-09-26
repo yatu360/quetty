@@ -144,6 +144,21 @@ the global limit; both work queues are explicitly bounded and cannot exceed it.
 Phase 2 harnesses retain their exact 100-session gates. Override the Phase 3 defaults
 with the documented Phase 2 values when reproducing those benchmarks.
 
+## Phase 3 Synthetic Repository Benchmark
+
+The local benchmark seeds 1,000 mixed synthetic sessions and measures the indexed due
+query, bounded transactional claim, update, lease release, and complete scheduler
+iteration without Queue-it or browser traffic:
+
+```powershell
+queue-load-test-phase3-repository --sessions 1000 --batch-size 50 --samples 20
+```
+
+The optional `--database` must name a dedicated empty SQLite file. Use `--report` for
+aggregate JSON output. See
+[the Phase 3 repository benchmark](docs/phase3-repository-benchmark.md) for the current
+local measurements, query plan, synthetic population, and SQLite decision.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

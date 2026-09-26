@@ -99,6 +99,25 @@ class SaturatedHandler:
         )
 
 
+class RecordingCycleHandler:
+    def __init__(self, repository: SQLiteSessionRepository) -> None:
+        self.repository = repository
+        self.session_ids: list[str] = []
+
+    async def check(self, session: QueueSession) -> MonitoringOutcome:
+        self.session_ids.append(session.session_id)
+        session.next_check_at = NOW + timedelta(minutes=5)
+        await self.repository.update(session)
+        return MonitoringOutcome(
+            session_id=session.session_id,
+            success=True,
+            observed_status=session.status,
+            next_check_at=session.next_check_at,
+            queue_update_stale=False,
+            progress_changed=False,
+        )
+
+
 class RaisingHandler:
     async def check(self, _: QueueSession) -> MonitoringOutcome:
         raise RuntimeError("synthetic monitoring failure")
@@ -289,6 +308,42 @@ async def test_one_thousand_sessions_keep_fixed_workers_and_bounded_queue(
     scheduler.stop_scheduling()
     handler.release.set()
     await scheduler.wait_until_idle()
+    await scheduler.shutdown()
+    await repository.close()
+
+
+async def test_one_thousand_sessions_have_stable_repeated_bounded_cycles(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "stable-cycles.sqlite3")
+    for index in range(1000):
+        await repository.create(make_session(f"session-{index:04d}"))
+    handler = RecordingCycleHandler(repository)
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=5,
+        queue_capacity=25,
+        claim_batch_size=25,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-cycles",
+    )
+
+    await scheduler.start()
+    claimed_per_cycle: list[int] = []
+    for _ in range(4):
+        claimed_per_cycle.append(await scheduler.schedule_due())
+        await scheduler.wait_until_idle()
+
+    assert claimed_per_cycle == [25, 25, 25, 25]
+    assert len(handler.session_ids) == len(set(handler.session_ids)) == 100
+    assert scheduler.worker_task_count == 5
+    assert scheduler.metrics.maximum_concurrent_checks <= 5
+    assert scheduler.metrics.maximum_queue_depth == 25
+    assert await repository.count_due_sessions(now=NOW) == 900
+
     await scheduler.shutdown()
     await repository.close()
 

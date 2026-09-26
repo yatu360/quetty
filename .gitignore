@@ -158,6 +158,7 @@ phase1-acceptance*.json
 phase2-restore-benchmark*.json
 phase2-resource-benchmark*.json
 phase2-concurrency-benchmark*.json
+phase3-repository-benchmark*.json
 .phase2-concurrency-runs/
 .venv
 env/

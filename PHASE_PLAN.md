@@ -288,7 +288,7 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: Prompt 1 completed locally; performance and staging scalability remain
+**Status: Prompts 1–2 completed locally; browser and staging scalability remain
 unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
 
 Target profile:
@@ -315,20 +315,28 @@ Planned prompt breakdown:
    Synthetic 1,000-row tests retain fixed worker/task and queue bounds. Creation target
    accounting now avoids one count query per outcome while retaining authoritative
    startup/completion counts. This is readiness evidence only, not a scalability PASS.
-2. **SQLite query/index benchmark** — measure due scans, claims, updates, counts, and
-   database growth at representative populations without changing backend prematurely.
-3. **1,000-session acquisition run** — acquire unique identities with bounded creation
+2. **SQLite query/index benchmark** — **completed on 2026-09-26.** A synthetic mixed
+   1,000-row population produced 600 eligible sessions. The due query now uses a
+   matching partial expression index without a temporary ordering B-tree. Local p50
+   measurements were 0.098 ms for due count, 0.555 ms for a 50-row transactional
+   claim, 0.365 ms for update, 0.279 ms for lease release, and 0.668 ms for a scheduler
+   iteration. Two repository connections claimed disjoint batches, expired leases
+   recovered, and queues remained bounded. SQLite remains selected.
+3. **Browser capacity benchmark at 50–100 contexts** — measure installed-Chrome context
+   creation, allocation contention, resource use, and stability without declaring 100
+   contexts safe in advance.
+4. **1,000-session acquisition run** — acquire unique identities with bounded creation
    and record throughput/failure/resource data.
-4. **Large-population scheduler fairness** — measure due ordering, lease contention,
+5. **Large-population scheduler fairness** — measure due ordering, lease contention,
    starvation, queue backpressure, and backlog behavior.
-5. **Monitoring sweep benchmark** — measure full and priority-state sweep times under
+6. **Monitoring sweep benchmark** — measure full and priority-state sweep times under
    adaptive polling and bounded contexts.
-6. **State-file and restart scale test** — measure filesystem footprint, atomic writes,
+7. **State-file and restart scale test** — measure filesystem footprint, atomic writes,
    corrupt/missing-state isolation, and recovery after restart.
-7. **SQLite versus PostgreSQL decision** — use measured latency, locking, recovery, and
+8. **SQLite versus PostgreSQL decision** — use measured latency, locking, recovery, and
    operational requirements to decide whether migration is justified; do not migrate by
    default.
-8. **Phase 3 acceptance report** — record PASS/FAIL/UNKNOWN gates and the evidence-based
+9. **Phase 3 acceptance report** — record PASS/FAIL/UNKNOWN gates and the evidence-based
    Phase 4 architecture recommendation.
 
 ## Phase 4 — 10,000 Sessions

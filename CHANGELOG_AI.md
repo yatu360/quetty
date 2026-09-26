@@ -1166,3 +1166,115 @@ Phase 3 Prompt 2 — Repository and Scheduler Performance at 1,000 Sessions
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 1 implementation and documentation changes
+
+## 2026-09-26 — Phase 3 Prompt 2 — Repository and Scheduler Performance
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Validate and improve SQLite repository and bounded scheduler behavior with 1,000
+synthetic sessions, retaining SQLite unless measurements demonstrated a real need to
+migrate.
+
+### Changes Made
+
+- Replaced the Phase 2 `(next_check_at, lease_until, status)` index with a partial
+  ordered expression index matching the actual due predicate and ordering:
+  `COALESCE(next_check_at, created_at), created_at, session_id` for monitorable states.
+- Added automatic in-place migration of the old index. Kept the unique constraint's
+  existing automatic Queue ID index and did not add unsupported status/lease indexes.
+- Reused one shared due filter/order definition for counts, bounded claims, and query
+  plan inspection. The query now avoids SQLite's temporary ordering B-tree.
+- Retained the short `BEGIN IMMEDIATE` claim transaction, one commit per bounded batch,
+  deterministic due ordering, lease-owner checks, expired-lease recovery, and terminal
+  status filtering.
+- Added a local benchmark CLI that seeds 1,000 mixed sessions without browser or
+  staging traffic and measures due count, claim, update, lease release, and scheduler
+  iteration latency.
+- Added 1,000-row tests for mixed due/future/leased/expired/excluded states, concurrent
+  disjoint claims from two SQLite connections, index migration/query planning, bounded
+  backpressure, and stable repeated scheduler cycles.
+- Documented the benchmark method, measured result, SQLite decision, remaining limits,
+  and next Phase 3 task.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase3_repository.py`
+- `tests/unit/test_phase3_repository_benchmark.py`
+- `docs/phase3-repository-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/repository/sqlite.py`
+- `tests/unit/test_repository.py`
+- `tests/unit/test_monitoring.py`
+
+### Tests Run
+
+- Baseline `.venv/bin/python -m pytest -q tests/unit/test_repository.py tests/unit/test_monitoring.py` — 25 passed.
+- Final repository/scheduler/benchmark tests — 35 passed in 2.36 seconds.
+- Final repository plus benchmark utility tests — 19 passed in 1.31 seconds.
+- Final scheduler tests — 16 passed in 1.10 seconds.
+- `.venv/bin/python -m pytest -q` — 242 passed, 4 deselected in 10.59 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 42 source files.
+- `git diff --check` — passed.
+
+### Synthetic Benchmark
+
+- Command: `.venv/bin/python -m queue_load_test.harness.phase3_repository --sessions 1000 --batch-size 50 --samples 20`.
+- Population: 1,000 rows, 600 eligible due, 50-row claim/queue batch.
+- Seed: 336.935 ms; database size: 450,560 bytes.
+- Due count p50/p95: 0.098/0.126 ms.
+- Transactional 50-row claim p50/p95: 0.555/0.673 ms.
+- Update p50/p95: 0.365/0.386 ms.
+- Lease release p50/p95: 0.279/2.321 ms.
+- Scheduler iteration p50/p95: 0.668/0.800 ms.
+- Query plan: `SEARCH queue_sessions USING INDEX idx_queue_sessions_due (<expr><?)`;
+  no temporary B-tree.
+
+### Staging Tests
+
+- **NOT RUN.** The benchmark is intentionally synthetic and local. No browser or
+  staging traffic was started.
+
+### Important Decisions
+
+- SQLite remains the Phase 3 backend. The measured 1,000-row workload does not justify
+  PostgreSQL or distributed leasing.
+- The scheduler keeps its existing configuration names:
+  `MONITOR_CLAIM_BATCH_SIZE`, `MONITOR_QUEUE_CAPACITY`, and `MONITOR_LEASE_SECONDS`.
+- Claims stay bounded by both free queue space and claim batch size. Persisted
+  population size never determines task or BrowserContext count.
+- The query-specific partial expression index is justified by the actual plan. A
+  separate Queue ID, status, or lease index was not added blindly.
+
+### Known Issues
+
+- Each repository instance still serializes work through one connection/async lock,
+  and SQLite remains a one-writer database across connections.
+- Updates and lease releases remain separate per-session commits. Measurements were
+  comfortable locally, but sustained browser-driven write contention is not covered.
+- Runtime startup and `/status` still load the complete population; this benchmark
+  targeted scheduler hot paths, not status aggregation.
+- Phase 2 staging evidence and Phase 3 browser capacity/resource evidence remain
+  missing, so these local results are not a general scalability claim.
+
+### Follow-Up
+
+Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100 Contexts
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 2 implementation, tests, benchmark, and documentation

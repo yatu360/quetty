@@ -9,14 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompt 1 configuration/readiness complete.
-- Last completed work: Phase 3 Prompt 1 — 1,000-session configuration and scale audit.
-- Completion: local configuration and bounded-concurrency readiness only. No Phase 3
-  performance or staging benchmark has run, and Phase 2 measurement gaps remain.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–2 complete locally.
+- Last completed work: Phase 3 Prompt 2 — repository and scheduler performance at
+  1,000 synthetic sessions.
+- Completion: local configuration, bounded-concurrency, SQLite query, lease, and
+  scheduler evidence only. No Phase 3 browser or staging benchmark has run, and Phase 2
+  measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 2 — Repository and Scheduler Performance at
-  1,000 Sessions**. It may proceed as a local benchmark; staging scale remains blocked.
+- Next planned work: **Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100
+  Contexts**. Values in this range remain candidates, not safe operating points.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -131,7 +133,10 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   release, and close. This is the boundary intended to permit a future PostgreSQL
   implementation.
 - SQLite has separate `queue_sessions` and `queue_progress` tables, a unique nullable
-  `queue_id`, a due-session index, and lightweight `worker_id`/`lease_until` fields.
+  `queue_id`, and lightweight `worker_id`/`lease_until` fields. The due-session query
+  uses a partial ordered expression index on
+  `COALESCE(next_check_at, created_at), created_at, session_id` for monitorable states.
+  Existing Phase 2 indexes are migrated in place during initialization.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
   `QueueIdConflictError`.
 - `FileSystemStateStore` defaults to `.browser-state/<session_id>.json`, validates safe
@@ -222,6 +227,13 @@ Queued/active session IDs are tracked in a bounded local ownership set. If a slo
 check outlives its lease and the same scheduler reclaims it, the claim renews ownership
 without enqueueing a simultaneous duplicate check.
 
+The local Phase 3 synthetic benchmark seeded 1,000 mixed rows with 600 eligible due
+sessions. `EXPLAIN QUERY PLAN` used `idx_queue_sessions_due` without a temporary sort.
+For a 50-row batch, measured p50 latencies were 0.098 ms due count, 0.555 ms claim,
+0.365 ms update, 0.279 ms lease release, and 0.668 ms scheduler iteration. Two SQLite
+connections made disjoint concurrent claims. This supports retaining SQLite for the
+current local scale; it is not a browser, staging, or multi-host result.
+
 `QueueSessionMonitor` restores one leased session, evaluates live status, verifies
 identity, persists progress and timestamps, refreshes HYBRID state when appropriate,
 computes `next_check_at`, and lets the scheduler release the lease. Defaults are:
@@ -302,8 +314,8 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/python -m pytest -q` reported **232 passed,
-  4 deselected in 9.22 seconds** on Python 3.14.7/macOS arm64. The deselected tests were
+- Latest result on 2026-09-26: `.venv/bin/python -m pytest -q` reported **242 passed,
+  4 deselected in 10.59 seconds** on Python 3.14.7/macOS arm64. The deselected tests were
   the four explicitly gated staging harnesses. Ruff and strict mypy passed.
 
 ## Phase 1 Acceptance Results
@@ -388,10 +400,11 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - Phase 3 scale audit: `/status` and runtime startup load all sessions to calculate
   status gauges; the Phase 2 restore harness also loads its full population. At 1,000
   rows these paths need measurement and may need aggregate/paginated repository APIs.
-- SQLite serializes every operation through one async lock and uses one commit per
-  create/update/lease release. The scheduler runs an indexed due count followed by a
-  bounded `BEGIN IMMEDIATE` claim every tick. Query plans, tick cost, transaction
-  contention, and batch-size behavior are Prompt 2 evidence gaps.
+- SQLite serializes each repository instance through one async lock and uses one commit
+  per create/update/lease release. The scheduler still runs a due count followed by a
+  bounded `BEGIN IMMEDIATE` claim when queue space exists. At 1,000 synthetic rows the
+  indexed query and transaction costs were sub-millisecond at p50, but one-writer
+  behavior and per-session commits remain later-scale risks.
 - `BrowserManager` holds its global lock while `browser.new_context()` runs, which may
   serialize allocation at 50–100 workers. Measure before redesigning reservations.
 - Every creation/monitor/restore operation can emit a structured per-session event.
@@ -422,6 +435,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase2-resource-benchmark.md` — resource harness procedure and NOT RUN result.
 - `docs/phase2-concurrency-benchmark.md` — tuning procedure and NOT RUN result.
 - `docs/phase2-acceptance.md` — final Phase 2 PASS/FAIL/UNKNOWN decision and evidence.
+- `docs/phase3-repository-benchmark.md` — synthetic population, query plan, latency,
+  and SQLite decision for Phase 3 Prompt 2.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -507,6 +522,12 @@ $env:RUN_PHASE2_CONCURRENCY_BENCHMARK = "1"
 queue-load-test-phase2-tuning --confirm-authorized-staging --matrix-file benchmarks/phase2-concurrency-matrix.example.json --monitoring-seconds 600 --restore-sample-size 10 --report phase2-concurrency-benchmark.json
 ```
 
+Local synthetic Phase 3 repository benchmark:
+
+```powershell
+queue-load-test-phase3-repository --sessions 1000 --batch-size 50 --samples 20
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -516,10 +537,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 2 — Repository and Scheduler Performance at 1,000 Sessions.** Measure
-the identified SQLite, full-table status, due-query, claim/update, tick, and backlog
-costs locally before changing the repository design. Do not start a large staging run
-or claim that any 50–100-context candidate is safe.
+**Phase 3 Prompt 3 — Browser Capacity Benchmark at 50–100 Contexts.** Measure actual
+installed-Chrome capacity, allocation contention, CPU/RAM, failures, and cleanup at
+controlled candidate levels. Do not assume 100 contexts is safe.
 
 ## Instructions for Future AI Sessions
 

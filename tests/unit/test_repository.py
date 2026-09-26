@@ -1,8 +1,11 @@
+import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import (
     QueueIdConflictError,
@@ -142,6 +145,36 @@ async def test_claim_selects_only_due_non_terminal_sessions(tmp_path: Path) -> N
     await repository.close()
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        QueueStatus.ADMITTED,
+        QueueStatus.EXPIRED,
+        QueueStatus.FAILED,
+        QueueStatus.NEW,
+        QueueStatus.CREATING,
+    ],
+)
+async def test_claim_excludes_non_monitorable_statuses(
+    tmp_path: Path,
+    status: QueueStatus,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / f"{status.value}.sqlite3")
+    await repository.create(make_session("excluded", status=status, next_check_at=NOW))
+
+    assert await repository.count_due_sessions(now=NOW) == 0
+    assert (
+        await repository.claim_due_sessions(
+            worker_id="worker-1",
+            now=NOW,
+            lease_until=NOW + timedelta(seconds=30),
+            limit=1,
+        )
+        == []
+    )
+    await repository.close()
+
+
 async def test_active_lease_prevents_claim_until_expiry(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
     await repository.create(
@@ -192,6 +225,83 @@ async def test_release_lease_checks_owner_when_provided(tmp_path: Path) -> None:
     assert loaded.worker_id is None
     assert loaded.lease_until is None
     await repository.close()
+
+
+async def test_one_thousand_mixed_sessions_have_bounded_disjoint_concurrent_claims(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "one-thousand.sqlite3"
+    first_repository = SQLiteSessionRepository(database)
+    expected_due = await seed_synthetic_sessions(first_repository, now=NOW)
+    second_repository = SQLiteSessionRepository(database)
+    await second_repository.initialize()
+
+    first_claim, second_claim = await asyncio.gather(
+        first_repository.claim_due_sessions(
+            worker_id="worker-1",
+            now=NOW,
+            lease_until=NOW + timedelta(minutes=2),
+            limit=50,
+        ),
+        second_repository.claim_due_sessions(
+            worker_id="worker-2",
+            now=NOW,
+            lease_until=NOW + timedelta(minutes=2),
+            limit=50,
+        ),
+    )
+
+    first_ids = {session.session_id for session in first_claim}
+    second_ids = {session.session_id for session in second_claim}
+    assert expected_due == 600
+    assert len(first_claim) == len(second_claim) == 50
+    assert first_ids.isdisjoint(second_ids)
+    assert first_ids | second_ids == {
+        f"synthetic-{index:04d}" for index in range(800, 900)
+    }
+    assert {session.worker_id for session in first_claim} == {"worker-1"}
+    assert {session.worker_id for session in second_claim} == {"worker-2"}
+    assert await first_repository.count_due_sessions(now=NOW) == 500
+
+    await second_repository.close()
+    await first_repository.close()
+
+
+async def test_due_query_uses_ordered_partial_index_without_temporary_sort(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "query-plan.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await seed_synthetic_sessions(repository, now=NOW)
+
+    plan = await repository.explain_due_session_query(now=NOW, limit=50)
+
+    assert any("idx_queue_sessions_due" in detail for detail in plan)
+    assert all("TEMP B-TREE" not in detail for detail in plan)
+    await repository.close()
+
+
+async def test_existing_phase_two_due_index_is_migrated(tmp_path: Path) -> None:
+    database = tmp_path / "migrated-index.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await repository.initialize()
+    await repository.close()
+    connection = sqlite3.connect(database)
+    connection.execute("DROP INDEX idx_queue_sessions_due")
+    connection.execute(
+        "CREATE INDEX idx_queue_sessions_due "
+        "ON queue_sessions (next_check_at, lease_until, status)"
+    )
+    connection.commit()
+    connection.close()
+
+    restarted = SQLiteSessionRepository(database)
+    await restarted.initialize()
+    plan = await restarted.explain_due_session_query(now=NOW, limit=50)
+
+    assert any("idx_queue_sessions_due" in detail for detail in plan)
+    assert all("TEMP B-TREE" not in detail for detail in plan)
+    await restarted.close()
 
 
 async def test_sessions_survive_repository_restart(tmp_path: Path) -> None:

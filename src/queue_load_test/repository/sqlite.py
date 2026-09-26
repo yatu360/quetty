@@ -28,6 +28,21 @@ _SESSION_COLUMNS = """
     next_check_at, attempt_count, last_error, worker_id, lease_until
 """
 
+_NON_MONITORABLE_STATUSES_SQL = "'ADMITTED', 'EXPIRED', 'FAILED', 'NEW', 'CREATING'"
+_DUE_TIME_SQL = "COALESCE(next_check_at, created_at)"
+_DUE_FILTER_SQL = f"""
+    {_DUE_TIME_SQL} <= ?
+    AND (lease_until IS NULL OR lease_until <= ?)
+    AND status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
+"""
+_DUE_ORDER_SQL = f"{_DUE_TIME_SQL}, created_at, session_id"
+_DUE_INDEX_NAME = "idx_queue_sessions_due"
+_DUE_INDEX_SQL = f"""
+CREATE INDEX IF NOT EXISTS {_DUE_INDEX_NAME}
+    ON queue_sessions ({_DUE_ORDER_SQL})
+    WHERE status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS queue_sessions (
     session_id TEXT PRIMARY KEY,
@@ -46,8 +61,6 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     worker_id TEXT,
     lease_until TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_queue_sessions_due
-    ON queue_sessions (next_check_at, lease_until, status);
 CREATE TABLE IF NOT EXISTS queue_progress (
     session_id TEXT PRIMARY KEY REFERENCES queue_sessions(session_id) ON DELETE CASCADE,
     queue_number TEXT,
@@ -237,6 +250,7 @@ class SQLiteSessionRepository:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(_SCHEMA)
             self._migrate_session_columns(connection)
+            self._ensure_due_index(connection)
             connection.commit()
             if self._database != ":memory:":
                 Path(self._database).chmod(0o600)
@@ -252,6 +266,19 @@ class SQLiteSessionRepository:
         for name in ("last_queue_update", "last_progress_change_at"):
             if name not in columns:
                 connection.execute(f"ALTER TABLE queue_sessions ADD COLUMN {name} TEXT")
+
+    @staticmethod
+    def _ensure_due_index(connection: sqlite3.Connection) -> None:
+        """Replace the Phase 2 index when it does not match the due query ordering."""
+
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (_DUE_INDEX_NAME,),
+        ).fetchone()
+        existing_sql = str(row["sql"]) if row is not None else ""
+        if existing_sql and "COALESCE(next_check_at, created_at)" not in existing_sql:
+            connection.execute(f"DROP INDEX {_DUE_INDEX_NAME}")
+        connection.execute(_DUE_INDEX_SQL)
 
     def _initialize(self) -> None:
         self._connect()
@@ -409,22 +436,12 @@ class SQLiteSessionRepository:
 
         def operation() -> int:
             row = self._connect().execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM queue_sessions
-                WHERE (next_check_at IS NULL OR next_check_at <= ?)
-                  AND (lease_until IS NULL OR lease_until <= ?)
-                  AND status NOT IN (?, ?, ?, ?, ?)
+                WHERE {_DUE_FILTER_SQL}
                 """,
-                (
-                    now_storage,
-                    now_storage,
-                    QueueStatus.ADMITTED.value,
-                    QueueStatus.EXPIRED.value,
-                    QueueStatus.FAILED.value,
-                    QueueStatus.NEW.value,
-                    QueueStatus.CREATING.value,
-                ),
+                (now_storage, now_storage),
             ).fetchone()
             return int(row["total"])
 
@@ -457,22 +474,11 @@ class SQLiteSessionRepository:
                     f"""
                     SELECT {_SESSION_COLUMNS}
                     FROM queue_sessions
-                    WHERE (next_check_at IS NULL OR next_check_at <= ?)
-                      AND (lease_until IS NULL OR lease_until <= ?)
-                      AND status NOT IN (?, ?, ?, ?, ?)
-                    ORDER BY COALESCE(next_check_at, created_at), created_at, session_id
+                    WHERE {_DUE_FILTER_SQL}
+                    ORDER BY {_DUE_ORDER_SQL}
                     LIMIT ?
                     """,
-                    (
-                        now_storage,
-                        now_storage,
-                        QueueStatus.ADMITTED.value,
-                        QueueStatus.EXPIRED.value,
-                        QueueStatus.FAILED.value,
-                        QueueStatus.NEW.value,
-                        QueueStatus.CREATING.value,
-                        limit,
-                    ),
+                    (now_storage, now_storage, limit),
                 ).fetchall()
                 session_ids = [row["session_id"] for row in rows]
                 if session_ids:
@@ -485,7 +491,7 @@ class SQLiteSessionRepository:
                     rows = connection.execute(
                         f"SELECT {_SESSION_COLUMNS} FROM queue_sessions "
                         f"WHERE session_id IN ({placeholders}) "
-                        "ORDER BY COALESCE(next_check_at, created_at), created_at, session_id",
+                        f"ORDER BY {_DUE_ORDER_SQL}",
                         session_ids,
                     ).fetchall()
                 connection.commit()
@@ -493,6 +499,36 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 raise
             return [_row_to_session(row) for row in rows]
+
+        return await self._run(operation)
+
+    async def explain_due_session_query(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[str, ...]:
+        """Return SQLite's plan details for the bounded due-session selection."""
+
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+        now_storage = _to_storage(now)
+        if now_storage is None:
+            raise ValueError("now is required")
+
+        def operation() -> tuple[str, ...]:
+            rows = self._connect().execute(
+                f"""
+                EXPLAIN QUERY PLAN
+                SELECT session_id
+                FROM queue_sessions
+                WHERE {_DUE_FILTER_SQL}
+                ORDER BY {_DUE_ORDER_SQL}
+                LIMIT ?
+                """,
+                (now_storage, now_storage, limit),
+            ).fetchall()
+            return tuple(str(row["detail"]) for row in rows)
 
         return await self._run(operation)
 
