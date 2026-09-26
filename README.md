@@ -12,11 +12,12 @@ This phase intentionally implements only:
 - shared Google Chrome process and isolated BrowserContext resource management
 - live, defensive Queue-it DOM state extraction after JavaScript execution
 - supported Queue-it transfer-link capture with explicit identity-mismatch handling
+- bounded session creation until the configured unique Queue ID target is reached
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement Queue-it navigation, queue polling, scheduling, transfer
-logic, PostgreSQL, or metrics.
+It does not implement queue monitoring orchestration, admission handling,
+PostgreSQL, Prometheus export, or later transfer workflows.
 
 ## Install
 

@@ -1,0 +1,427 @@
+"""Bounded Queue-it session creation and target acquisition."""
+
+import asyncio
+import random
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from pathlib import Path
+from typing import Protocol, cast
+from uuid import uuid4
+
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+from queue_load_test.browser import BrowserManager, BrowserManagerError
+from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.queue_monitor import QueueItLiveStateExtractor
+from queue_load_test.repository import QueueIdConflictError, SessionRepository
+from queue_load_test.state import BrowserState, StateStore
+from queue_load_test.transfer import (
+    QueueItTransferExtractor,
+    TransferExtractionResult,
+    TransferFailure,
+)
+
+type Sleep = Callable[[float], Awaitable[None]]
+type Jitter = Callable[[float, float], float]
+
+
+class CreationOutcomeKind(StrEnum):
+    SUCCESS = "SUCCESS"
+    DUPLICATE = "DUPLICATE"
+    TEMPORARY_FAILURE = "TEMPORARY_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+
+class TransientCreationError(RuntimeError):
+    """A sanitized failure that can reasonably succeed on retry."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class PermanentCreationError(RuntimeError):
+    """A sanitized failure that should not be retried."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True, slots=True)
+class CreationRetryPolicy:
+    max_attempts: int = 3
+    initial_backoff_seconds: float = 0.25
+    maximum_backoff_seconds: float = 5.0
+    jitter_seconds: float = 0.1
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if self.initial_backoff_seconds < 0 or self.maximum_backoff_seconds < 0:
+            raise ValueError("backoff values cannot be negative")
+        if self.maximum_backoff_seconds < self.initial_backoff_seconds:
+            raise ValueError("maximum_backoff_seconds cannot be less than initial backoff")
+        if self.jitter_seconds < 0:
+            raise ValueError("jitter_seconds cannot be negative")
+
+    def delay(self, failed_attempt: int, jitter: Jitter) -> float:
+        exponential: float = min(
+            self.initial_backoff_seconds * (2.0 ** max(0, failed_attempt - 1)),
+            self.maximum_backoff_seconds,
+        )
+        return exponential + jitter(0.0, self.jitter_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class CreationWorkItem:
+    sequence: int
+    session_id: str = field(default_factory=lambda: str(uuid4()))
+
+
+@dataclass(frozen=True, slots=True)
+class CreationOutcome:
+    kind: CreationOutcomeKind
+    attempts: int
+    temporary_failures: int
+    duration_seconds: float
+    session: QueueSession | None = None
+    progress: QueueProgress | None = None
+    failure_code: str | None = None
+
+
+class SessionCreationHandler(Protocol):
+    async def create(self, work_item: CreationWorkItem) -> CreationOutcome: ...
+
+
+class TransferExtractor(Protocol):
+    async def extract(
+        self,
+        page: Page,
+        *,
+        expected_queue_id: str | None = None,
+    ) -> TransferExtractionResult: ...
+
+
+type TransferExtractorFactory = Callable[[str], TransferExtractor]
+
+
+@dataclass(slots=True)
+class CreationMetrics:
+    attempts: int = 0
+    successful_unique_ids: int = 0
+    duplicates: int = 0
+    temporary_failures: int = 0
+    permanent_failures: int = 0
+    currently_creating: int = 0
+    total_creation_duration_seconds: float = 0.0
+    elapsed_seconds: float = 0.0
+
+
+class QueueSessionCreator:
+    """Create and persist one independent Queue-it session with bounded retries."""
+
+    def __init__(
+        self,
+        *,
+        browser_manager: BrowserManager,
+        repository: SessionRepository,
+        state_store: StateStore,
+        staging_url: str,
+        state_directory: Path,
+        mode: SessionMode,
+        live_extractor: QueueItLiveStateExtractor | None = None,
+        transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
+        retry_policy: CreationRetryPolicy | None = None,
+        navigation_timeout_ms: float = 30_000,
+        live_page_timeout_seconds: float = 30.0,
+        observation_interval_seconds: float = 0.25,
+        sleep: Sleep = asyncio.sleep,
+        jitter: Jitter = random.uniform,
+    ) -> None:
+        self._browser_manager = browser_manager
+        self._repository = repository
+        self._state_store = state_store
+        self._staging_url = staging_url
+        self._state_directory = state_directory
+        self._mode = SessionMode.parse(mode)
+        self._live_extractor = live_extractor or QueueItLiveStateExtractor()
+        self._transfer_extractor_factory = transfer_extractor_factory
+        self._retry_policy = retry_policy or CreationRetryPolicy()
+        self._navigation_timeout_ms = navigation_timeout_ms
+        self._live_page_timeout_seconds = live_page_timeout_seconds
+        self._observation_interval_seconds = observation_interval_seconds
+        self._sleep = sleep
+        self._jitter = jitter
+
+    async def create(self, work_item: CreationWorkItem) -> CreationOutcome:
+        started = time.perf_counter()
+        temporary_failures = 0
+        last_failure = "creation_failed"
+        for attempt in range(1, self._retry_policy.max_attempts + 1):
+            try:
+                return await self._attempt(work_item, attempt, started, temporary_failures)
+            except PermanentCreationError as exc:
+                await self._persist_failed(work_item, attempt, exc.code)
+                return CreationOutcome(
+                    kind=CreationOutcomeKind.PERMANENT_FAILURE,
+                    attempts=attempt,
+                    temporary_failures=temporary_failures,
+                    duration_seconds=time.perf_counter() - started,
+                    failure_code=exc.code,
+                )
+            except (
+                TransientCreationError,
+                PlaywrightTimeoutError,
+                PlaywrightError,
+                BrowserManagerError,
+                OSError,
+            ) as exc:
+                temporary_failures += 1
+                last_failure = (
+                    exc.code
+                    if isinstance(exc, TransientCreationError)
+                    else "transient_browser_error"
+                )
+                if attempt < self._retry_policy.max_attempts:
+                    await self._sleep(self._retry_policy.delay(attempt, self._jitter))
+
+        await self._persist_failed(work_item, self._retry_policy.max_attempts, last_failure)
+        return CreationOutcome(
+            kind=CreationOutcomeKind.TEMPORARY_FAILURE,
+            attempts=self._retry_policy.max_attempts,
+            temporary_failures=temporary_failures,
+            duration_seconds=time.perf_counter() - started,
+            failure_code=last_failure,
+        )
+
+    async def _attempt(
+        self,
+        work_item: CreationWorkItem,
+        attempt: int,
+        started: float,
+        temporary_failures: int,
+    ) -> CreationOutcome:
+        state_saved = False
+        state_path = self._state_directory / f"{work_item.session_id}.json"
+        async with self._browser_manager.context() as context:
+            page = await context.new_page()
+            response = await page.goto(
+                self._staging_url,
+                wait_until="domcontentloaded",
+                timeout=self._navigation_timeout_ms,
+            )
+            if response is not None:
+                if response.status >= 500 or response.status in {408, 429}:
+                    raise TransientCreationError("temporary_http_response")
+                if response.status >= 400:
+                    raise PermanentCreationError("permanent_http_response")
+
+            progress, transfer = await self._wait_for_live_queue(page, work_item.session_id)
+            queue_id = transfer.queue_id
+            if queue_id is None or transfer.transfer_url is None:
+                raise PermanentCreationError("queue_identity_missing")
+
+            if self._mode is SessionMode.HYBRID:
+                storage_state = cast(BrowserState, await context.storage_state())
+                state_path = await self._state_store.save(work_item.session_id, storage_state)
+                state_saved = True
+
+            observed_at = datetime.now(UTC)
+            session = QueueSession(
+                session_id=work_item.session_id,
+                queue_id=queue_id,
+                transfer_url=transfer.transfer_url,
+                mode=self._mode,
+                status=QueueStatus.PARKED,
+                state_path=state_path,
+                created_at=observed_at,
+                last_checked_at=observed_at,
+                next_check_at=observed_at,
+                attempt_count=attempt,
+            )
+            try:
+                await self._repository.create(session)
+            except QueueIdConflictError:
+                if state_saved:
+                    await self._state_store.delete(work_item.session_id)
+                await self._persist_failed(work_item, attempt, "duplicate_queue_id")
+                return CreationOutcome(
+                    kind=CreationOutcomeKind.DUPLICATE,
+                    attempts=attempt,
+                    temporary_failures=temporary_failures,
+                    duration_seconds=time.perf_counter() - started,
+                    failure_code="duplicate_queue_id",
+                )
+            except BaseException:
+                if state_saved:
+                    await self._state_store.delete(work_item.session_id)
+                raise
+            return CreationOutcome(
+                kind=CreationOutcomeKind.SUCCESS,
+                attempts=attempt,
+                temporary_failures=temporary_failures,
+                duration_seconds=time.perf_counter() - started,
+                session=session,
+                progress=progress,
+            )
+
+    async def _wait_for_live_queue(
+        self,
+        page: Page,
+        session_id: str,
+    ) -> tuple[QueueProgress, TransferExtractionResult]:
+        deadline = asyncio.get_running_loop().time() + self._live_page_timeout_seconds
+        last_transfer_failure: TransferFailure | None = None
+        while True:
+            progress = await self._live_extractor.extract(page, session_id=session_id)
+            if progress.pre_queue is True or progress.active_queue is True:
+                transfer = await self._transfer_extractor_factory(page.url).extract(page)
+                if transfer.successful:
+                    return progress, transfer
+                last_transfer_failure = transfer.failure
+                if last_transfer_failure in {
+                    TransferFailure.MALFORMED_URL,
+                    TransferFailure.UNEXPECTED_HOST,
+                    TransferFailure.UNEXPECTED_JOURNEY,
+                    TransferFailure.AMBIGUOUS_QUEUE_ID,
+                    TransferFailure.IDENTITY_MISMATCH,
+                }:
+                    raise PermanentCreationError("invalid_transfer_identity")
+            if asyncio.get_running_loop().time() >= deadline:
+                if last_transfer_failure is TransferFailure.QUEUE_ID_MISSING:
+                    raise PermanentCreationError("queue_identity_missing")
+                raise TransientCreationError("queue_page_not_ready")
+            await self._sleep(self._observation_interval_seconds)
+
+    async def _persist_failed(
+        self,
+        work_item: CreationWorkItem,
+        attempts: int,
+        failure_code: str,
+    ) -> None:
+        session = QueueSession(
+            session_id=work_item.session_id,
+            queue_id=None,
+            transfer_url="",
+            mode=self._mode,
+            status=QueueStatus.FAILED,
+            state_path=self._state_directory / f"{work_item.session_id}.json",
+            attempt_count=attempts,
+            last_error=failure_code,
+        )
+        await self._repository.create(session)
+
+
+class SessionCreationController:
+    """Acquire unique Queue IDs using a bounded queue and fixed worker pool."""
+
+    def __init__(
+        self,
+        *,
+        repository: SessionRepository,
+        handler: SessionCreationHandler,
+        target_queue_ids: int,
+        worker_count: int,
+        queue_capacity: int | None = None,
+    ) -> None:
+        if target_queue_ids < 1:
+            raise ValueError("target_queue_ids must be at least 1")
+        if worker_count < 1:
+            raise ValueError("worker_count must be at least 1")
+        if queue_capacity is not None and queue_capacity < 1:
+            raise ValueError("queue_capacity must be at least 1")
+        self._repository = repository
+        self._handler = handler
+        self._target = target_queue_ids
+        self._worker_count = worker_count
+        self._queue_capacity = queue_capacity or worker_count
+        self.metrics = CreationMetrics()
+
+    async def run(self) -> CreationMetrics:
+        started = time.perf_counter()
+        work_queue: asyncio.Queue[CreationWorkItem | None] = asyncio.Queue(
+            maxsize=self._queue_capacity
+        )
+        result_queue: asyncio.Queue[CreationOutcome] = asyncio.Queue(maxsize=self._worker_count)
+        workers = [
+            asyncio.create_task(
+                self._worker(work_queue, result_queue),
+                name=f"creation-worker-{index}",
+            )
+            for index in range(self._worker_count)
+        ]
+        sequence = 0
+        in_flight = 0
+        try:
+            self.metrics.successful_unique_ids = await self._repository.count_successful_queue_ids()
+            while self.metrics.successful_unique_ids < self._target:
+                deficit = self._target - self.metrics.successful_unique_ids
+                desired_in_flight = min(self._worker_count, deficit)
+                while in_flight < desired_in_flight:
+                    sequence += 1
+                    await work_queue.put(CreationWorkItem(sequence=sequence))
+                    in_flight += 1
+
+                outcome = await result_queue.get()
+                in_flight -= 1
+                self._record(outcome)
+                self.metrics.successful_unique_ids = (
+                    await self._repository.count_successful_queue_ids()
+                )
+
+            if in_flight:
+                for _ in range(in_flight):
+                    outcome = await result_queue.get()
+                    self._record(outcome)
+                self.metrics.successful_unique_ids = (
+                    await self._repository.count_successful_queue_ids()
+                )
+        finally:
+            for _ in workers:
+                await work_queue.put(None)
+            await asyncio.gather(*workers)
+            self.metrics.elapsed_seconds = time.perf_counter() - started
+        return self.metrics
+
+    async def _worker(
+        self,
+        work_queue: asyncio.Queue[CreationWorkItem | None],
+        result_queue: asyncio.Queue[CreationOutcome],
+    ) -> None:
+        while True:
+            work_item = await work_queue.get()
+            try:
+                if work_item is None:
+                    return
+                self.metrics.currently_creating += 1
+                try:
+                    try:
+                        outcome = await self._handler.create(work_item)
+                    except Exception:  # noqa: BLE001 - isolate one failed worker job
+                        outcome = CreationOutcome(
+                            kind=CreationOutcomeKind.TEMPORARY_FAILURE,
+                            attempts=1,
+                            temporary_failures=1,
+                            duration_seconds=0.0,
+                            failure_code="unexpected_creation_error",
+                        )
+                finally:
+                    self.metrics.currently_creating -= 1
+                await result_queue.put(outcome)
+            finally:
+                work_queue.task_done()
+
+    def _record(self, outcome: CreationOutcome) -> None:
+        self.metrics.attempts += outcome.attempts
+        self.metrics.temporary_failures += outcome.temporary_failures
+        self.metrics.total_creation_duration_seconds += outcome.duration_seconds
+        if outcome.kind is CreationOutcomeKind.DUPLICATE:
+            self.metrics.duplicates += 1
+        elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
+            self.metrics.permanent_failures += 1
