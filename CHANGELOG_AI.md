@@ -797,3 +797,114 @@ Phase 2 Prompt 7 — Concurrency Tuning Harness
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 6 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 7 — Concurrency Tuning Harness
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Build a controlled, repeatable Phase 2 concurrency matrix that records objective
+behavior as bounded concurrency increases without automatically choosing an optimal
+configuration.
+
+### Changes Made
+
+- Added deterministic matrix generation for 5, 10, 15, 20, and 25 maximum contexts
+  across one or two Chrome processes, plus strict JSON manifests for explicit browser,
+  worker, per-browser capacity, queue, and claim-batch settings.
+- Added a checked-in ten-case example manifest covering both process counts.
+- Added a sequential matrix collector. Each case uses a fresh 100-session SQLite/state
+  location; matrix size never becomes simultaneous benchmark tasks or browsers.
+- Composed the existing resource runner with optional transfer-only and
+  storage-state-only probes, retaining only non-sensitive restore aggregates in the
+  matrix report.
+- Added machine-readable per-case results, concise comparison rows, and aggregate text
+  output without Queue IDs, session IDs, transfer URLs, or browser state.
+- Added configurable observation flags for adjacent p95 creation/check/context-
+  acquisition latency, failure-rate increases, sustained CPU, RAM growth, crashes,
+  identity mismatches, continuously increasing backlog, and restore reliability drops.
+  No ranking or winner is produced.
+- Added aggregate navigation-duration and BrowserManager context-acquisition-duration
+  histograms without identity labels. Context acquisition includes manager contention.
+- Added a separately gated staging matrix runner and documented sensitive case work
+  directories, cumulative test volume, repetition, and non-extrapolation constraints.
+
+### Files Added
+
+- `src/queue_load_test/harness/concurrency_tuning.py`
+- `src/queue_load_test/harness/phase2_tuning.py`
+- `tests/unit/test_concurrency_tuning.py`
+- `tests/staging/test_phase2_concurrency_benchmark.py`
+- `benchmarks/phase2-concurrency-matrix.example.json`
+- `docs/phase2-concurrency-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `pyproject.toml`
+- `README.md`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/harness/phase2_resources.py`
+- `src/queue_load_test/harness/phase2_restore.py`
+- `src/queue_load_test/harness/resource_benchmark.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/transfer/restoration.py`
+- `tests/unit/test_observability.py`
+- `tests/unit/test_resource_benchmark.py`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_concurrency_tuning.py tests/unit/test_resource_benchmark.py tests/unit/test_observability.py tests/unit/test_browser_manager.py tests/unit/test_creation.py tests/unit/test_restoration.py -q` — 51 passed during focused development.
+- `python -m pytest -q` — 216 passed, 4 deselected.
+- `python -m pytest -o addopts="" --collect-only -q -m staging tests/staging` — 4 staging tests collected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 41 source files.
+- `git diff --check` — passed; Git emitted only expected LF-to-CRLF working-copy notices.
+
+### Staging Tests
+
+- Phase 2 concurrency matrix — **NOT RUN**.
+- Reason: `RUN_STAGING_TESTS` and `RUN_PHASE2_CONCURRENCY_BENCHMARK` were unset and no
+  `.env` staging configuration was present. No browser traffic was sent.
+
+### Important Decisions
+
+- Cases execute sequentially and continue after a sanitized case failure. Case
+  concurrency remains bounded by that case’s validated settings.
+- The standard matrix splits creation and monitoring workers within the global context
+  limit, preserving the runtime invariant that their configured sum cannot exceed
+  `MAX_ACTIVE_CONTEXTS`. An explicit manifest can choose any other valid split.
+- Transfer and storage reliability probes are optional and sequential; they measure
+  mechanism reliability rather than adding uncontrolled restore concurrency.
+- Prometheus histogram percentiles are reported as bucket upper-bound estimates. Raw
+  operation percentiles remain exact where the resource recorder holds timings.
+- The ten-case manifest creates ten separate 100-session populations over time. It is
+  not a 1,000-session architecture test and must be limited to authorised staging
+  volume.
+
+### Known Issues
+
+- No real matrix case was run. All throughput, latency, CPU/RAM, failure, restore,
+  backlog, stability, and saturation observations remain UNKNOWN.
+- No optimal or recommended Phase 2 operating point exists without staging evidence.
+- The aggregate matrix JSON is identity-free, but each case work directory contains
+  sensitive SQLite/state data and, when restore probes run, a Queue ID audit report.
+- `psutil` remains optional, and unavailable system measurements cannot contribute to
+  the corresponding saturation flags.
+
+### Follow-Up
+
+Phase 2 Prompt 8 — Phase 2 Acceptance Report
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 7 changes present; clean before this prompt

@@ -262,6 +262,7 @@ class QueueSessionCreator:
         state_path = self._state_directory / f"{work_item.session_id}.json"
         async with self._browser_manager.context() as context:
             page = await context.new_page()
+            navigation_started = time.perf_counter()
             try:
                 response = await page.goto(
                     self._staging_url,
@@ -276,6 +277,11 @@ class QueueSessionCreator:
                 if self._observability is not None:
                     self._observability.record_navigation_failure()
                 raise
+            finally:
+                if self._observability is not None:
+                    self._observability.record_navigation_duration(
+                        time.perf_counter() - navigation_started
+                    )
             if response is not None:
                 if response.status >= 400 and self._observability is not None:
                     self._observability.record_navigation_failure()

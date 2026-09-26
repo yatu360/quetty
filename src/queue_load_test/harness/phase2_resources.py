@@ -93,6 +93,7 @@ async def run_phase2_resource_benchmark(
     monitoring_seconds: float,
     sample_interval_seconds: float,
     creation_timeout_seconds: float,
+    environment_gate: str = "RUN_PHASE2_RESOURCE_BENCHMARK",
 ) -> ResourceBenchmarkReport:
     """Acquire 100 sessions then observe bounded monitoring under explicit gates."""
 
@@ -103,10 +104,8 @@ async def run_phase2_resource_benchmark(
         raise ValueError("sample interval and creation timeout must be positive")
     if os.environ.get("RUN_STAGING_TESTS") != "1":
         raise RuntimeError("Set RUN_STAGING_TESTS=1 to run against authorised staging")
-    if os.environ.get("RUN_PHASE2_RESOURCE_BENCHMARK") != "1":
-        raise RuntimeError(
-            "Set RUN_PHASE2_RESOURCE_BENCHMARK=1 to run the Phase 2 resource benchmark"
-        )
+    if os.environ.get(environment_gate) != "1":
+        raise RuntimeError(f"Set {environment_gate}=1 to run the Phase 2 resource benchmark")
 
     recorder = ResourceBenchmarkRecorder()
     metrics = PrometheusMetrics()
@@ -228,7 +227,7 @@ def _validate_phase2_profile(settings: Settings) -> None:
         "TARGET_QUEUE_IDS": settings.target_queue_ids == 100,
         "SESSION_MODE": settings.session_mode is SessionMode.HYBRID,
         "CHROME_PROCESS_COUNT": settings.chrome_process_count in {1, 2},
-        "MAX_ACTIVE_CONTEXTS": settings.max_active_contexts == 25,
+        "MAX_ACTIVE_CONTEXTS": 1 <= settings.max_active_contexts <= 25,
         "DATABASE_URL": settings.database_url.startswith("sqlite:///"),
     }
     invalid = [name for name, matches in expected.items() if not matches]

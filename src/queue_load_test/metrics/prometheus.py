@@ -104,6 +104,12 @@ class PrometheusMetrics:
             "BrowserContext creation calls that failed.",
             registry=self.registry,
         )
+        self.browser_context_acquisition_duration_seconds = Histogram(
+            "browser_context_acquisition_duration_seconds",
+            "Time spent acquiring a BrowserContext, including manager contention.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
         self.session_creation_duration_seconds = Histogram(
             "session_creation_duration_seconds",
             "Queue-it session creation duration.",
@@ -145,6 +151,12 @@ class PrometheusMetrics:
         self.navigation_failures_total = Counter(
             "navigation_failures_total",
             "Browser navigation calls that failed, including timeouts.",
+            registry=self.registry,
+        )
+        self.navigation_duration_seconds = Histogram(
+            "navigation_duration_seconds",
+            "Browser page navigation duration.",
+            buckets=_DURATION_BUCKETS,
             registry=self.registry,
         )
         self.checks_total = Counter(
@@ -278,6 +290,9 @@ class PrometheusMetrics:
         if timed_out:
             self.navigation_timeouts_total.inc()
 
+    def record_navigation_duration(self, duration_seconds: float) -> None:
+        self.navigation_duration_seconds.observe(duration_seconds)
+
     def record_check(self, duration_seconds: float, progress: QueueProgress | None) -> None:
         self.checks_total.inc()
         self.queue_check_duration_seconds.observe(duration_seconds)
@@ -319,6 +334,9 @@ class PrometheusMetrics:
 
     def record_context_creation_failure(self) -> None:
         self.browser_context_creation_failures_total.inc()
+
+    def record_context_acquisition_duration(self, duration_seconds: float) -> None:
+        self.browser_context_acquisition_duration_seconds.observe(duration_seconds)
 
     def sync_session_counts(self, sessions: Iterable[QueueSession]) -> None:
         counts = dict.fromkeys(self._session_gauges, 0)

@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 6 — Resource and Stability Benchmarking.
+- Last completed work: Phase 2 Prompt 7 — Concurrency Tuning Harness.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 7 — Concurrency Tuning Harness.
+- Next planned work: Phase 2 Prompt 8 — Phase 2 Acceptance Report.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -91,7 +91,7 @@ close the context, release the lease, and park them again.
 - Structured logging, Prometheus metrics, and text/HTTP status:
   `src/queue_load_test/metrics/`.
 - Sensitive-data-safe Phase 1 acceptance reporting plus explicitly gated Phase 1,
-  Phase 2 HYBRID restore, and Phase 2 resource/stability benchmark runners:
+  Phase 2 HYBRID restore, resource/stability, and concurrency-matrix benchmark runners:
   `src/queue_load_test/harness/`.
 - Local controlled Chrome run and opt-in staging test:
   `tests/integration/test_phase1_controlled_run.py` and
@@ -274,6 +274,12 @@ releases active/queued leases without deleting persisted identities.
   throughput, and average/p50/p95 creation/context/check/restore latency. Its JSON has
   no session IDs, Queue IDs, transfer URLs, or browser state. Aggregate Prometheus
   counters now explicitly include BrowserContext creation and navigation failures.
+- The Phase 2 tuning harness runs isolated cases sequentially from a generated matrix
+  or explicit JSON manifest. It combines resource runs with optional explicit transfer
+  and storage-state probes, emits per-case data and concise comparison rows, and flags
+  configurable saturation symptoms without ranking cases or choosing a winner.
+  BrowserManager context-acquisition and page-navigation durations are aggregate
+  histograms without session labels.
 
 ## Tests
 
@@ -286,8 +292,8 @@ releases active/queued leases without deleting persisted identities.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **210 passed, 3 deselected**. The deselected tests were the opt-in Phase 1, Phase 2
-  restore, and Phase 2 resource benchmark staging tests.
+  **216 passed, 4 deselected**. The deselected tests were the four explicitly gated
+  staging harnesses.
 
 ## Phase 1 Acceptance Results
 
@@ -322,6 +328,8 @@ PASS for the corresponding mechanisms.
 - The Phase 2 resource/stability harness is implemented but **NOT RUN**. No verified
   application/Chrome CPU or RAM, throughput, operation latency, file-descriptor trend,
   failure rate, or one-browser versus two-browser comparison exists yet.
+- The Phase 2 concurrency matrix is implemented but **NOT RUN**. All measured
+  comparisons and saturation flags remain UNKNOWN; no operating point has been chosen.
 - Process-tree CPU/RAM requires the optional `benchmark` dependency. Open file
   descriptors remain `null` on platforms where `psutil` does not expose `num_fds`;
   missing optional system metrics never abort a run.
@@ -363,6 +371,8 @@ PASS for the corresponding mechanisms.
 - `docs/phase1-acceptance-report.md` — controlled Phase 1 report and assumptions.
 - `docs/phase2-restore-benchmark.md` — Phase 2 benchmark scope and current NOT RUN result.
 - `docs/phase2-resource-benchmark.md` — resource harness procedure and NOT RUN result.
+- `docs/phase2-concurrency-benchmark.md` — tuning procedure and NOT RUN result.
+- `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
 - `PHASE_PLAN.md` and `CHANGELOG_AI.md` — roadmap and AI-session history.
@@ -439,6 +449,14 @@ $env:MAX_CONTEXTS_PER_BROWSER = "25" # use 13 with two Chrome processes
 queue-load-test-phase2-resources --confirm-authorized-staging --monitoring-seconds 600 --sample-interval-seconds 5 --report phase2-resource-benchmark.json
 ```
 
+Phase 2 concurrency matrix using fresh per-case SQLite/state locations:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_CONCURRENCY_BENCHMARK = "1"
+queue-load-test-phase2-tuning --confirm-authorized-staging --matrix-file benchmarks/phase2-concurrency-matrix.example.json --monitoring-seconds 600 --restore-sample-size 10 --report phase2-concurrency-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -450,7 +468,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 7 — Concurrency Tuning Harness**
+**Phase 2 Prompt 8 — Phase 2 Acceptance Report**
 
 Do not implement it as part of this handoff.
 

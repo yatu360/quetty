@@ -20,6 +20,7 @@ from queue_load_test.harness.restore_benchmark import percentile
 from queue_load_test.metrics import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
+_HISTOGRAM_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +345,10 @@ class ResourceBenchmarkRecorder:
             "restore_failures": _counter(metrics, "state_restore_failures_total")
             + _counter(metrics, "transfer_restore_failures_total"),
             "identity_mismatches": _counter(metrics, "identity_mismatches_total"),
+            "navigation_latency": _prometheus_histogram_summary(
+                metrics,
+                "navigation_duration_seconds",
+            ),
             "creation_throughput_per_second": self.creation_successes
             / max(self.creation_phase_seconds or test_duration_seconds, 1e-9),
             "monitoring_throughput_per_second": self.completed_checks
@@ -352,6 +357,10 @@ class ResourceBenchmarkRecorder:
                 "creation": asdict(_latency_summary(self.creation_latencies)),
                 "context_creation": asdict(
                     _latency_summary(self.context_creation_latencies)
+                ),
+                "context_acquisition": _prometheus_histogram_summary(
+                    metrics,
+                    "browser_context_acquisition_duration_seconds",
                 ),
                 "check": asdict(_latency_summary(self.check_latencies)),
                 "restore": asdict(_latency_summary(self.restore_latencies)),
@@ -428,6 +437,41 @@ def _metric(metrics: PrometheusMetrics, name: str) -> float | None:
 
 def _counter(metrics: PrometheusMetrics, name: str) -> int:
     return int(_metric(metrics, name) or 0)
+
+
+def _prometheus_histogram_summary(
+    metrics: PrometheusMetrics,
+    name: str,
+) -> dict[str, int | float | None]:
+    count = int(_metric(metrics, f"{name}_count") or 0)
+    total = _metric(metrics, f"{name}_sum") or 0.0
+    return {
+        "count": count,
+        "average_seconds": total / count if count else None,
+        "p50_seconds": _histogram_percentile(metrics, name, count, 0.50),
+        "p95_seconds": _histogram_percentile(metrics, name, count, 0.95),
+    }
+
+
+def _histogram_percentile(
+    metrics: PrometheusMetrics,
+    name: str,
+    count: int,
+    quantile: float,
+) -> float | None:
+    """Return the first matching Prometheus bucket boundary (an upper-bound estimate)."""
+
+    if count == 0:
+        return None
+    target = count * quantile
+    for boundary in _HISTOGRAM_BUCKETS:
+        cumulative = metrics.registry.get_sample_value(
+            f"{name}_bucket",
+            {"le": str(float(boundary))},
+        )
+        if cumulative is not None and cumulative >= target:
+            return float(boundary)
+    return None
 
 
 def _json_default(value: object) -> object:

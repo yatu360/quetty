@@ -372,6 +372,7 @@ class QueueSessionRestorer:
                     if method is RestoreMethod.STORAGE_STATE
                     else session.transfer_url
                 )
+                navigation_started = time.perf_counter()
                 try:
                     response = await page.goto(
                         navigation_url,
@@ -396,6 +397,11 @@ class QueueSessionRestorer:
                         else RestoreFailure.NAVIGATION_FAILED
                     )
                     return RestoreAttempt(method=method, success=False, failure=failure)
+                finally:
+                    if self._observability is not None:
+                        self._observability.record_navigation_duration(
+                            time.perf_counter() - navigation_started
+                        )
                 if response is not None and response.status == 410:
                     if self._observability is not None:
                         self._observability.record_navigation_failure()

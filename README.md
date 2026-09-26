@@ -173,8 +173,24 @@ queue-load-test-phase2-resources --confirm-authorized-staging --monitoring-secon
 ```
 
 Use a separate empty database and state directory for each one- versus two-Chrome run.
-The harness accepts only `TARGET_QUEUE_IDS=100`, `SESSION_MODE=HYBRID`,
-`MAX_ACTIVE_CONTEXTS=25`, one or two Chrome processes, and SQLite. The report excludes
+The harness accepts only `TARGET_QUEUE_IDS=100`, `SESSION_MODE=HYBRID`, up to 25 active
+contexts, one or two Chrome processes, and SQLite. The report excludes
 session/Queue IDs, transfer URLs, and browser state. See
 [`docs/phase2-resource-benchmark.md`](docs/phase2-resource-benchmark.md) for the exact
 comparison procedure and current evidence status.
+
+## Phase 2 Concurrency Tuning Harness
+
+The tuning harness runs isolated cases sequentially and compares bounded concurrency
+levels without selecting an optimal configuration. It supports generated 5/10/15/20/25
+context matrices or a JSON manifest that explicitly sets Chrome processes, global and
+per-browser capacity, creation/monitor workers, queue capacity, and claim batch size.
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_CONCURRENCY_BENCHMARK = "1"
+queue-load-test-phase2-tuning --confirm-authorized-staging --matrix-file benchmarks/phase2-concurrency-matrix.example.json --report phase2-concurrency-benchmark.json
+```
+
+The aggregate output contains comparison rows and objective saturation flags, not a
+winner. See [the concurrency benchmark guide](docs/phase2-concurrency-benchmark.md).

@@ -36,7 +36,7 @@ proceed without it.
 
 **Status: in progress. Prompts 1–5 are complete for local configuration, multi-browser,
 acquisition, bounded monitoring, restore-benchmark tooling, and resource/stability
-benchmark tooling. Prompt 7 is next. No
+benchmark tooling and an objective concurrency-matrix harness. Prompt 8 is next. No
 100-session staging run or performance tuning has started.**
 
 Target profile:
@@ -227,6 +227,8 @@ until the authorised runs occur.
 
 ### Prompt 7 — Phase 2 Concurrency Tuning Harness
 
+Status: **implemented; authorised staging matrix NOT RUN**.
+
 Objective: compare a small matrix of worker, context, and Chrome-process settings without
 changing architectural semantics.
 
@@ -243,6 +245,14 @@ Exit criteria:
 - Higher concurrency is rejected when it increases failures or resource pressure without
   useful throughput.
 - All tested profiles retain bounded queues and identity safety.
+
+Implemented evidence: generated or manifest-driven cases run sequentially with maximum
+active-context levels up to 25 and one or two Chrome processes. Each case has isolated
+SQLite/state storage and produces resource, throughput, latency, error, restore, queue,
+and backlog evidence. Configurable adjacent-case rules flag potential saturation but
+never rank cases. Unit tests verify matrix generation, collection, flags,
+serialization, and comparison rows. No real case result or recommended operating point
+is claimed.
 
 ### Prompt 8 — Phase 2 Acceptance Report
 

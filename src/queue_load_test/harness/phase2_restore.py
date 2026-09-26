@@ -31,16 +31,15 @@ async def run_phase2_restore_benchmark(
         RestoreBenchmarkMode.STORAGE_STATE_ONLY,
         RestoreBenchmarkMode.HYBRID,
     ),
+    environment_gate: str = "RUN_PHASE2_RESTORE_BENCHMARK",
 ) -> RestoreBenchmarkReport:
     """Benchmark persisted HYBRID sessions after both explicit safety gates."""
 
     _validate_phase2_profile(settings, sample_size)
     if os.environ.get("RUN_STAGING_TESTS") != "1":
         raise RuntimeError("Set RUN_STAGING_TESTS=1 to run against authorised staging")
-    if os.environ.get("RUN_PHASE2_RESTORE_BENCHMARK") != "1":
-        raise RuntimeError(
-            "Set RUN_PHASE2_RESTORE_BENCHMARK=1 to run the Phase 2 restore benchmark"
-        )
+    if os.environ.get(environment_gate) != "1":
+        raise RuntimeError(f"Set {environment_gate}=1 to run the Phase 2 restore benchmark")
 
     metrics = PrometheusMetrics()
     repository = SQLiteSessionRepository(settings.database_url)

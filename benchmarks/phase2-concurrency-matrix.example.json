@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "name": "p1-c5",
+      "chrome_process_count": 1,
+      "max_active_contexts": 5,
+      "max_contexts_per_browser": 5,
+      "creation_workers": 2,
+      "monitor_workers": 3,
+      "monitor_queue_capacity": 5,
+      "monitor_claim_batch_size": 3
+    },
+    {
+      "name": "p1-c10",
+      "chrome_process_count": 1,
+      "max_active_contexts": 10,
+      "max_contexts_per_browser": 10,
+      "creation_workers": 5,
+      "monitor_workers": 5,
+      "monitor_queue_capacity": 10,
+      "monitor_claim_batch_size": 5
+    },
+    {
+      "name": "p1-c15",
+      "chrome_process_count": 1,
+      "max_active_contexts": 15,
+      "max_contexts_per_browser": 15,
+      "creation_workers": 7,
+      "monitor_workers": 8,
+      "monitor_queue_capacity": 15,
+      "monitor_claim_batch_size": 8
+    },
+    {
+      "name": "p1-c20",
+      "chrome_process_count": 1,
+      "max_active_contexts": 20,
+      "max_contexts_per_browser": 20,
+      "creation_workers": 10,
+      "monitor_workers": 10,
+      "monitor_queue_capacity": 20,
+      "monitor_claim_batch_size": 10
+    },
+    {
+      "name": "p1-c25",
+      "chrome_process_count": 1,
+      "max_active_contexts": 25,
+      "max_contexts_per_browser": 25,
+      "creation_workers": 12,
+      "monitor_workers": 13,
+      "monitor_queue_capacity": 25,
+      "monitor_claim_batch_size": 13
+    },
+    {
+      "name": "p2-c5",
+      "chrome_process_count": 2,
+      "max_active_contexts": 5,
+      "max_contexts_per_browser": 3,
+      "creation_workers": 2,
+      "monitor_workers": 3,
+      "monitor_queue_capacity": 5,
+      "monitor_claim_batch_size": 3
+    },
+    {
+      "name": "p2-c10",
+      "chrome_process_count": 2,
+      "max_active_contexts": 10,
+      "max_contexts_per_browser": 5,
+      "creation_workers": 5,
+      "monitor_workers": 5,
+      "monitor_queue_capacity": 10,
+      "monitor_claim_batch_size": 5
+    },
+    {
+      "name": "p2-c15",
+      "chrome_process_count": 2,
+      "max_active_contexts": 15,
+      "max_contexts_per_browser": 8,
+      "creation_workers": 7,
+      "monitor_workers": 8,
+      "monitor_queue_capacity": 15,
+      "monitor_claim_batch_size": 8
+    },
+    {
+      "name": "p2-c20",
+      "chrome_process_count": 2,
+      "max_active_contexts": 20,
+      "max_contexts_per_browser": 10,
+      "creation_workers": 10,
+      "monitor_workers": 10,
+      "monitor_queue_capacity": 20,
+      "monitor_claim_batch_size": 10
+    },
+    {
+      "name": "p2-c25",
+      "chrome_process_count": 2,
+      "max_active_contexts": 25,
+      "max_contexts_per_browser": 13,
+      "creation_workers": 12,
+      "monitor_workers": 13,
+      "monitor_queue_capacity": 25,
+      "monitor_claim_batch_size": 13
+    }
+  ]
+}

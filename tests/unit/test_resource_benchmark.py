@@ -89,7 +89,9 @@ async def test_resource_samples_are_aggregated_with_peaks_and_averages() -> None
     recorder.monitoring_phase_seconds = 2.0
     metrics.record_browser_crash()
     metrics.record_context_creation_failure()
+    metrics.record_context_acquisition_duration(0.4)
     metrics.record_navigation_failure()
+    metrics.record_navigation_duration(0.2)
     metrics.record_restore(
         1,
         success=False,
@@ -121,6 +123,12 @@ async def test_resource_samples_are_aggregated_with_peaks_and_averages() -> None
     assert report.summary["identity_mismatches"] == 1
     assert report.summary["creation_throughput_per_second"] == 0.5
     assert report.summary["monitoring_throughput_per_second"] == 0.5
+    assert report.summary["navigation_latency"] == {
+        "count": 1,
+        "average_seconds": 0.2,
+        "p50_seconds": 0.25,
+        "p95_seconds": 0.25,
+    }
     assert report.summary["latencies"] == {
         "creation": {
             "count": 2,
@@ -133,6 +141,12 @@ async def test_resource_samples_are_aggregated_with_peaks_and_averages() -> None
             "average_seconds": 0.2,
             "p50_seconds": 0.2,
             "p95_seconds": 0.2,
+        },
+        "context_acquisition": {
+            "count": 1,
+            "average_seconds": 0.4,
+            "p50_seconds": 0.5,
+            "p95_seconds": 0.5,
         },
         "check": {
             "count": 1,

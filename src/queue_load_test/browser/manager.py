@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -206,6 +207,22 @@ class BrowserManager:
         storage_state: ContextStorageState | None = None,
     ) -> OwnedBrowserContext:
         """Allocate one isolated visitor context with explicit ownership."""
+
+        started = time.perf_counter()
+        try:
+            return await self._create_context(storage_state=storage_state)
+        finally:
+            if self._observability is not None:
+                self._observability.record_context_acquisition_duration(
+                    time.perf_counter() - started
+                )
+
+    async def _create_context(
+        self,
+        *,
+        storage_state: ContextStorageState | None = None,
+    ) -> OwnedBrowserContext:
+        """Implement allocation separately so all exits receive timing instrumentation."""
 
         while True:
             restart_tasks: tuple[asyncio.Task[bool], ...] = ()
