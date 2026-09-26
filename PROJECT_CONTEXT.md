@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark.
+- Last completed work: Phase 2 Prompt 6 — Resource and Stability Benchmarking.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 6 — Resource and Stability Benchmarking.
+- Next planned work: Phase 2 Prompt 7 — Concurrency Tuning Harness.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -90,8 +90,8 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/runtime.py`.
 - Structured logging, Prometheus metrics, and text/HTTP status:
   `src/queue_load_test/metrics/`.
-- Sensitive-data-safe Phase 1 acceptance reporting plus explicitly gated Phase 1 and
-  Phase 2 HYBRID restore benchmark runners:
+- Sensitive-data-safe Phase 1 acceptance reporting plus explicitly gated Phase 1,
+  Phase 2 HYBRID restore, and Phase 2 resource/stability benchmark runners:
   `src/queue_load_test/harness/`.
 - Local controlled Chrome run and opt-in staging test:
   `tests/integration/test_phase1_controlled_run.py` and
@@ -268,6 +268,12 @@ releases active/queued leases without deleting persisted identities.
   browser/context failure, then aggregates success/mismatch rates, p50/p95, mechanism
   reliability, fallback use, and errors. It never records transfer URLs or browser
   state. Its JSON is sensitive because Queue IDs are retained for identity auditing.
+- The Phase 2 resource harness records fixed-interval application/Chrome CPU and RAM
+  when optional `psutil` is installed, managed/observed process counts, active contexts,
+  optional file descriptors, bounded queue/backlog depths, aggregate failures,
+  throughput, and average/p50/p95 creation/context/check/restore latency. Its JSON has
+  no session IDs, Queue IDs, transfer URLs, or browser state. Aggregate Prometheus
+  counters now explicitly include BrowserContext creation and navigation failures.
 
 ## Tests
 
@@ -280,8 +286,8 @@ releases active/queued leases without deleting persisted identities.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **206 passed, 2 deselected**. The deselected tests were the opt-in Phase 1 and Phase 2
-  staging tests.
+  **210 passed, 3 deselected**. The deselected tests were the opt-in Phase 1, Phase 2
+  restore, and Phase 2 resource benchmark staging tests.
 
 ## Phase 1 Acceptance Results
 
@@ -313,6 +319,12 @@ PASS for the corresponding mechanisms.
 - The Phase 2 HYBRID restore benchmark is implemented but **NOT RUN**. Both staging
   environment gates were absent, so transfer/storage success rates, fallback frequency,
   latency percentiles, error distribution, and identity mismatches remain UNKNOWN.
+- The Phase 2 resource/stability harness is implemented but **NOT RUN**. No verified
+  application/Chrome CPU or RAM, throughput, operation latency, file-descriptor trend,
+  failure rate, or one-browser versus two-browser comparison exists yet.
+- Process-tree CPU/RAM requires the optional `benchmark` dependency. Open file
+  descriptors remain `null` on platforms where `psutil` does not expose `num_fds`;
+  missing optional system metrics never abort a run.
 - The normal `queue-load-test` CLI validates settings and exits unless code injects an
   assembled `ApplicationRuntime`. The Phase 1 acceptance CLI is fully assembled for its
   narrower controlled purpose.
@@ -350,6 +362,7 @@ PASS for the corresponding mechanisms.
 - `src/queue_load_test/harness/` — acceptance recorder and staging runner.
 - `docs/phase1-acceptance-report.md` — controlled Phase 1 report and assumptions.
 - `docs/phase2-restore-benchmark.md` — Phase 2 benchmark scope and current NOT RUN result.
+- `docs/phase2-resource-benchmark.md` — resource harness procedure and NOT RUN result.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
 - `PHASE_PLAN.md` and `CHANGELOG_AI.md` — roadmap and AI-session history.
@@ -362,6 +375,8 @@ Install/setup in PowerShell:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[test]"
+# Add the optional process-tree sampler for resource benchmark runs:
+python -m pip install -e ".[test,benchmark]"
 python -m playwright install chrome
 Copy-Item .env.example .env
 ```
@@ -411,6 +426,19 @@ $env:RUN_PHASE2_RESTORE_BENCHMARK = "1"
 queue-load-test-phase2-restore --confirm-authorized-staging --sample-size 100 --mode all --report phase2-restore-benchmark.json
 ```
 
+Phase 2 resource benchmark using a dedicated empty SQLite database/state directory:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_RESOURCE_BENCHMARK = "1"
+$env:TARGET_QUEUE_IDS = "100"
+$env:SESSION_MODE = "HYBRID"
+$env:MAX_ACTIVE_CONTEXTS = "25"
+$env:CHROME_PROCESS_COUNT = "1" # repeat with 2
+$env:MAX_CONTEXTS_PER_BROWSER = "25" # use 13 with two Chrome processes
+queue-load-test-phase2-resources --confirm-authorized-staging --monitoring-seconds 600 --sample-interval-seconds 5 --report phase2-resource-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -422,7 +450,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 6 — Resource and Stability Benchmarking**
+**Phase 2 Prompt 7 — Concurrency Tuning Harness**
 
 Do not implement it as part of this handoff.
 

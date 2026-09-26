@@ -231,6 +231,8 @@ class BrowserManager:
                     try:
                         context = await self._new_context(slot.browser, storage_state)
                     except Exception:
+                        if self._observability is not None:
+                            self._observability.record_context_creation_failure()
                         if slot.browser.is_connected():
                             raise
                         restart_tasks = self._schedule_failed_restarts_locked()

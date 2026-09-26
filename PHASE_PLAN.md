@@ -35,7 +35,8 @@ proceed without it.
 ## Phase 2 — 100 Sessions
 
 **Status: in progress. Prompts 1–5 are complete for local configuration, multi-browser,
-acquisition, bounded monitoring, and restore-benchmark tooling. Prompt 6 is next. No
+acquisition, bounded monitoring, restore-benchmark tooling, and resource/stability
+benchmark tooling. Prompt 7 is next. No
 100-session staging run or performance tuning has started.**
 
 Target profile:
@@ -196,6 +197,8 @@ rate or latency result is claimed.
 
 ### Prompt 6 — Resource and Stability Benchmarking
 
+Status: **implemented; authorised staging runs NOT RUN**.
+
 Objective: measure controller/Chrome CPU, RAM, crash behavior, context churn, SQLite
 activity, and state-file footprint during acquisition and monitoring.
 
@@ -213,6 +216,14 @@ Exit criteria:
   defined in Prompt 1.
 - Context/process counts return to baseline after the run.
 - Restart preserves persisted journeys and leases recover safely.
+
+Implemented evidence: a gated 100-session acquisition/monitoring runner emits stable
+JSON and aggregate text with fixed-interval process/context/queue observations,
+aggregate failures, throughput, and latency percentiles. Optional `psutil` process-tree
+sampling degrades to explicit missing values. Unit tests verify aggregation,
+serialization, comparisons, and unavailable/disappearing process handling. Host
+headroom, cleanup baselines, and one- versus two-browser behavior remain unverified
+until the authorised runs occur.
 
 ### Prompt 7 — Phase 2 Concurrency Tuning Harness
 

@@ -157,3 +157,24 @@ mismatch, fallback, duration, percentile, and mechanism reliability statistics. 
 never contains transfer URLs or browser state. Because the report does contain Queue
 IDs as requested for identity auditing, treat it as sensitive local test evidence; the
 default report filename is git-ignored. The terminal summary contains aggregates only.
+
+## Phase 2 Resource and Stability Benchmark
+
+The explicitly gated resource harness creates a 100-session HYBRID population in a
+dedicated empty SQLite database, then exercises bounded parked-session monitoring. It
+produces comparison-friendly JSON plus an aggregate terminal summary. Install the
+optional process sampler for application and Chrome CPU/RAM observations:
+
+```powershell
+python -m pip install -e ".[test,benchmark]"
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_RESOURCE_BENCHMARK = "1"
+queue-load-test-phase2-resources --confirm-authorized-staging --monitoring-seconds 600 --sample-interval-seconds 5 --report phase2-resource-benchmark.json
+```
+
+Use a separate empty database and state directory for each one- versus two-Chrome run.
+The harness accepts only `TARGET_QUEUE_IDS=100`, `SESSION_MODE=HYBRID`,
+`MAX_ACTIVE_CONTEXTS=25`, one or two Chrome processes, and SQLite. The report excludes
+session/Queue IDs, transfer URLs, and browser state. See
+[`docs/phase2-resource-benchmark.md`](docs/phase2-resource-benchmark.md) for the exact
+comparison procedure and current evidence status.

@@ -372,12 +372,33 @@ class QueueSessionRestorer:
                     if method is RestoreMethod.STORAGE_STATE
                     else session.transfer_url
                 )
-                response = await page.goto(
-                    navigation_url,
-                    wait_until="domcontentloaded",
-                    timeout=self._navigation_timeout_ms,
-                )
+                try:
+                    response = await page.goto(
+                        navigation_url,
+                        wait_until="domcontentloaded",
+                        timeout=self._navigation_timeout_ms,
+                    )
+                except PlaywrightTimeoutError:
+                    if self._observability is not None:
+                        self._observability.record_navigation_failure(timed_out=True)
+                    failure = (
+                        RestoreFailure.STATE_CONTEXT_FAILED
+                        if method is RestoreMethod.STORAGE_STATE
+                        else RestoreFailure.NAVIGATION_FAILED
+                    )
+                    return RestoreAttempt(method=method, success=False, failure=failure)
+                except Exception:  # noqa: BLE001 - browser adapter boundary
+                    if self._observability is not None:
+                        self._observability.record_navigation_failure()
+                    failure = (
+                        RestoreFailure.STATE_CONTEXT_FAILED
+                        if method is RestoreMethod.STORAGE_STATE
+                        else RestoreFailure.NAVIGATION_FAILED
+                    )
+                    return RestoreAttempt(method=method, success=False, failure=failure)
                 if response is not None and response.status == 410:
+                    if self._observability is not None:
+                        self._observability.record_navigation_failure()
                     return RestoreAttempt(
                         method=method,
                         success=False,
@@ -385,6 +406,8 @@ class QueueSessionRestorer:
                         expired=True,
                     )
                 if response is not None and response.status >= 400:
+                    if self._observability is not None:
+                        self._observability.record_navigation_failure()
                     failure = (
                         RestoreFailure.HTTP_FAILURE
                         if response.status >= 500 or response.status in {408, 429}
@@ -423,8 +446,6 @@ class QueueSessionRestorer:
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
         except PlaywrightTimeoutError:
-            if self._observability is not None:
-                self._observability.record_navigation_timeout()
             failure = (
                 RestoreFailure.STATE_CONTEXT_FAILED
                 if method is RestoreMethod.STORAGE_STATE

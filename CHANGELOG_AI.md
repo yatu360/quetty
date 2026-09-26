@@ -696,3 +696,104 @@ Phase 2 Prompt 6 — Resource and Stability Benchmarking
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 5 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 6 — Resource and Stability Benchmarking
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Add a lightweight, repeatable Phase 2 resource and stability benchmark for the
+100-session, 25-context HYBRID profile and make one- versus two-Chrome runs directly
+comparable without adding high-cardinality telemetry.
+
+### Changes Made
+
+- Added a fixed-cadence recorder for optional application/Chrome CPU and RAM, observed
+  and managed process counts, active contexts, optional file descriptors, bounded queue
+  depth, and due backlog.
+- Added aggregate failure counts, acquisition/check throughput, and average/p50/p95
+  creation, context-creation, restore, and check latency.
+- Added atomic machine-readable JSON and a concise aggregate terminal report, plus a
+  stable comparison helper. Reports contain no session IDs, Queue IDs, transfer URLs,
+  or browser state and explicitly warn against Phase 3/4 extrapolation.
+- Added an optional `psutil` benchmark dependency. Missing system facilities and
+  disappearing processes produce unavailable values instead of aborting the run.
+- Added an explicitly gated staging runner that requires a dedicated empty SQLite
+  database, acquires 100 sessions with existing bounded workers, then exercises the
+  existing parked-session scheduler for a controlled duration.
+- Added aggregate BrowserContext-creation and navigation-failure Prometheus counters
+  and wired them at their owning browser/navigation boundaries without labels.
+- Added the run/comparison procedure and recorded the current real result as NOT RUN.
+
+### Files Added
+
+- `src/queue_load_test/harness/resource_benchmark.py`
+- `src/queue_load_test/harness/phase2_resources.py`
+- `tests/unit/test_resource_benchmark.py`
+- `tests/staging/test_phase2_resource_benchmark.py`
+- `docs/phase2-resource-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `pyproject.toml`
+- `README.md`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/transfer/restoration.py`
+- `tests/unit/test_observability.py`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_resource_benchmark.py tests/unit/test_observability.py tests/unit/test_browser_manager.py tests/unit/test_creation.py tests/unit/test_restoration.py -q` — 46 passed.
+- `python -m pytest -q` — 210 passed, 3 deselected.
+- `python -m pytest -o addopts="" --collect-only -q -m staging tests/staging` — 3 staging tests collected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 39 source files.
+- `git diff --check` — passed; Git emitted only expected LF-to-CRLF working-copy notices.
+
+### Staging Tests
+
+- Phase 2 resource and stability benchmark — **NOT RUN**.
+- Reason: `RUN_STAGING_TESTS` and `RUN_PHASE2_RESOURCE_BENCHMARK` were unset and no
+  `.env` staging configuration was present. No browser traffic was sent.
+
+### Important Decisions
+
+- Sampling uses one fixed task and existing bounded controllers; it never creates a
+  task or context per persisted session.
+- `BrowserManager` remains the authoritative source for managed Chrome-process and
+  active-context counts. Optional process-tree discovery is used only for aggregate OS
+  CPU/RAM observations and may include Chrome helper processes.
+- One- and two-browser runs use separate empty database/state locations and the same
+  report schema. A two-process run uses a per-browser capacity of at least 13 to cover
+  the global limit of 25.
+- A completed benchmark is not an acceptance PASS. Real measurements remain UNKNOWN
+  until the explicitly gated staging runs are performed.
+
+### Known Issues
+
+- No authorised one-browser or two-browser resource run was performed, so all host
+  headroom, throughput, latency, stability, and comparative observations are UNKNOWN.
+- `psutil` is optional; without the `benchmark` extra, process CPU/RAM and file
+  descriptors are unavailable while BrowserManager/Prometheus data remain present.
+- On platforms without `psutil.Process.num_fds`, the file-descriptor field is `null`.
+- The harness records context churn and aggregate SQLite/monitoring behavior but does
+  not yet report database/state-directory disk footprint.
+
+### Follow-Up
+
+Phase 2 Prompt 7 — Concurrency Tuning Harness
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 6 changes present; clean before this prompt

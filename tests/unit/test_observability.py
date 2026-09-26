@@ -112,6 +112,8 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
         identity_mismatch=False,
     )
     metrics.record_navigation_timeout()
+    metrics.record_navigation_failure()
+    metrics.record_context_creation_failure()
     metrics.record_browser_crash()
     metrics.set_browser_capacity(active_contexts=2, processes=1)
     metrics.record_check(
@@ -143,6 +145,9 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     assert metrics.registry.get_sample_value("queue_sessions_active") == 1
     assert metrics.registry.get_sample_value("queue_sessions_admitted") == 1
     assert metrics.registry.get_sample_value("browser_crashes_total") == 1
+    assert metrics.registry.get_sample_value("active_browser_contexts_peak") == 2
+    assert metrics.registry.get_sample_value("browser_context_creation_failures_total") == 1
+    assert metrics.registry.get_sample_value("navigation_failures_total") == 1
     assert metrics.registry.get_sample_value("checks_total") == 1
 
     exposition = metrics.render().decode()

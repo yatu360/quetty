@@ -156,6 +156,7 @@ activemq-data/
 *.sqlite3-wal
 phase1-acceptance*.json
 phase2-restore-benchmark*.json
+phase2-resource-benchmark*.json
 .venv
 env/
 venv/

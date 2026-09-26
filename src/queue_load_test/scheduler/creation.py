@@ -262,12 +262,23 @@ class QueueSessionCreator:
         state_path = self._state_directory / f"{work_item.session_id}.json"
         async with self._browser_manager.context() as context:
             page = await context.new_page()
-            response = await page.goto(
-                self._staging_url,
-                wait_until="domcontentloaded",
-                timeout=self._navigation_timeout_ms,
-            )
+            try:
+                response = await page.goto(
+                    self._staging_url,
+                    wait_until="domcontentloaded",
+                    timeout=self._navigation_timeout_ms,
+                )
+            except PlaywrightTimeoutError:
+                if self._observability is not None:
+                    self._observability.record_navigation_failure(timed_out=True)
+                raise
+            except PlaywrightError:
+                if self._observability is not None:
+                    self._observability.record_navigation_failure()
+                raise
             if response is not None:
+                if response.status >= 400 and self._observability is not None:
+                    self._observability.record_navigation_failure()
                 if response.status >= 500 or response.status in {408, 429}:
                     raise TransientCreationError("temporary_http_response")
                 if response.status >= 400:

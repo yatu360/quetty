@@ -84,6 +84,11 @@ class PrometheusMetrics:
             "Currently allocated browser contexts.",
             registry=self.registry,
         )
+        self.active_browser_contexts_peak = Gauge(
+            "active_browser_contexts_peak",
+            "Peak simultaneously allocated browser contexts in this process.",
+            registry=self.registry,
+        )
         self.browser_processes = Gauge(
             "browser_processes",
             "Managed Google Chrome processes.",
@@ -92,6 +97,11 @@ class PrometheusMetrics:
         self.browser_crashes_total = Counter(
             "browser_crashes_total",
             "Detected Chrome process failures.",
+            registry=self.registry,
+        )
+        self.browser_context_creation_failures_total = Counter(
+            "browser_context_creation_failures_total",
+            "BrowserContext creation calls that failed.",
             registry=self.registry,
         )
         self.session_creation_duration_seconds = Histogram(
@@ -130,6 +140,11 @@ class PrometheusMetrics:
         self.navigation_timeouts_total = Counter(
             "navigation_timeouts_total",
             "Browser navigation timeouts.",
+            registry=self.registry,
+        )
+        self.navigation_failures_total = Counter(
+            "navigation_failures_total",
+            "Browser navigation calls that failed, including timeouts.",
             registry=self.registry,
         )
         self.checks_total = Counter(
@@ -178,6 +193,7 @@ class PrometheusMetrics:
         self._started_at = time.monotonic()
         self._check_count = 0
         self._check_duration = 0.0
+        self._browser_context_peak = 0
         self._lock = threading.Lock()
 
     def _create_session_gauges(self) -> dict[QueueStatus, Gauge]:
@@ -257,6 +273,11 @@ class PrometheusMetrics:
     def record_navigation_timeout(self) -> None:
         self.navigation_timeouts_total.inc()
 
+    def record_navigation_failure(self, *, timed_out: bool = False) -> None:
+        self.navigation_failures_total.inc()
+        if timed_out:
+            self.navigation_timeouts_total.inc()
+
     def record_check(self, duration_seconds: float, progress: QueueProgress | None) -> None:
         self.checks_total.inc()
         self.queue_check_duration_seconds.observe(duration_seconds)
@@ -289,10 +310,15 @@ class PrometheusMetrics:
 
     def set_browser_capacity(self, *, active_contexts: int, processes: int) -> None:
         self.active_browser_contexts.set(active_contexts)
+        self._browser_context_peak = max(self._browser_context_peak, active_contexts)
+        self.active_browser_contexts_peak.set(self._browser_context_peak)
         self.browser_processes.set(processes)
 
     def record_browser_crash(self) -> None:
         self.browser_crashes_total.inc()
+
+    def record_context_creation_failure(self) -> None:
+        self.browser_context_creation_failures_total.inc()
 
     def sync_session_counts(self, sessions: Iterable[QueueSession]) -> None:
         counts = dict.fromkeys(self._session_gauges, 0)
