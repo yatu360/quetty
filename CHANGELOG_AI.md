@@ -344,3 +344,81 @@ Phase 2 Prompt 2 — Multi-Browser BrowserManager
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 1 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 2 — Multi-Browser BrowserManager
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Make `BrowserManager` reliable with one or two shared Google Chrome processes and a
+global limit of 25 active contexts while preserving the bounded parked-session design.
+
+### Changes Made
+
+- Added an explicit stable browser-slot ID accessor to owned contexts for diagnostics
+  and allocation verification.
+- Moved failed-process relaunches into one tracked task per browser slot, allowing a
+  healthy Chrome process to remain allocatable while another process restarts.
+- Kept disconnected-slot cleanup, capacity release, and replacement installation
+  synchronized without holding the global manager lock during Chrome relaunch.
+- Ensured only the disconnected process is replaced and its lost contexts are marked
+  closed; healthy processes and contexts are preserved.
+- Moved context close I/O outside the accounting lock after capacity is safely released.
+- Added tests for one- and two-browser startup, Phase 2's 25-context cap and balanced
+  13/12 allocation, context-creation failure, isolated restart, healthy capacity during
+  a deliberately blocked restart, restored capacity, and leak-free cleanup.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `src/queue_load_test/browser/manager.py`
+- `tests/unit/test_browser_manager.py`
+- `PROJECT_CONTEXT.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_browser_manager.py -q` — 19 passed.
+- `python -m pytest -q` — 193 passed, 1 deselected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 35 source files.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN**.
+- Reason: the prompt requested mock/fake verification and did not require a large or
+  real-staging load run. The normal suite deselected the opt-in staging test.
+
+### Important Decisions
+
+- Retained least-loaded allocation with the slot index as a stable internal browser ID.
+- Used at most one restart task per configured browser slot; this is bounded by Chrome
+  process count and is never tied to the persisted session population.
+- A caller waits for restart only when no healthy slot can accept work. Explicit
+  restart/capacity probes may wait for all currently failed slots to finish recovery.
+- Kept worker code dependent only on `BrowserManager.context()` / `create_context()`;
+  no scheduler or worker receives a raw Playwright `Browser`.
+
+### Known Issues
+
+- Real installed-Chrome behavior with two processes, actual process crashes, resource
+  use, and staging traffic remains unverified; current failure coverage uses fakes.
+- Browser context creation is deliberately serialized by the manager's accounting lock;
+  creation-throughput tuning belongs to later Phase 2 prompts and was not attempted.
+- No 100-session real-staging acquisition or performance benchmark has been run.
+
+### Follow-Up
+
+Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 2 changes present; clean before this prompt

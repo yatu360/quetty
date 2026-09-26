@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, cast
 
 import pytest
@@ -26,6 +27,7 @@ class FakeBrowser:
         self.process_id = process_id
         self.connected = True
         self.contexts: list[FakeContext] = []
+        self.fail_next_context = False
 
     def is_connected(self) -> bool:
         return self.connected
@@ -33,6 +35,9 @@ class FakeBrowser:
     async def new_context(self, **options: object) -> FakeContext:
         if not self.connected:
             raise RuntimeError("browser process is disconnected")
+        if self.fail_next_context:
+            self.fail_next_context = False
+            raise RuntimeError("context creation failed")
         context = FakeContext(options)
         self.contexts.append(context)
         return context
@@ -47,9 +52,15 @@ class FakeChromium:
     def __init__(self) -> None:
         self.launch_calls: list[dict[str, object]] = []
         self.browsers: list[FakeBrowser] = []
+        self.block_launch_call: int | None = None
+        self.launch_started = asyncio.Event()
+        self.continue_launch = asyncio.Event()
 
     async def launch(self, **options: object) -> FakeBrowser:
         self.launch_calls.append(options)
+        if len(self.launch_calls) == self.block_launch_call:
+            self.launch_started.set()
+            await self.continue_launch.wait()
         browser = FakeBrowser(len(self.browsers))
         self.browsers.append(browser)
         return browser
@@ -97,6 +108,16 @@ async def test_manager_starts_configured_google_chrome_processes() -> None:
     await manager.shutdown()
 
 
+async def test_manager_starts_one_google_chrome_process() -> None:
+    manager, playwright = manager_and_playwright(processes=1, per_browser=25, global_limit=25)
+
+    await manager.start()
+
+    assert len(playwright.chromium.browsers) == 1
+    assert playwright.chromium.launch_calls == [{"channel": "chrome", "headless": True}]
+    await manager.shutdown()
+
+
 async def test_fresh_context_has_no_shared_storage_state() -> None:
     manager, playwright = manager_and_playwright()
     await manager.start()
@@ -132,6 +153,26 @@ async def test_least_loaded_browser_allocation() -> None:
 
     assert len(playwright.chromium.browsers[0].contexts) == 2
     assert len(playwright.chromium.browsers[1].contexts) == 1
+    for context in contexts:
+        await context.close()
+    await manager.shutdown()
+
+
+async def test_phase2_limit_is_balanced_across_two_browsers() -> None:
+    manager, _ = manager_and_playwright(processes=2, per_browser=13, global_limit=25)
+    await manager.start()
+
+    contexts = [await manager.create_context() for _ in range(25)]
+
+    assert [context.browser_id for context in contexts].count(0) == 13
+    assert [context.browser_id for context in contexts].count(1) == 12
+    capacity = await manager.capacity()
+    assert [process.active_contexts for process in capacity.processes] == [13, 12]
+    assert capacity.active_contexts == 25
+    assert capacity.available_contexts == 0
+    with pytest.raises(BrowserCapacityError, match="Global"):
+        await manager.create_context()
+
     for context in contexts:
         await context.close()
     await manager.shutdown()
@@ -206,6 +247,22 @@ async def test_context_scope_cleans_up_after_failure() -> None:
     await manager.shutdown()
 
 
+async def test_context_creation_failure_does_not_leak_capacity() -> None:
+    manager, playwright = manager_and_playwright()
+    await manager.start()
+    playwright.chromium.browsers[0].fail_next_context = True
+
+    with pytest.raises(RuntimeError, match="context creation failed"):
+        await manager.create_context()
+
+    capacity = await manager.capacity()
+    assert capacity.active_contexts == 0
+    assert capacity.available_contexts == 5
+    replacement_attempt = await manager.create_context()
+    await replacement_attempt.close()
+    await manager.shutdown()
+
+
 async def test_dead_browser_is_detected_and_restarted() -> None:
     manager, playwright = manager_and_playwright()
     await manager.start()
@@ -220,8 +277,64 @@ async def test_dead_browser_is_detected_and_restarted() -> None:
     assert len(playwright.chromium.browsers) == 2
     assert playwright.chromium.browsers[1].connected
     replacement_context = await manager.create_context()
+    assert replacement_context.browser_id == 0
     assert replacement_context.context is playwright.chromium.browsers[1].contexts[0]
     await replacement_context.close()
+    await manager.shutdown()
+
+
+async def test_healthy_browser_remains_usable_while_failed_browser_restarts() -> None:
+    manager, playwright = manager_and_playwright(processes=2, per_browser=2, global_limit=4)
+    await manager.start()
+    failed_context = await manager.create_context()
+    healthy_context = await manager.create_context()
+    failed_browser = playwright.chromium.browsers[0]
+    healthy_browser = playwright.chromium.browsers[1]
+    failed_browser.connected = False
+    playwright.chromium.block_launch_call = 3
+
+    restart = asyncio.create_task(manager.restart_failed_browsers())
+    await asyncio.wait_for(playwright.chromium.launch_started.wait(), timeout=1)
+    context_during_restart = await asyncio.wait_for(manager.create_context(), timeout=1)
+
+    assert context_during_restart.browser_id == 1
+    assert healthy_browser.connected
+    assert healthy_context.context in healthy_browser.contexts
+    assert failed_context.closed
+
+    playwright.chromium.continue_launch.set()
+    assert await restart == 1
+    capacity = await manager.capacity()
+    assert capacity.connected_processes == 2
+    assert capacity.active_contexts == 2
+    assert capacity.available_contexts == 2
+
+    await context_during_restart.close()
+    await healthy_context.close()
+    await manager.shutdown()
+
+
+async def test_restart_replaces_only_the_failed_browser_and_restores_capacity() -> None:
+    manager, playwright = manager_and_playwright(processes=2, per_browser=3, global_limit=5)
+    await manager.start()
+    failed_context = await manager.create_context()
+    healthy_context = await manager.create_context()
+    failed_browser = playwright.chromium.browsers[0]
+    healthy_browser = playwright.chromium.browsers[1]
+    failed_browser.connected = False
+
+    assert await manager.restart_failed_browsers() == 1
+
+    capacity = await manager.capacity()
+    assert failed_context.closed
+    assert playwright.chromium.browsers[1] is healthy_browser
+    assert healthy_browser.connected
+    assert len(playwright.chromium.browsers) == 3
+    assert capacity.connected_processes == 2
+    assert capacity.active_contexts == 1
+    assert capacity.available_contexts == 4
+
+    await healthy_context.close()
     await manager.shutdown()
 
 
@@ -249,6 +362,27 @@ async def test_graceful_shutdown_closes_every_resource() -> None:
 
     await manager.shutdown()
 
+    assert not manager.started
+    assert all(context.closed for context in contexts)
+    assert all(not browser.connected for browser in playwright.chromium.browsers)
+    assert playwright.stopped
+
+
+async def test_graceful_shutdown_waits_for_in_progress_restart_without_leaks() -> None:
+    manager, playwright = manager_and_playwright(processes=2, per_browser=2, global_limit=4)
+    await manager.start()
+    contexts = [await manager.create_context() for _ in range(2)]
+    playwright.chromium.browsers[0].connected = False
+    playwright.chromium.block_launch_call = 3
+    restart = asyncio.create_task(manager.restart_failed_browsers())
+    await asyncio.wait_for(playwright.chromium.launch_started.wait(), timeout=1)
+
+    shutdown = asyncio.create_task(manager.shutdown())
+    await asyncio.sleep(0)
+    playwright.chromium.continue_launch.set()
+
+    assert await restart == 0
+    await shutdown
     assert not manager.started
     assert all(context.closed for context in contexts)
     assert all(not browser.connected for browser in playwright.chromium.browsers)

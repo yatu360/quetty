@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 1 — Configuration and Scaling Readiness.
+- Last completed work: Phase 2 Prompt 2 — Multi-Browser BrowserManager.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 2 — Multi-Browser BrowserManager.
+- Next planned work: Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -73,7 +73,8 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/repository/base.py` and `sqlite.py`.
 - State-store protocol and atomic filesystem implementation:
   `src/queue_load_test/state/base.py` and `filesystem.py`.
-- Shared-Chrome resource manager:
+- Shared-Chrome resource manager with stable process-slot identifiers, least-loaded
+  multi-process allocation, and per-slot asynchronous crash recovery:
   `src/queue_load_test/browser/manager.py`.
 - Supported transfer-link and Queue ID extraction:
   `src/queue_load_test/transfer/extractor.py`.
@@ -133,13 +134,17 @@ The current Phase 2 readiness defaults are one Chrome process, 25 contexts per b
 and 25 total active contexts. A supported two-process profile can use 13 contexts per
 browser and a global limit of 25. `BrowserManager` launches Chromium with
 `channel="chrome"`, selects the least-loaded connected process, and rejects allocations
-above either capacity.
+above either capacity. Browser slot IDs remain stable when only a failed Chrome process
+is replaced. The manager reports per-slot and aggregate capacity, and a context exposes
+the ID of its owning browser slot for diagnostics.
 
 A fresh context is created without storage state; state is supplied only for explicit
 restoration. `OwnedBrowserContext`, the manager's async context manager, idempotent
 close, and shutdown paths ensure tracked contexts are released. Capacity calls detect
-disconnected browsers; restart closes/invalidates lost contexts, relaunches the failed
-slot, preserves persisted session identity outside the browser, and updates metrics.
+disconnected browsers; restart immediately removes and invalidates lost contexts,
+relaunches only the failed slot, preserves persisted session identity outside the
+browser, and updates metrics. Relaunch runs outside the global manager lock, so a
+healthy process can continue accepting contexts while another process restarts.
 
 ## Session Lifecycle
 
@@ -199,8 +204,9 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
   are explicit structured results.
 - Identity mismatch is observable, increments metrics, preserves the expected Queue ID,
   and can become `FAILED`.
-- Browser disconnect recovery replaces the failed process while the persisted identity
-  remains in SQLite; monitor retry policy can retry through healthy capacity.
+- Browser disconnect recovery replaces only the failed process while the persisted
+  identity remains in SQLite. A healthy process remains allocatable during that
+  restart; monitor retry policy can retry through healthy capacity.
 - SIGINT/SIGTERM stop producers, drain in-flight work within a timeout, release queued
   leases, close contexts/Chrome, and close SQLite. Persisted journeys are not deleted.
 
@@ -230,7 +236,7 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **187 passed, 1 deselected**. The deselected test was the opt-in staging test.
+  **193 passed, 1 deselected**. The deselected test was the opt-in staging test.
 
 ## Phase 1 Acceptance Results
 
@@ -264,9 +270,9 @@ PASS for the corresponding mechanisms.
   narrower controlled purpose.
 - The 100-session configuration and bounded controller/scheduler behavior are covered by
   tests, but no 100-session browser/staging run or performance tuning has been performed.
-- Multi-browser Phase 2 validation is the next prompt; the current manager already
-  supports configurable process counts but has not received the dedicated Phase 2
-  failure/allocation exercise.
+- Two-process allocation, the 25-context global cap, isolated process restart, and
+  capacity recovery are verified with fakes. Actual two-process installed-Chrome
+  behavior and crash recovery still require authorised staging observation.
 - PostgreSQL, distributed workers, and shared/object state storage are not implemented.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 
@@ -351,7 +357,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 2 — Multi-Browser BrowserManager**
+**Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions**
 
 Do not implement it as part of this handoff.
 

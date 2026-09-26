@@ -61,6 +61,7 @@ class _BrowserSlot:
     index: int
     browser: Browser
     contexts: set[OwnedBrowserContext] = field(default_factory=set)
+    restart_task: asyncio.Task[bool] | None = None
 
 
 class OwnedBrowserContext:
@@ -86,6 +87,12 @@ class OwnedBrowserContext:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def browser_id(self) -> int:
+        """Return the stable identifier of the Chrome slot owning this context."""
+
+        return self._slot.index
 
     async def close(self) -> None:
         await self._manager.close_context(self)
@@ -200,40 +207,65 @@ class BrowserManager:
     ) -> OwnedBrowserContext:
         """Allocate one isolated visitor context with explicit ownership."""
 
-        async with self._lock:
-            self._require_started()
-            await self._restart_failed_browsers_locked()
-            if self._active_context_count() >= self._max_active_contexts:
-                raise BrowserCapacityError("Global browser context capacity is exhausted")
+        while True:
+            restart_tasks: tuple[asyncio.Task[bool], ...] = ()
+            wait_for_restart = False
+            async with self._lock:
+                self._require_started()
+                restart_tasks = self._schedule_failed_restarts_locked()
+                if self._active_context_count() >= self._max_active_contexts:
+                    raise BrowserCapacityError("Global browser context capacity is exhausted")
 
-            candidates = [
-                slot
-                for slot in self._slots
-                if slot.browser.is_connected()
-                and len(slot.contexts) < self._max_contexts_per_browser
-            ]
-            if not candidates:
-                raise BrowserCapacityError("Per-browser context capacity is exhausted")
-            slot = min(candidates, key=lambda candidate: (len(candidate.contexts), candidate.index))
+                candidates = [
+                    slot
+                    for slot in self._slots
+                    if slot.restart_task is None
+                    and slot.browser.is_connected()
+                    and len(slot.contexts) < self._max_contexts_per_browser
+                ]
+                if candidates:
+                    slot = min(
+                        candidates,
+                        key=lambda candidate: (len(candidate.contexts), candidate.index),
+                    )
+                    try:
+                        context = await self._new_context(slot.browser, storage_state)
+                    except Exception:
+                        if slot.browser.is_connected():
+                            raise
+                        restart_tasks = self._schedule_failed_restarts_locked()
+                        wait_for_restart = not any(
+                            candidate.restart_task is None
+                            and candidate.browser.is_connected()
+                            and len(candidate.contexts) < self._max_contexts_per_browser
+                            for candidate in self._slots
+                        )
+                    else:
+                        owned_context = OwnedBrowserContext(self, slot, context)
+                        slot.contexts.add(owned_context)
+                        self._update_capacity_metrics()
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "browser_context_created",
+                            browser_id=slot.index,
+                        )
+                        return owned_context
+                elif not restart_tasks:
+                    raise BrowserCapacityError("Per-browser context capacity is exhausted")
+                else:
+                    wait_for_restart = True
 
-            try:
-                context = await self._new_context(slot.browser, storage_state)
-            except Exception:
-                if slot.browser.is_connected():
-                    raise
-                await self._restart_slot(slot)
-                context = await self._new_context(slot.browser, storage_state)
-
-            owned_context = OwnedBrowserContext(self, slot, context)
-            slot.contexts.add(owned_context)
-            self._update_capacity_metrics()
-            log_event(
-                logger,
-                logging.INFO,
-                "browser_context_created",
-                browser_id=slot.index,
-            )
-            return owned_context
+            # No healthy slot was available, or the chosen slot disconnected while
+            # creating its context. Wait only when recovery is required to proceed.
+            # When another slot is healthy the loop selects it without waiting for
+            # the failed Chrome process to relaunch.
+            if wait_for_restart:
+                restart_results = await asyncio.gather(*restart_tasks)
+                if not any(restart_results):
+                    raise BrowserManagerError(
+                        "No disconnected browser process could be restarted"
+                    )
 
     @staticmethod
     async def _new_context(
@@ -266,34 +298,52 @@ class BrowserManager:
                 return
             owned_context._slot.contexts.discard(owned_context)
             owned_context._mark_closed()
-            try:
-                await owned_context.context.close()
-            except Exception as exc:  # noqa: BLE001
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "browser_context_close_failed",
-                    browser_id=owned_context._slot.index,
-                    error_type=type(exc).__name__,
-                )
             self._update_capacity_metrics()
+        try:
+            await owned_context.context.close()
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                logger,
+                logging.WARNING,
+                "browser_context_close_failed",
+                browser_id=owned_context._slot.index,
+                error_type=type(exc).__name__,
+            )
 
     async def restart_failed_browsers(self) -> int:
         """Detect disconnected processes and replace them."""
 
         async with self._lock:
             self._require_started()
-            return await self._restart_failed_browsers_locked()
+            restart_tasks = self._schedule_failed_restarts_locked()
+        if not restart_tasks:
+            return 0
+        return sum(await asyncio.gather(*restart_tasks))
 
-    async def _restart_failed_browsers_locked(self) -> int:
-        restarted = 0
+    def _schedule_failed_restarts_locked(self) -> tuple[asyncio.Task[bool], ...]:
+        restart_tasks: list[asyncio.Task[bool]] = []
         for slot in self._slots:
-            if not slot.browser.is_connected():
-                await self._restart_slot(slot)
-                restarted += 1
-        return restarted
+            if slot.browser.is_connected():
+                continue
+            if slot.restart_task is None:
+                lost_contexts = tuple(slot.contexts)
+                slot.contexts.clear()
+                for owned_context in lost_contexts:
+                    owned_context._mark_closed()
+                slot.restart_task = asyncio.create_task(
+                    self._restart_slot(slot, slot.browser, lost_contexts),
+                    name=f"browser-restart-{slot.index}",
+                )
+                self._update_capacity_metrics()
+            restart_tasks.append(slot.restart_task)
+        return tuple(restart_tasks)
 
-    async def _restart_slot(self, slot: _BrowserSlot) -> None:
+    async def _restart_slot(
+        self,
+        slot: _BrowserSlot,
+        old_browser: Browser,
+        lost_contexts: tuple[OwnedBrowserContext, ...],
+    ) -> bool:
         if self._observability is not None:
             self._observability.record_browser_crash()
         log_event(
@@ -303,11 +353,7 @@ class BrowserManager:
             browser_id=slot.index,
             error_type="BrowserDisconnected",
         )
-        old_browser = slot.browser
-        lost_contexts = tuple(slot.contexts)
-        slot.contexts.clear()
         for owned_context in lost_contexts:
-            owned_context._mark_closed()
             try:
                 await owned_context.context.close()
             except Exception as exc:  # noqa: BLE001
@@ -328,15 +374,53 @@ class BrowserManager:
                 browser_id=slot.index,
                 error_type=type(exc).__name__,
             )
-        slot.browser = await self._launch_browser()
-        self._update_capacity_metrics()
+        replacement: Browser | None = None
+        try:
+            replacement = await self._launch_browser()
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                logger,
+                logging.ERROR,
+                "browser_process_restart_failed",
+                browser_id=slot.index,
+                error_type=type(exc).__name__,
+            )
+
+        installed = False
+        current_task = asyncio.current_task()
+        async with self._lock:
+            if slot.restart_task is current_task:
+                slot.restart_task = None
+                slot_is_managed = any(candidate is slot for candidate in self._slots)
+                if replacement is not None and self._running and slot_is_managed:
+                    slot.browser = replacement
+                    installed = True
+                self._update_capacity_metrics()
+
+        if replacement is not None and not installed:
+            try:
+                await replacement.close()
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "unused_replacement_browser_cleanup_failed",
+                    browser_id=slot.index,
+                    error_type=type(exc).__name__,
+                )
+        return installed
 
     async def capacity(self) -> BrowserCapacity:
         """Return current active and available capacity, repairing dead processes first."""
 
         async with self._lock:
             self._require_started()
-            await self._restart_failed_browsers_locked()
+            restart_tasks = self._schedule_failed_restarts_locked()
+        if restart_tasks:
+            await asyncio.gather(*restart_tasks)
+
+        async with self._lock:
+            self._require_started()
             active = self._active_context_count()
             process_capacity = tuple(
                 BrowserProcessCapacity(
@@ -369,8 +453,15 @@ class BrowserManager:
         """Close every context, Chrome process, and the Playwright controller."""
 
         async with self._lock:
-            await self._close_started_resources()
             self._running = False
+            restart_tasks = tuple(
+                slot.restart_task for slot in self._slots if slot.restart_task is not None
+            )
+        if restart_tasks:
+            await asyncio.gather(*restart_tasks)
+
+        async with self._lock:
+            await self._close_started_resources()
             self._update_capacity_metrics()
             log_event(logger, logging.INFO, "browser_manager_stopped")
 
