@@ -78,6 +78,38 @@ session IDs are never labels.
 python -m pytest
 ```
 
+The ordinary suite includes a controlled 10-session Chrome integration run
+against a local Queue-it-shaped simulator. It does not contact staging. Tests
+marked `staging` are excluded by default even if staging configuration is
+present.
+
+To run the authorised staging harness, use a dedicated SQLite database and
+state directory, then opt in with both the environment gate and confirmation
+flag:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:PHASE1_OBSERVE_SECONDS = "600"
+queue-load-test-phase1 --confirm-authorized-staging --observe-seconds 600 --report phase1-acceptance.json
+```
+
+The harness refuses profiles that differ from 10 Queue IDs, HYBRID mode, one
+Chrome process, five contexts per browser, a five-context global limit, and
+SQLite. Its JSON report contains aggregate timing and result counts, not Queue
+IDs or transfer URLs. A longer observation window may be required to encounter
+every real Queue-it lifecycle state.
+Session acquisition is bounded by a configurable 600-second harness timeout so
+a broken staging journey still produces a finite acceptance result.
+
+The same run can be invoked through pytest when deliberately requested:
+
+```powershell
+python -m pytest -o addopts="" -m staging tests/staging
+```
+
+See [the Phase 1 acceptance report](docs/phase1-acceptance-report.md) for the
+controlled evidence and the staging assumptions that remain unknown.
+
 ## Initial Phase 1 Defaults
 
 - `TARGET_QUEUE_IDS=10`

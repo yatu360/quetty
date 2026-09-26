@@ -3,7 +3,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from queue_load_test.browser import BrowserManager
+from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.state import FileSystemStateStore
@@ -41,6 +44,18 @@ class FakeContext:
         return {"cookies": [{"name": "refreshed"}], "origins": []}
 
 
+class TimeoutPage(FakePage):
+    async def goto(self, url: str, **_: object) -> FakeResponse:
+        self.visited_urls.append(url)
+        raise PlaywrightTimeoutError("controlled navigation timeout")
+
+
+class TimeoutContext(FakeContext):
+    def __init__(self) -> None:
+        super().__init__()
+        self.page = TimeoutPage()
+
+
 class FakeBrowserManager:
     def __init__(self) -> None:
         self.contexts: list[FakeContext] = []
@@ -49,6 +64,18 @@ class FakeBrowserManager:
     @asynccontextmanager
     async def context(self, *, storage_state: object | None = None):
         context = FakeContext()
+        self.contexts.append(context)
+        self.storage_states.append(storage_state)
+        try:
+            yield context
+        finally:
+            context.closed = True
+
+
+class TimeoutBrowserManager(FakeBrowserManager):
+    @asynccontextmanager
+    async def context(self, *, storage_state: object | None = None):
+        context = TimeoutContext()
         self.contexts.append(context)
         self.storage_states.append(storage_state)
         try:
@@ -205,6 +232,29 @@ async def test_transfer_only_failure_is_recorded_without_fallback(tmp_path: Path
     assert persisted is not None
     assert persisted.last_error == "restore:TRANSFER_UNAVAILABLE"
     assert persisted.queue_id == "queue-expected"
+    await repository.close()
+
+
+async def test_navigation_timeout_is_sanitized_counted_and_context_closed(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    expected = session(SessionMode.TRANSFER_ONLY)
+    await repository.create(expected)
+    manager = TimeoutBrowserManager()
+    metrics = PrometheusMetrics()
+    restorer = QueueSessionRestorer(
+        browser_manager=cast(BrowserManager, manager),
+        repository=repository,
+        state_store=FileSystemStateStore(tmp_path / "state"),
+        observability=metrics,
+    )
+
+    result = await restorer.restore(expected)
+
+    assert result.failure is RestoreFailure.NAVIGATION_FAILED
+    assert metrics.registry.get_sample_value("navigation_timeouts_total") == 1
+    assert manager.contexts[0].closed
     await repository.close()
 
 
