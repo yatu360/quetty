@@ -363,7 +363,13 @@ class MonitoringMetrics:
     completed: int = 0
     failed: int = 0
     currently_checking: int = 0
+    maximum_concurrent_checks: int = 0
+    queue_depth: int = 0
     maximum_queue_depth: int = 0
+    due_backlog: int = 0
+    lease_conflicts: int = 0
+    scheduler_iterations: int = 0
+    idle_iterations: int = 0
 
 
 class _StopWorker:
@@ -390,6 +396,7 @@ class ParkedSessionScheduler:
         shutdown_timeout_seconds: float = 30.0,
         clock: Clock | None = None,
         scheduler_id: str | None = None,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         if worker_count < 1:
             raise ValueError("worker_count must be at least 1")
@@ -414,10 +421,12 @@ class ParkedSessionScheduler:
         self._shutdown_timeout_seconds = shutdown_timeout_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
         self._scheduler_id = scheduler_id or f"monitor-{uuid4()}"
+        self._observability = observability
         self._queue: asyncio.Queue[QueueSession | _StopWorker] = asyncio.Queue(
             maxsize=queue_capacity
         )
         self._workers: list[asyncio.Task[None]] = []
+        self._owned_session_ids: set[str] = set()
         self._schedule_lock = asyncio.Lock()
         self._accepting = True
         self.metrics = MonitoringMetrics()
@@ -431,6 +440,7 @@ class ParkedSessionScheduler:
         handler: MonitoringHandler,
         clock: Clock | None = None,
         scheduler_id: str | None = None,
+        observability: PrometheusMetrics | None = None,
     ) -> Self:
         return cls(
             repository=repository,
@@ -444,6 +454,7 @@ class ParkedSessionScheduler:
             shutdown_timeout_seconds=settings.shutdown_timeout_seconds,
             clock=clock,
             scheduler_id=scheduler_id,
+            observability=observability,
         )
 
     @property
@@ -465,6 +476,7 @@ class ParkedSessionScheduler:
             asyncio.create_task(self._worker(index), name=f"queue-monitor-{index}")
             for index in range(self._worker_count)
         ]
+        self._set_monitoring_activity()
 
     def stop_scheduling(self) -> None:
         self._accepting = False
@@ -493,24 +505,50 @@ class ParkedSessionScheduler:
         async with self._schedule_lock:
             if not self._accepting:
                 return 0
+            self.metrics.scheduler_iterations += 1
+            now = self._clock()
+            due_backlog = await self._repository.count_due_sessions(now=now)
+            self.metrics.due_backlog = due_backlog
+            if self._observability is not None:
+                self._observability.set_monitoring_backlog(due_backlog)
             available = self._queue.maxsize - self._queue.qsize()
             limit = min(available, self._claim_batch_size)
             if limit < 1:
+                self.metrics.idle_iterations += 1
                 return 0
-            now = self._clock()
-            sessions = await self._repository.claim_due_sessions(
+            claimed_sessions = await self._repository.claim_due_sessions(
                 worker_id=self._scheduler_id,
                 now=now,
                 lease_until=now + timedelta(seconds=self._lease_seconds),
                 limit=limit,
             )
+            expected_claims = min(limit, due_backlog)
+            conflicts = max(0, expected_claims - len(claimed_sessions))
+            if conflicts:
+                self.metrics.lease_conflicts += conflicts
+                if self._observability is not None:
+                    self._observability.record_monitoring_lease_conflicts(conflicts)
+            sessions = [
+                session
+                for session in claimed_sessions
+                if session.session_id not in self._owned_session_ids
+            ]
             for session in sessions:
+                self._owned_session_ids.add(session.session_id)
                 self._queue.put_nowait(session)
             self.metrics.claimed += len(sessions)
+            self.metrics.due_backlog = max(0, due_backlog - len(claimed_sessions))
+            self.metrics.queue_depth = self._queue.qsize()
             self.metrics.maximum_queue_depth = max(
                 self.metrics.maximum_queue_depth,
                 self._queue.qsize(),
             )
+            if not sessions:
+                self.metrics.idle_iterations += 1
+            if self._observability is not None:
+                self._observability.record_monitoring_claims(len(sessions))
+                self._observability.set_monitoring_backlog(self.metrics.due_backlog)
+            self._set_monitoring_activity()
             return len(sessions)
 
     async def wait_until_idle(self) -> None:
@@ -536,6 +574,9 @@ class ParkedSessionScheduler:
                 await self._queue.put(_STOP)
             await asyncio.gather(*self._workers)
         self._workers.clear()
+        self.metrics.queue_depth = 0
+        self.metrics.currently_checking = 0
+        self._set_monitoring_activity()
 
     async def _release_queued_leases(self) -> None:
         while not self._queue.empty():
@@ -546,8 +587,11 @@ class ParkedSessionScheduler:
                         item.session_id,
                         worker_id=self._scheduler_id,
                     )
+                    self._owned_session_ids.discard(item.session_id)
             finally:
                 self._queue.task_done()
+        self.metrics.queue_depth = 0
+        self._set_monitoring_activity()
 
     async def _worker(self, _: int) -> None:
         while True:
@@ -556,6 +600,11 @@ class ParkedSessionScheduler:
                 if isinstance(item, _StopWorker):
                     return
                 self.metrics.currently_checking += 1
+                self.metrics.maximum_concurrent_checks = max(
+                    self.metrics.maximum_concurrent_checks,
+                    self.metrics.currently_checking,
+                )
+                self._set_monitoring_activity()
                 try:
                     outcome = await self._handler.check(item)
                     self.metrics.completed += 1
@@ -589,10 +638,14 @@ class ParkedSessionScheduler:
                 finally:
                     self.metrics.currently_checking -= 1
                     try:
-                        await self._repository.release_lease(
+                        released = await self._repository.release_lease(
                             item.session_id,
                             worker_id=self._scheduler_id,
                         )
+                        if not released:
+                            self.metrics.lease_conflicts += 1
+                            if self._observability is not None:
+                                self._observability.record_monitoring_lease_conflicts()
                     except Exception as exc:  # noqa: BLE001
                         log_event(
                             logger,
@@ -604,6 +657,8 @@ class ParkedSessionScheduler:
                             worker_id=self._scheduler_id,
                             error_type=type(exc).__name__,
                         )
+                    self._owned_session_ids.discard(item.session_id)
+                    self._set_monitoring_activity()
             finally:
                 self._queue.task_done()
 
@@ -611,3 +666,11 @@ class ParkedSessionScheduler:
         session.last_error = "monitor:worker_failure"
         session.next_check_at = self._clock() + timedelta(seconds=self._failure_delay_seconds)
         await self._repository.update(session)
+
+    def _set_monitoring_activity(self) -> None:
+        self.metrics.queue_depth = self._queue.qsize()
+        if self._observability is not None:
+            self._observability.set_monitoring_activity(
+                active_workers=self.metrics.currently_checking,
+                queue_depth=self.metrics.queue_depth,
+            )

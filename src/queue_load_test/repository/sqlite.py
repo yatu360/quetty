@@ -400,6 +400,36 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def count_due_sessions(self, *, now: datetime) -> int:
+        """Count sessions currently eligible for a monitoring lease."""
+
+        now_storage = _to_storage(now)
+        if now_storage is None:
+            raise ValueError("now is required")
+
+        def operation() -> int:
+            row = self._connect().execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM queue_sessions
+                WHERE (next_check_at IS NULL OR next_check_at <= ?)
+                  AND (lease_until IS NULL OR lease_until <= ?)
+                  AND status NOT IN (?, ?, ?, ?, ?)
+                """,
+                (
+                    now_storage,
+                    now_storage,
+                    QueueStatus.ADMITTED.value,
+                    QueueStatus.EXPIRED.value,
+                    QueueStatus.FAILED.value,
+                    QueueStatus.NEW.value,
+                    QueueStatus.CREATING.value,
+                ),
+            ).fetchone()
+            return int(row["total"])
+
+        return await self._run(operation)
+
     async def claim_due_sessions(
         self,
         *,

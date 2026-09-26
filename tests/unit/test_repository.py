@@ -153,6 +153,7 @@ async def test_active_lease_prevents_claim_until_expiry(tmp_path: Path) -> None:
         lease_until=NOW + timedelta(seconds=30),
         limit=1,
     )
+    assert await repository.count_due_sessions(now=NOW + timedelta(seconds=10)) == 0
     blocked = await repository.claim_due_sessions(
         worker_id="worker-2",
         now=NOW + timedelta(seconds=10),
@@ -169,6 +170,8 @@ async def test_active_lease_prevents_claim_until_expiry(tmp_path: Path) -> None:
     assert len(first) == 1
     assert blocked == []
     assert [session.worker_id for session in reclaimed] == ["worker-2"]
+    assert await repository.count_due_sessions(now=NOW + timedelta(seconds=60)) == 0
+    assert await repository.count_due_sessions(now=NOW + timedelta(seconds=62)) == 1
     await repository.close()
 
 

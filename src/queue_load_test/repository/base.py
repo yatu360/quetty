@@ -46,6 +46,8 @@ class SessionRepository(Protocol):
 
     async def get_progress(self, session_id: str) -> QueueProgress | None: ...
 
+    async def count_due_sessions(self, *, now: datetime) -> int: ...
+
     async def claim_due_sessions(
         self,
         *,

@@ -137,6 +137,31 @@ class PrometheusMetrics:
             "Completed parked-session checks.",
             registry=self.registry,
         )
+        self.monitoring_workers_active = Gauge(
+            "monitoring_workers_active",
+            "Monitoring workers currently checking a leased session.",
+            registry=self.registry,
+        )
+        self.monitoring_queue_depth = Gauge(
+            "monitoring_queue_depth",
+            "Leased monitoring sessions waiting in the bounded work queue.",
+            registry=self.registry,
+        )
+        self.monitoring_due_backlog = Gauge(
+            "monitoring_due_backlog",
+            "Due, currently unleased sessions waiting to be claimed.",
+            registry=self.registry,
+        )
+        self.monitoring_sessions_claimed_total = Counter(
+            "monitoring_sessions_claimed_total",
+            "Sessions successfully claimed for monitoring.",
+            registry=self.registry,
+        )
+        self.monitoring_lease_conflicts_total = Counter(
+            "monitoring_lease_conflicts_total",
+            "Expected monitoring claims or lease releases lost to another owner.",
+            registry=self.registry,
+        )
         self.queue_progress_percentage = Histogram(
             "queue_progress_percentage",
             "Aggregate observed Queue-it progress percentage without session labels.",
@@ -243,6 +268,24 @@ class PrometheusMetrics:
         with self._lock:
             self._check_count += 1
             self._check_duration += duration_seconds
+
+    def set_monitoring_activity(
+        self,
+        *,
+        active_workers: int,
+        queue_depth: int,
+    ) -> None:
+        self.monitoring_workers_active.set(active_workers)
+        self.monitoring_queue_depth.set(queue_depth)
+
+    def set_monitoring_backlog(self, due_sessions: int) -> None:
+        self.monitoring_due_backlog.set(due_sessions)
+
+    def record_monitoring_claims(self, claimed: int) -> None:
+        self.monitoring_sessions_claimed_total.inc(claimed)
+
+    def record_monitoring_lease_conflicts(self, conflicts: int = 1) -> None:
+        self.monitoring_lease_conflicts_total.inc(conflicts)
 
     def set_browser_capacity(self, *, active_contexts: int, processes: int) -> None:
         self.active_browser_contexts.set(active_contexts)

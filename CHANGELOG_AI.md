@@ -512,3 +512,91 @@ Phase 2 Prompt 4 — Monitoring Throughput
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 3 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 4 — Monitoring Throughput
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Validate and improve due-session scheduling for 100 persisted sessions while keeping
+browser work, asyncio queues, worker tasks, and leases strictly bounded.
+
+### Changes Made
+
+- Added `count_due_sessions(now=...)` to the repository boundary and SQLite
+  implementation, using the same due, lease, and terminal-state criteria as claims.
+- Added scheduler visibility for current/maximum queue depth, current/maximum active
+  checks, due backlog, scheduling/idle iterations, and lease conflicts.
+- Added low-cardinality Prometheus gauges/counters for monitoring workers, queue depth,
+  due backlog, claimed sessions, and lease conflicts.
+- Kept claim size capped by both free bounded-queue capacity and configured batch size;
+  no task or browser context is allocated per persisted session.
+- Made failed lease release ownership observable while preserving owner-checked release.
+- Added a bounded queued/active ownership set so an expired lease reclaimed by the same
+  scheduler renews ownership without enqueueing a simultaneous local duplicate check.
+- Added synthetic 100-session due/future and blocked-worker tests, exception re-parking,
+  idle tick pacing, backlog telemetry, and explicit lease-expiry count assertions.
+- Updated persistent project context and Phase 2 roadmap status.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `src/queue_load_test/repository/base.py`
+- `src/queue_load_test/repository/sqlite.py`
+- `src/queue_load_test/scheduler/monitoring.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `tests/unit/test_monitoring.py`
+- `tests/unit/test_repository.py`
+- `tests/unit/test_observability.py`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_monitoring.py tests/unit/test_repository.py tests/unit/test_observability.py -q` — 27 passed.
+- `python -m pytest -q` — 200 passed, 1 deselected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 35 source files.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN**.
+- Reason: this task validates bounded monitoring mechanics with synthetic sessions; the
+  full Phase 2 real-environment benchmark was explicitly deferred.
+
+### Important Decisions
+
+- Defined backlog as due, non-terminal sessions whose lease is absent or expired;
+  queued and actively checked sessions are leased and therefore excluded.
+- Retained one fixed task per configured monitoring worker. A slow-worker test with 100
+  sessions proves two active checks plus two queued leases, not 100 tasks or contexts.
+- Kept lease expiry as crash recovery. Before expiry, atomic SQLite claims prevent
+  simultaneous ownership. The same scheduler renews an expired locally owned lease
+  without duplicating work; cross-process renewal remains a future concern.
+- Used one indexed due-count query per scheduler tick for backlog visibility. This is
+  appropriate at 100 sessions but its cost must be measured at later scales.
+
+### Known Issues
+
+- No real Chrome/Queue-it 100-session monitoring sweep, checks-per-second benchmark, or
+  backlog drain measurement has been performed.
+- Real restore latency may approach the configured lease duration; lease-duration
+  adequacy must be validated during restore reliability and resource benchmarks.
+- SQLite due-count/claim latency is only unit-tested at this scale, not benchmarked.
+
+### Follow-Up
+
+Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 4 changes present; clean before this prompt

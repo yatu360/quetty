@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions.
+- Last completed work: Phase 2 Prompt 4 — Monitoring Throughput.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 4 — Monitoring Throughput.
+- Next planned work: Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -83,7 +83,8 @@ close the context, release the lease, and park them again.
 - Bounded target acquisition and creation workers with deficit-aware scheduling,
   restart continuation, duplicate isolation, and aggregate activity/rate metrics:
   `src/queue_load_test/scheduler/creation.py`.
-- Adaptive per-session monitoring and bounded due-session scheduling:
+- Adaptive per-session monitoring and bounded due-session scheduling with backlog,
+  queue-depth, active-worker, claim, and lease-conflict telemetry:
   `src/queue_load_test/scheduler/monitoring.py`.
 - Signal-aware shutdown coordination:
   `src/queue_load_test/runtime.py`.
@@ -118,8 +119,9 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 - `SQLiteSessionRepository` uses the path from `DATABASE_URL`; the default is
   `sqlite:///queue_load_test.sqlite3`.
 - The repository protocol exposes create, update, get, list, successful-ID count,
-  progress operations, due-session claims, lease release, and close. This is the
-  boundary intended to permit a future PostgreSQL implementation.
+  progress operations, eligible due-session count, bounded due-session claims, lease
+  release, and close. This is the boundary intended to permit a future PostgreSQL
+  implementation.
 - SQLite has separate `queue_sessions` and `queue_progress` tables, a unique nullable
   `queue_id`, a due-session index, and lightweight `worker_id`/`lease_until` fields.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
@@ -200,7 +202,13 @@ mismatch without replacing the expected ID.
 `ParkedSessionScheduler` selects only due, unleased, non-terminal sessions through the
 repository, claims at most the free space in a bounded `asyncio.Queue`, and feeds a
 fixed worker pool. SQLite uses a short `BEGIN IMMEDIATE` transaction for the local
-claim; it does not emulate PostgreSQL distributed locking.
+claim; it does not emulate PostgreSQL distributed locking. The scheduler performs one
+due-backlog count per tick, limits each claim by both free queue slots and configured
+batch size, and sleeps for the configured tick when idle. Its task count is fixed by
+`MONITOR_WORKERS`, independent of whether 1 or 100 sessions are persisted.
+Queued/active session IDs are tracked in a bounded local ownership set. If a slow local
+check outlives its lease and the same scheduler reclaims it, the claim renews ownership
+without enqueueing a simultaneous duplicate check.
 
 `QueueSessionMonitor` restores one leased session, evaluates live status, verifies
 identity, persists progress and timestamps, refreshes HYBRID state when appropriate,
@@ -209,6 +217,9 @@ PRE_QUEUE 60–300 seconds, early ACTIVE_QUEUE 60–120, mid ACTIVE_QUEUE 30–6
 SERVICED_SOON 10–30, and TURN_STARTED/READY immediate. Jitter is applied. A static
 progress value is not automatically failure; `last_updated_at` is tracked separately
 and is stale only when Queue-it supplied a timestamp older than the configured limit.
+Unexpected worker errors re-park the session with a configured delay before releasing
+the owned lease. Shutdown drains within its timeout, then cancels active workers and
+releases active/queued leases without deleting persisted identities.
 
 ## Failure Handling
 
@@ -238,6 +249,9 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
   session ID labels. Creation telemetry includes attempts, acquired IDs, duplicates,
   transient/permanent failures, active workers, bounded queue depth, duration, and the
   current-run acquisition rate.
+- Monitoring telemetry includes aggregate checks/rate/duration, active fixed workers,
+  bounded queue depth, due unleased backlog, claimed sessions, and lease conflicts.
+  Restore failures and identity mismatches remain separately counted.
 - `ObservabilityHttpServer` serves `/status` and `/metrics`; `StatusSummary` also renders
   terminal-readable text.
 - The Phase 1 harness records creation/context/navigation/restore/monitor latency,
@@ -256,7 +270,7 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **196 passed, 1 deselected**. The deselected test was the opt-in staging test.
+  **200 passed, 1 deselected**. The deselected test was the opt-in staging test.
 
 ## Phase 1 Acceptance Results
 
@@ -298,6 +312,9 @@ PASS for the corresponding mechanisms.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
+- Synthetic 100-session tests verify a fixed two-worker/two-queue live set and a visible
+  96-session due backlog under blocked workers. Real restore/check latency, sustainable
+  checks per second, polling sweep time, and backlog drain rate remain unmeasured.
 - PostgreSQL, distributed workers, and shared/object state storage are not implemented.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 
@@ -382,7 +399,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 4 — Monitoring Throughput**
+**Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark**
 
 Do not implement it as part of this handoff.
 

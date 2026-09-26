@@ -34,9 +34,9 @@ proceed without it.
 
 ## Phase 2 — 100 Sessions
 
-**Status: in progress. Prompts 1–3 are complete for local configuration, multi-browser,
-and acquisition correctness. Prompt 4 is next. No 100-session staging run or
-performance tuning has started.**
+**Status: in progress. Prompts 1–4 are complete for local configuration, multi-browser,
+acquisition, and bounded monitoring correctness. Prompt 5 is next. No 100-session
+staging run or performance tuning has started.**
 
 Target profile:
 
@@ -138,6 +138,9 @@ resource claim is made.
 
 ### Prompt 4 — Phase 2 Monitoring Throughput
 
+**Status: completed on 2026-09-26 for bounded scheduling correctness and telemetry.
+Real-environment throughput and full-sweep timing remain unmeasured.**
+
 Objective: measure due-session claim, restore, inspect, persist, release, and re-park
 throughput across 100 persisted sessions.
 
@@ -152,6 +155,15 @@ Exit criteria:
 - Queues remain bounded and leases are released/expire safely.
 - The measured sweep/check cadence satisfies the thresholds defined in Prompt 1.
 - No starvation, accidental task explosion, or simultaneous duplicate checks are seen.
+
+Implemented evidence: synthetic tests with approximately 100 SQLite sessions verify
+due/future filtering, a bounded claim batch, fixed worker tasks, slow-worker
+backpressure, atomic lease exclusion/expiry, success and exception release paths,
+adaptive intervals/jitter, re-parking, shutdown lease cleanup, local lease renewal
+without duplicate checks, and a tick-paced idle loop. Prometheus now exposes active
+monitoring workers, queue depth, due backlog, claims, and lease conflicts alongside
+existing check/restore metrics. No real Chrome monitoring sweep or throughput result
+is claimed.
 
 ### Prompt 5 — HYBRID Restore Reliability Benchmark
 
