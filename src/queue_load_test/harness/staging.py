@@ -97,7 +97,7 @@ async def run_staging_acceptance(
         handler=recording_creator,
         target_queue_ids=10,
         worker_count=settings.creation_workers,
-        queue_capacity=settings.max_active_contexts,
+        queue_capacity=settings.creation_queue_capacity,
         observability=metrics,
     )
     restorer = QueueSessionRestorer.from_settings(

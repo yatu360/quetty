@@ -126,6 +126,16 @@ async def seed_successful_sessions(
         )
 
 
+class CountingSQLiteSessionRepository(SQLiteSessionRepository):
+    def __init__(self, database: Path) -> None:
+        super().__init__(database)
+        self.successful_count_queries = 0
+
+    async def count_successful_queue_ids(self) -> int:
+        self.successful_count_queries += 1
+        return await super().count_successful_queue_ids()
+
+
 async def test_target_one_replenishes_after_failure(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "target-one.sqlite3")
     handler = ScriptedCreationHandler(
@@ -279,6 +289,37 @@ async def test_target_one_hundred_uses_fixed_worker_concurrency(tmp_path: Path) 
     assert (
         observability.registry.get_sample_value("queue_sessions_created_per_second") or 0
     ) > 0
+    await repository.close()
+
+
+async def test_target_one_thousand_uses_fixed_workers_and_constant_count_queries(
+    tmp_path: Path,
+) -> None:
+    repository = CountingSQLiteSessionRepository(tmp_path / "target-one-thousand.sqlite3")
+    handler = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"queue-{index}")
+            for index in range(1000)
+        ],
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.successful_unique_ids == 1000
+    assert metrics.maximum_concurrent_creating == 20
+    assert metrics.maximum_queue_depth <= 20
+    assert handler.maximum_active == 20
+    assert handler.calls == 1000
+    assert repository.successful_count_queries == 2
+    assert await repository.count_successful_queue_ids() == 1000
     await repository.close()
 
 

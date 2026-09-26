@@ -288,7 +288,8 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: planned, not started, and blocked by the Phase 2 acceptance evidence gaps.**
+**Status: Prompt 1 completed locally; performance and staging scalability remain
+unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
 
 Target profile:
 
@@ -306,8 +307,14 @@ Goals:
 
 Planned prompt breakdown:
 
-1. **Phase 3 readiness and 1,000-session profile** — review Phase 2 gates, establish
-   authorised limits, cadence requirements, and run manifests.
+1. **Phase 3 readiness and 1,000-session profile** — **completed on 2026-09-26.**
+   Defaults now target 1,000 persisted HYBRID sessions with two Chrome processes, a
+   benchmark-only 50-context ceiling, one creation worker, one monitoring worker, and
+   explicit bounded creation/monitoring queues. Configuration tests cover 50/75/100
+   candidates and reject capacity, worker, queue, batch, and >100-context contradictions.
+   Synthetic 1,000-row tests retain fixed worker/task and queue bounds. Creation target
+   accounting now avoids one count query per outcome while retaining authoritative
+   startup/completion counts. This is readiness evidence only, not a scalability PASS.
 2. **SQLite query/index benchmark** — measure due scans, claims, updates, counts, and
    database growth at representative populations without changing backend prematurely.
 3. **1,000-session acquisition run** — acquire unique identities with bounded creation

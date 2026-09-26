@@ -178,6 +178,25 @@ async def test_phase2_limit_is_balanced_across_two_browsers() -> None:
     await manager.shutdown()
 
 
+async def test_phase3_one_hundred_context_cap_is_bounded_across_four_browsers() -> None:
+    manager, _ = manager_and_playwright(processes=4, per_browser=25, global_limit=100)
+    await manager.start()
+
+    contexts = [await manager.create_context() for _ in range(100)]
+    capacity = await manager.capacity()
+
+    assert capacity.chrome_processes == 4
+    assert capacity.active_contexts == 100
+    assert capacity.available_contexts == 0
+    assert [process.active_contexts for process in capacity.processes] == [25, 25, 25, 25]
+    with pytest.raises(BrowserCapacityError, match="Global"):
+        await manager.create_context()
+
+    for context in contexts:
+        await context.close()
+    await manager.shutdown()
+
+
 async def test_global_context_limit_is_enforced() -> None:
     manager, _ = manager_and_playwright(processes=2, per_browser=5, global_limit=2)
     await manager.start()

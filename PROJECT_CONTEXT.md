@@ -9,14 +9,14 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 2 — 100 Sessions, implementation complete through Prompt 8.
-- Last completed work: Phase 2 Prompt 8 — Phase 2 Acceptance Report.
-- Completion: **PARTIAL**. Local architecture gates pass, but the authorised Phase 2
-  acquisition, monitoring, restore, resource, and concurrency runs were not performed.
-- Acceptance: **3 PASS, 2 FAIL, 15 UNKNOWN**. Bounded capacity, parked persistence, and
-  fixed-task scheduling pass locally. Phase 3 readiness and absence of blockers fail.
-- Next planned work: **Phase 3 Prompt 1**, but it is blocked until the missing Phase 2
-  staging evidence establishes a measured operating point and resource headroom.
+- Current phase: Phase 3 — 1,000 Sessions, Prompt 1 configuration/readiness complete.
+- Last completed work: Phase 3 Prompt 1 — 1,000-session configuration and scale audit.
+- Completion: local configuration and bounded-concurrency readiness only. No Phase 3
+  performance or staging benchmark has run, and Phase 2 measurement gaps remain.
+- Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
+  are carried as explicit blockers, not converted into Phase 3 scalability claims.
+- Next planned work: **Phase 3 Prompt 2 — Repository and Scheduler Performance at
+  1,000 Sessions**. It may proceed as a local benchmark; staging scale remains blocked.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -141,9 +141,12 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 
 ## Browser Model
 
-The current Phase 2 readiness defaults are one Chrome process, 25 contexts per browser,
-and 25 total active contexts. A supported two-process profile can use 13 contexts per
-browser and a global limit of 25. `BrowserManager` launches Chromium with
+The Phase 3 readiness defaults are two Chrome processes, 25 contexts per browser, and
+a 50-context global ceiling, with only one creation and one monitoring worker enabled
+by default. Structurally validated benchmark candidates use 2/3/4 Chrome processes at
+25 contexts each for 50/75/100 global ceilings. These are unmeasured candidates, not
+safe operating-point claims, and the Phase 3 configuration rejects ceilings above 100.
+`BrowserManager` launches Chromium with
 `channel="chrome"`, selects the least-loaded connected process, and rejects allocations
 above either capacity. Browser slot IDs remain stable when only a failed Chrome process
 is replaced. The manager reports per-slot and aggregate capacity, and a context exposes
@@ -162,8 +165,9 @@ healthy process can continue accepting contexts while another process restarts.
 `SessionCreationController` reads the successful unique Queue ID count from the
 repository on startup and schedules at most `min(CREATION_WORKERS, remaining target)`
 work items. Its `asyncio.Queue` is bounded and the worker-task count is fixed; it never
-creates one task per requested or persisted session. Each successful result causes a
-fresh repository count before more work is scheduled, so concurrency contracts as the
+creates one task per requested or persisted session. Successful persisted outcomes
+advance a local count; SQLite is queried authoritatively at startup and before target
+completion rather than after every one of 1,000 outcomes. Concurrency contracts as the
 target approaches. Existing persisted successes support restart continuation, while
 failed and duplicate records do not count.
 
@@ -213,7 +217,7 @@ fixed worker pool. SQLite uses a short `BEGIN IMMEDIATE` transaction for the loc
 claim; it does not emulate PostgreSQL distributed locking. The scheduler performs one
 due-backlog count per tick, limits each claim by both free queue slots and configured
 batch size, and sleeps for the configured tick when idle. Its task count is fixed by
-`MONITOR_WORKERS`, independent of whether 1 or 100 sessions are persisted.
+`MONITOR_WORKERS`, independent of whether 1 or 1,000 sessions are persisted.
 Queued/active session IDs are tracked in a bounded local ownership set. If a slow local
 check outlives its lease and the same scheduler reclaims it, the claim renews ownership
 without enqueueing a simultaneous duplicate check.
@@ -298,11 +302,9 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest locally verified result on 2026-09-26: `.venv/bin/python -m pytest -q`
-  reported **216 passed, 4 deselected in 8.49 seconds** on Python 3.14.7/macOS arm64
-  with installed Google Chrome 153.0.8010.54. The deselected tests were the four
-  explicitly gated staging harnesses. Ruff and strict mypy also passed; this is local
-  correctness evidence, not a Phase 2 staging benchmark.
+- Latest result on 2026-09-26: `.venv/bin/python -m pytest -q` reported **232 passed,
+  4 deselected in 9.22 seconds** on Python 3.14.7/macOS arm64. The deselected tests were
+  the four explicitly gated staging harnesses. Ruff and strict mypy passed.
 
 ## Phase 1 Acceptance Results
 
@@ -383,11 +385,26 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 - Phase 2 acceptance is documented in `docs/phase2-acceptance.md`; the missing staging
   evidence is a blocker to selecting the Phase 3 50–100-context operating range.
+- Phase 3 scale audit: `/status` and runtime startup load all sessions to calculate
+  status gauges; the Phase 2 restore harness also loads its full population. At 1,000
+  rows these paths need measurement and may need aggregate/paginated repository APIs.
+- SQLite serializes every operation through one async lock and uses one commit per
+  create/update/lease release. The scheduler runs an indexed due count followed by a
+  bounded `BEGIN IMMEDIATE` claim every tick. Query plans, tick cost, transaction
+  contention, and batch-size behavior are Prompt 2 evidence gaps.
+- `BrowserManager` holds its global lock while `browser.new_context()` runs, which may
+  serialize allocation at 50–100 workers. Measure before redesigning reservations.
+- Every creation/monitor/restore operation can emit a structured per-session event.
+  Logging volume and sink backpressure are unmeasured at 1,000 sessions, although
+  Prometheus labels remain aggregate/low-cardinality.
+- HYBRID state saves are correctly offloaded to threads but perform an fsync and atomic
+  replacement per session. Thread-pool and disk pressure require later measurement;
+  no directory-wide scan occurs in the hot path.
 
 ## Important Files
 
 - `README.md` — setup, scope, and harness usage.
-- `.env.example` — complete Phase 1 environment defaults.
+- `.env.example` — Phase 3 readiness defaults and bounded queue/capacity settings.
 - `pyproject.toml` — dependencies, scripts, pytest marker/default exclusion.
 - `src/queue_load_test/config.py` — configuration and contradiction validation.
 - `src/queue_load_test/models/` — identity/progress/lifecycle domain.
@@ -499,10 +516,10 @@ python -m mypy src
 
 ## Next Task
 
-The next named task is **Phase 3 Prompt 1 — Phase 3 readiness and 1,000-session
-profile**. Do not begin implementation until the Phase 2 acceptance blockers are
-addressed or explicitly carried as blocking evidence; no 50–100-context setting is yet
-supported by measurement.
+**Phase 3 Prompt 2 — Repository and Scheduler Performance at 1,000 Sessions.** Measure
+the identified SQLite, full-table status, due-query, claim/update, tick, and backlog
+costs locally before changing the repository design. Do not start a large staging run
+or claim that any 50–100-context candidate is safe.
 
 ## Instructions for Future AI Sessions
 

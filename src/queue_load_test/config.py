@@ -14,12 +14,15 @@ class Settings(BaseSettings):
     """Environment-backed application settings."""
 
     staging_url: HttpUrl = Field(alias="STAGING_URL")
-    target_queue_ids: int = Field(default=100, alias="TARGET_QUEUE_IDS", ge=1)
+    target_queue_ids: int = Field(default=1000, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
-    chrome_process_count: int = Field(default=1, alias="CHROME_PROCESS_COUNT", ge=1)
-    max_contexts_per_browser: int = Field(default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1)
-    max_active_contexts: int = Field(default=25, alias="MAX_ACTIVE_CONTEXTS", ge=1)
+    chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
+    max_contexts_per_browser: int = Field(
+        default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25
+    )
+    max_active_contexts: int = Field(default=50, alias="MAX_ACTIVE_CONTEXTS", ge=1, le=100)
     creation_workers: int = Field(default=1, alias="CREATION_WORKERS", ge=1)
+    creation_queue_capacity: int = Field(default=5, alias="CREATION_QUEUE_CAPACITY", ge=1)
     monitor_workers: int = Field(default=1, alias="MONITOR_WORKERS", ge=1)
     monitor_queue_capacity: int = Field(default=5, alias="MONITOR_QUEUE_CAPACITY", ge=1)
     monitor_claim_batch_size: int = Field(default=5, alias="MONITOR_CLAIM_BATCH_SIZE", ge=1)
@@ -108,6 +111,9 @@ class Settings(BaseSettings):
         if self.creation_workers > self.max_active_contexts:
             raise ValueError("CREATION_WORKERS cannot exceed MAX_ACTIVE_CONTEXTS")
 
+        if self.creation_queue_capacity > self.max_active_contexts:
+            raise ValueError("CREATION_QUEUE_CAPACITY cannot exceed MAX_ACTIVE_CONTEXTS")
+
         if self.monitor_workers > self.max_active_contexts:
             raise ValueError("MONITOR_WORKERS cannot exceed MAX_ACTIVE_CONTEXTS")
 
@@ -116,6 +122,9 @@ class Settings(BaseSettings):
 
         if self.monitor_claim_batch_size > self.monitor_queue_capacity:
             raise ValueError("MONITOR_CLAIM_BATCH_SIZE cannot exceed MONITOR_QUEUE_CAPACITY")
+
+        if self.monitor_queue_capacity > self.max_active_contexts:
+            raise ValueError("MONITOR_QUEUE_CAPACITY cannot exceed MAX_ACTIVE_CONTEXTS")
 
         if self.poll_jitter_seconds >= self.queue_poll_seconds:
             raise ValueError("POLL_JITTER_SECONDS must be less than QUEUE_POLL_SECONDS")

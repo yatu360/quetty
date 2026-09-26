@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, Self, cast
 from uuid import uuid4
 
 from playwright.async_api import Error as PlaywrightError
@@ -17,6 +17,7 @@ from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager, BrowserManagerError
+from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
@@ -419,6 +420,24 @@ class SessionCreationController:
         if observability is not None:
             observability.set_target(target_queue_ids)
 
+    @classmethod
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        repository: SessionRepository,
+        handler: SessionCreationHandler,
+        observability: PrometheusMetrics | None = None,
+    ) -> Self:
+        return cls(
+            repository=repository,
+            handler=handler,
+            target_queue_ids=settings.target_queue_ids,
+            worker_count=settings.creation_workers,
+            queue_capacity=settings.creation_queue_capacity,
+            observability=observability,
+        )
+
     async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
         started = time.perf_counter()
         work_queue: asyncio.Queue[CreationWorkItem | None] = asyncio.Queue(
@@ -439,28 +458,37 @@ class SessionCreationController:
             self.metrics.initial_successful_unique_ids = existing
             self.metrics.successful_unique_ids = existing
             self._set_creation_activity(work_queue)
-            while self.metrics.successful_unique_ids < self._target and not (
-                stop_event is not None and stop_event.is_set()
-            ):
-                deficit = self._target - self.metrics.successful_unique_ids
-                desired_in_flight = min(self._worker_count, deficit)
-                while in_flight < desired_in_flight:
-                    sequence += 1
-                    await work_queue.put(CreationWorkItem(sequence=sequence))
-                    in_flight += 1
-                    self._set_creation_activity(work_queue)
+            while not (stop_event is not None and stop_event.is_set()):
+                while self.metrics.successful_unique_ids < self._target and not (
+                    stop_event is not None and stop_event.is_set()
+                ):
+                    deficit = self._target - self.metrics.successful_unique_ids
+                    desired_in_flight = min(self._worker_count, deficit)
+                    while in_flight < desired_in_flight:
+                        sequence += 1
+                        await work_queue.put(CreationWorkItem(sequence=sequence))
+                        in_flight += 1
+                        self._set_creation_activity(work_queue)
 
-                outcome = await result_queue.get()
-                in_flight -= 1
-                self._record(outcome)
+                    outcome = await result_queue.get()
+                    in_flight -= 1
+                    self._record(outcome)
+                    if self._observability is not None:
+                        elapsed = max(time.perf_counter() - started, 1e-9)
+                        self._observability.set_creation_rate(
+                            self.metrics.unique_ids_acquired / elapsed
+                        )
+
+                # Successful outcomes are persisted by the handler, so they can drive
+                # the hot loop without an O(target) sequence of COUNT queries. Verify
+                # against SQLite before declaring the target complete.
                 self.metrics.successful_unique_ids = (
                     await self._repository.count_successful_queue_ids()
                 )
-                if self._observability is not None:
-                    elapsed = max(time.perf_counter() - started, 1e-9)
-                    self._observability.set_creation_rate(
-                        self.metrics.unique_ids_acquired / elapsed
-                    )
+                if self.metrics.successful_unique_ids >= self._target or (
+                    stop_event is not None and stop_event.is_set()
+                ):
+                    break
 
             if in_flight:
                 for _ in range(in_flight):
@@ -526,6 +554,7 @@ class SessionCreationController:
         self.metrics.total_creation_duration_seconds += outcome.duration_seconds
         if outcome.kind is CreationOutcomeKind.SUCCESS:
             self.metrics.unique_ids_acquired += 1
+            self.metrics.successful_unique_ids += 1
         elif outcome.kind is CreationOutcomeKind.DUPLICATE:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:

@@ -121,12 +121,10 @@ async def run_phase2_resource_benchmark(
         mode=settings.session_mode,
         observability=metrics,
     )
-    controller = SessionCreationController(
+    controller = SessionCreationController.from_settings(
+        settings,
         repository=repository,
         handler=_RecordingCreator(creator, recorder),
-        target_queue_ids=settings.target_queue_ids,
-        worker_count=settings.creation_workers,
-        queue_capacity=settings.max_active_contexts,
         observability=metrics,
     )
     restorer = QueueSessionRestorer.from_settings(

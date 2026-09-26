@@ -115,26 +115,34 @@ python -m pytest -o addopts="" -m staging tests/staging
 See [the Phase 1 acceptance report](docs/phase1-acceptance-report.md) for the
 controlled evidence and the staging assumptions that remain unknown.
 
-## Current Phase 2 Readiness Defaults
+## Current Phase 3 Readiness Defaults
 
-- `TARGET_QUEUE_IDS=100`
+- `TARGET_QUEUE_IDS=1000`
 - `SESSION_MODE=HYBRID`
-- `CHROME_PROCESS_COUNT=1`
+- `CHROME_PROCESS_COUNT=2`
 - `MAX_CONTEXTS_PER_BROWSER=25`
-- `MAX_ACTIVE_CONTEXTS=25`
+- `MAX_ACTIVE_CONTEXTS=50`
 - `CREATION_WORKERS=1`
+- `CREATION_QUEUE_CAPACITY=5`
 - `MONITOR_WORKERS=1`
+- `MONITOR_QUEUE_CAPACITY=5`
+- `MONITOR_CLAIM_BATCH_SIZE=5`
 - `QUEUE_POLL_SECONDS=30`
 - adaptive pre-queue, active-queue, serviced-soon, and turn-started intervals
 - SQLite via `DATABASE_URL`
 - local browser state files in `STATE_DIRECTORY`
 - browser-based Queue-it extraction and bounded polling orchestration
 
-The Phase 2 profile can use two Chrome processes by setting
-`CHROME_PROCESS_COUNT=2` and choosing a per-browser limit whose combined capacity is at
-least `MAX_ACTIVE_CONTEXTS` (for example, 13 contexts per browser for a global limit of
-25). Creation and monitoring worker counts are independently configurable, but each
-count and their combined maximum demand must fit within the global context limit.
+The Phase 3 defaults are a conservative readiness profile: the 50-context ceiling is
+available for benchmarking, but the default one creation and one monitoring worker do
+not attempt to consume it. Structurally valid benchmark profiles use 2/3/4 Chrome
+processes with 25 contexts each for global limits of 50/75/100. Those limits are
+configuration candidates, not measured safe operating points. `MAX_ACTIVE_CONTEXTS`
+is capped at 100 for this phase. Creation and monitoring worker counts must fit within
+the global limit; both work queues are explicitly bounded and cannot exceed it.
+
+Phase 2 harnesses retain their exact 100-session gates. Override the Phase 3 defaults
+with the documented Phase 2 values when reproducing those benchmarks.
 
 ## Phase 2 HYBRID Restore Benchmark
 

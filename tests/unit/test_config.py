@@ -16,7 +16,10 @@ def settings_kwargs(**overrides: object) -> dict[str, object]:
         "MAX_CONTEXTS_PER_BROWSER": 25,
         "MAX_ACTIVE_CONTEXTS": 25,
         "CREATION_WORKERS": 1,
+        "CREATION_QUEUE_CAPACITY": 5,
         "MONITOR_WORKERS": 1,
+        "MONITOR_QUEUE_CAPACITY": 5,
+        "MONITOR_CLAIM_BATCH_SIZE": 5,
         "QUEUE_POLL_SECONDS": 30.0,
         "POLL_JITTER_SECONDS": 5.0,
         "HEADLESS": True,
@@ -28,15 +31,16 @@ def settings_kwargs(**overrides: object) -> dict[str, object]:
     return values
 
 
-def test_phase_two_defaults() -> None:
+def test_phase_three_defaults_are_conservative_and_bounded() -> None:
     settings = Settings(_env_file=None, STAGING_URL="https://staging.example.test")
 
-    assert settings.target_queue_ids == 100
+    assert settings.target_queue_ids == 1000
     assert settings.session_mode is SessionMode.HYBRID
-    assert settings.chrome_process_count == 1
+    assert settings.chrome_process_count == 2
     assert settings.max_contexts_per_browser == 25
-    assert settings.max_active_contexts == 25
+    assert settings.max_active_contexts == 50
     assert settings.creation_workers == 1
+    assert settings.creation_queue_capacity == 5
     assert settings.monitor_workers == 1
 
 
@@ -69,6 +73,52 @@ def test_valid_phase_two_two_browser_configuration() -> None:
     assert settings.creation_workers + settings.monitor_workers == 25
 
 
+@pytest.mark.parametrize(
+    (
+        "max_active_contexts",
+        "chrome_process_count",
+        "max_contexts_per_browser",
+        "creation_workers",
+        "monitor_workers",
+    ),
+    [
+        (50, 2, 25, 25, 25),
+        (75, 3, 25, 37, 38),
+        (100, 4, 25, 50, 50),
+    ],
+)
+def test_valid_phase_three_benchmark_profiles(
+    max_active_contexts: int,
+    chrome_process_count: int,
+    max_contexts_per_browser: int,
+    creation_workers: int,
+    monitor_workers: int,
+) -> None:
+    settings = Settings(
+        **settings_kwargs(
+            TARGET_QUEUE_IDS=1000,
+            CHROME_PROCESS_COUNT=chrome_process_count,
+            MAX_CONTEXTS_PER_BROWSER=max_contexts_per_browser,
+            MAX_ACTIVE_CONTEXTS=max_active_contexts,
+            CREATION_WORKERS=creation_workers,
+            CREATION_QUEUE_CAPACITY=max_active_contexts,
+            MONITOR_WORKERS=monitor_workers,
+            MONITOR_QUEUE_CAPACITY=max_active_contexts,
+            MONITOR_CLAIM_BATCH_SIZE=max_active_contexts,
+        )
+    )
+
+    assert settings.target_queue_ids == 1000
+    assert settings.max_active_contexts == max_active_contexts
+    assert (
+        settings.chrome_process_count * settings.max_contexts_per_browser
+        >= max_active_contexts
+    )
+    assert settings.creation_workers + settings.monitor_workers == max_active_contexts
+    assert settings.creation_queue_capacity == max_active_contexts
+    assert settings.monitor_queue_capacity == max_active_contexts
+
+
 def test_rejects_active_contexts_above_browser_capacity() -> None:
     with pytest.raises(ValidationError, match="MAX_ACTIVE_CONTEXTS"):
         Settings(**settings_kwargs(MAX_ACTIVE_CONTEXTS=26))
@@ -81,6 +131,18 @@ def test_rejects_two_browser_capacity_below_global_limit() -> None:
                 CHROME_PROCESS_COUNT=2,
                 MAX_CONTEXTS_PER_BROWSER=12,
                 MAX_ACTIVE_CONTEXTS=25,
+            )
+        )
+
+
+def test_rejects_phase_three_seventy_five_contexts_on_two_browsers() -> None:
+    with pytest.raises(ValidationError, match="MAX_ACTIVE_CONTEXTS"):
+        Settings(
+            **settings_kwargs(
+                TARGET_QUEUE_IDS=1000,
+                CHROME_PROCESS_COUNT=2,
+                MAX_CONTEXTS_PER_BROWSER=25,
+                MAX_ACTIVE_CONTEXTS=75,
             )
         )
 
@@ -136,7 +198,10 @@ def test_hybrid_and_transfer_only_mode_parsing() -> None:
         ("MAX_CONTEXTS_PER_BROWSER", 0),
         ("MAX_ACTIVE_CONTEXTS", 0),
         ("CREATION_WORKERS", 0),
+        ("CREATION_QUEUE_CAPACITY", 0),
         ("MONITOR_WORKERS", 0),
+        ("MONITOR_QUEUE_CAPACITY", 0),
+        ("MONITOR_CLAIM_BATCH_SIZE", 0),
         ("PROMETHEUS_PORT", 65_536),
     ],
 )
@@ -158,6 +223,48 @@ def test_rejects_monitor_workers_above_active_context_capacity() -> None:
 def test_rejects_combined_workers_above_active_context_capacity() -> None:
     with pytest.raises(ValidationError, match=r"CREATION_WORKERS \+ MONITOR_WORKERS"):
         Settings(**settings_kwargs(CREATION_WORKERS=13, MONITOR_WORKERS=13))
+
+
+def test_rejects_phase_three_context_limit_above_benchmark_range() -> None:
+    with pytest.raises(ValidationError, match="MAX_ACTIVE_CONTEXTS"):
+        Settings(
+            **settings_kwargs(
+                TARGET_QUEUE_IDS=1000,
+                CHROME_PROCESS_COUNT=4,
+                MAX_CONTEXTS_PER_BROWSER=25,
+                MAX_ACTIVE_CONTEXTS=101,
+            )
+        )
+
+
+def test_rejects_browser_process_count_above_phase_three_bound() -> None:
+    with pytest.raises(ValidationError, match="CHROME_PROCESS_COUNT"):
+        Settings(**settings_kwargs(CHROME_PROCESS_COUNT=5))
+
+
+def test_rejects_per_browser_contexts_above_phase_three_bound() -> None:
+    with pytest.raises(ValidationError, match="MAX_CONTEXTS_PER_BROWSER"):
+        Settings(**settings_kwargs(MAX_CONTEXTS_PER_BROWSER=26))
+
+
+def test_rejects_creation_queue_above_active_context_capacity() -> None:
+    with pytest.raises(ValidationError, match="CREATION_QUEUE_CAPACITY"):
+        Settings(**settings_kwargs(CREATION_QUEUE_CAPACITY=26))
+
+
+def test_rejects_monitor_queue_above_active_context_capacity() -> None:
+    with pytest.raises(ValidationError, match="MONITOR_QUEUE_CAPACITY"):
+        Settings(**settings_kwargs(MONITOR_QUEUE_CAPACITY=26))
+
+
+def test_rejects_claim_batch_above_monitor_queue_capacity() -> None:
+    with pytest.raises(ValidationError, match="MONITOR_CLAIM_BATCH_SIZE"):
+        Settings(
+            **settings_kwargs(
+                MONITOR_QUEUE_CAPACITY=10,
+                MONITOR_CLAIM_BATCH_SIZE=11,
+            )
+        )
 
 
 def test_rejects_unknown_session_mode() -> None:

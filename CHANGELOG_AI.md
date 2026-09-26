@@ -1062,3 +1062,107 @@ Phase 2 acceptance blockers remain unresolved.
 - Commit: intentionally not created for this verification prompt
 - Branch: `main`
 - Working tree: documentation-only verification changes
+
+## 2026-09-26 — Phase 3 Prompt 1 — 1,000-Session Readiness
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Prepare bounded local configuration and controller/scheduler mechanics for a 1,000
+persisted-session Phase 3 target without running staging load, migrating databases, or
+claiming that 50–100 active contexts are safe.
+
+### Changes Made
+
+- Changed readiness defaults to 1,000 HYBRID targets, two Chrome processes, 25 contexts
+  per browser, and a 50-context global ceiling while retaining one creation and one
+  monitoring worker by default.
+- Added explicit `CREATION_QUEUE_CAPACITY`; both creation and monitoring queue capacities
+  must remain within the global context ceiling. Capped Phase 3 context candidates at
+  100 and retained worker-sum, browser-capacity, and claim-batch validation.
+- Added structurally valid 50/75/100 candidate profiles using 2/3/4 Chrome processes at
+  25 contexts each. These are benchmark inputs, not safe operating-point claims.
+- Removed the creation controller's per-outcome target count query. Successful persisted
+  outcomes update the hot-loop count, with authoritative SQLite counts at startup and
+  completion.
+- Added 1,000-session tests proving 20 fixed creation workers/two target-count queries
+  and five fixed monitoring tasks/a 50-item queue; added a fake-based 100-context hard
+  cap across four Chrome slots.
+- Preserved Phase 1/2 harness gates and made their historical profiles explicit where
+  the Phase 3 defaults changed.
+- Documented Phase 3 bottleneck candidates and advanced the next task to Prompt 2.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `.env.example`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/harness/staging.py`
+- `src/queue_load_test/harness/phase2_resources.py`
+- `tests/unit/test_config.py`
+- `tests/unit/test_creation.py`
+- `tests/unit/test_monitoring.py`
+- `tests/unit/test_browser_manager.py`
+- `tests/unit/test_acceptance_report.py`
+- `tests/unit/test_restore_benchmark.py`
+
+### Tests Run
+
+- `.venv/bin/python -m pytest -q tests/unit/test_config.py tests/unit/test_creation.py tests/unit/test_monitoring.py tests/unit/test_browser_manager.py tests/unit/test_restore_benchmark.py` — 84 passed.
+- First full `.venv/bin/python -m pytest -q` — 1 failed, 228 passed, 4 deselected;
+  the Phase 1 gate fixture relied on the former one-browser default.
+- Final `.venv/bin/python -m pytest -q` — 232 passed, 4 deselected in 9.22 seconds.
+- Final focused repository/scheduler/configuration regression run — 112 passed in
+  1.10 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 41 source files.
+
+### Staging Tests
+
+- Phase 3 staging/load benchmarks — **NOT RUN**.
+- The four explicitly gated staging harnesses were deselected. No browser traffic was
+  sent to a staging environment.
+
+### Important Decisions
+
+- A 50-context default is a benchmark ceiling, not default demand: one creation and one
+  monitoring worker remain conservative until measurements justify increases.
+- 75 and 100 contexts are accepted only as explicit benchmark candidates. Values above
+  100 are rejected during Phase 3 readiness.
+- SQLite remains the backend. PostgreSQL and distributed workers require Prompt 2 or
+  later evidence and were not introduced.
+- The creation controller remains single-controller. Eliminating O(target) count queries
+  does not add cross-process target reservation semantics.
+
+### Known Issues
+
+- Runtime startup and `/status` load all sessions; the restore benchmark also loads its
+  population. Aggregate/paginated APIs may be needed after measurement.
+- SQLite uses one serialized connection, per-operation commits, and a count plus bounded
+  `BEGIN IMMEDIATE` claim per scheduler tick. Query plans and contention are unmeasured.
+- Browser context creation is awaited while the BrowserManager global lock is held.
+- Per-session structured events and per-state-file threaded fsync/replace operations may
+  create logging, thread-pool, or disk pressure at 1,000 sessions.
+- No Phase 3 throughput, latency, resource, fairness, backlog, restoration, or browser
+  stability result exists. Phase 2 staging evidence gaps also remain.
+
+### Follow-Up
+
+Phase 3 Prompt 2 — Repository and Scheduler Performance at 1,000 Sessions
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 1 implementation and documentation changes

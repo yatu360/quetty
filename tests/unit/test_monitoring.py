@@ -254,6 +254,45 @@ async def test_slow_workers_apply_backpressure_with_one_hundred_sessions(
     await repository.close()
 
 
+async def test_one_thousand_sessions_keep_fixed_workers_and_bounded_queue(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "one-thousand.sqlite3")
+    for index in range(1000):
+        await repository.create(make_session(f"session-{index:04d}"))
+    handler = SaturatedHandler(expected_active=5)
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=5,
+        queue_capacity=50,
+        claim_batch_size=50,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    await scheduler.start()
+    assert scheduler.worker_task_count == 5
+    assert await scheduler.schedule_due() == 50
+    await asyncio.wait_for(handler.all_started.wait(), timeout=1)
+    assert await scheduler.schedule_due() == 5
+
+    sessions = await repository.list()
+    assert scheduler.worker_task_count == 5
+    assert scheduler.metrics.currently_checking == 5
+    assert scheduler.queue_size == scheduler.queue_capacity == 50
+    assert sum(session.worker_id == "scheduler-1" for session in sessions) == 55
+    assert scheduler.metrics.due_backlog == 945
+
+    scheduler.stop_scheduling()
+    handler.release.set()
+    await scheduler.wait_until_idle()
+    await scheduler.shutdown()
+    await repository.close()
+
+
 async def test_fixed_worker_reparks_and_releases_lease(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
     await repository.create(make_session("due"))

@@ -256,6 +256,9 @@ async def test_staging_benchmark_requires_both_explicit_environment_gates(
     monkeypatch.delenv("RUN_PHASE2_RESTORE_BENCHMARK", raising=False)
     settings = Settings(
         STAGING_URL="https://staging.example.test",
+        TARGET_QUEUE_IDS=100,
+        CHROME_PROCESS_COUNT=1,
+        MAX_ACTIVE_CONTEXTS=25,
         DATABASE_URL=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
         STATE_DIRECTORY=tmp_path / "state",
     )
