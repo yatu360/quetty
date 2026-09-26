@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: planned, not started.**
+**Status: Prompt 1 completed on 2026-09-26; 10,000-session staging run not started.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -393,12 +393,17 @@ Goals:
 
 Planned prompt breakdown:
 
-1. **Phase 4 readiness and capacity model** — translate Phase 3 measurements into
-   required sessions/minute, checks/minute, browser capacity, storage, and failure
-   budgets.
-2. **Persistence architecture implementation (conditional)** — implement PostgreSQL
-   behind `SessionRepository` only if the Phase 3 decision requires it; include schema,
-   migrations, locking, and recovery tests.
+1. **Phase 4 readiness and capacity model** — **completed on 2026-09-26.**
+   `docs/phase4_readiness.md` records measured Phase 3 baselines, a 10.56–10.58-second
+   synthetic-only 10,000-check projection (21.11–21.16 seconds at an assumed 50%
+   utilization), and UNKNOWN real acquisition and monitoring durations. Existing
+   settings validated a 10,000 target with bounded Chrome, worker, queue, claim, and
+   lease values; the default remains 1,000. SQLite, shared storage, and distributed
+   worker needs remain conditional on later measurements.
+2. **Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness (next).** Examine measured
+   database and lease limits before deciding whether migration is justified. Keep
+   implementation conditional; any later PostgreSQL backend behind `SessionRepository`
+   would need schema, migration, locking, and recovery tests.
 3. **Shared state storage implementation (conditional)** — introduce an object/shared
    `StateStore` only when multiple nodes require it, retaining atomic/version-safe writes
    and sensitive-data controls.

@@ -9,8 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, closed with PARTIAL acceptance.
-- Last completed work: Phase 3 acceptance report, `docs/phase3-acceptance.md`.
+- Current phase: Phase 4 readiness; Prompt 1 complete. The 10,000-session target run
+  has not begun.
+- Last completed work: Phase 4 capacity model and 10,000-target configuration
+  validation, `docs/phase4_readiness.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -18,8 +20,12 @@ live monitoring.
   reliability remain unproven.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 4 Prompt 1 — readiness and capacity model**. This is a
-  planning/evidence task, not authorization to begin the 10,000-session run. No real
+- Phase 4 readiness: browser-backed creation duration and monitoring checks/s are
+  UNKNOWN. The 10,000-row synthetic monitoring projection is 10.56–10.58 seconds at
+  the measured Phase 3 synthetic rate, or 21.11–21.16 seconds with an assumed 50%
+  planning utilization. Neither is a real Queue-it sweep estimate. SQLite and
+  distribution decisions for the larger target remain UNKNOWN.
+- Next planned work: **Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness**. No real
   acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
@@ -161,8 +167,9 @@ by default. The controlled local benchmark exercised 2/3/4 Chrome processes at 2
 contexts each for 50/75/100 global ceilings. All three short in-memory-page cases
 completed with exact per-process accounting, zero recorded failures, and full cleanup.
 This is local installed-Chrome evidence, not a safe operating-point or Queue-it staging
-claim; the Phase 3 configuration rejects ceilings above 100.
-`BrowserManager` launches Chromium with
+claim; the current configuration rejects ceilings above 100. `TARGET_QUEUE_IDS=10000`
+validates with the existing bounded process/context/worker/queue/claim/lease settings,
+while the checked-in default remains 1,000. `BrowserManager` launches Chromium with
 `channel="chrome"`, selects the least-loaded connected process, and rejects allocations
 above either capacity. Browser slot IDs remain stable when only a failed Chrome process
 is replaced. The manager reports per-slot and aggregate capacity, and a context exposes
@@ -365,10 +372,9 @@ generated intervals.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **269 passed, 4 deselected
-  in 18.20 seconds**. The deselected tests were explicitly gated staging harnesses.
-  Phase 3 Prompt 5 focused monitoring/repository/benchmark tests reported 42 passed;
-  Ruff and strict mypy passed.
+- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **293 passed, 4 deselected
+  in 19.55 seconds**. The deselected tests were explicitly gated staging harnesses.
+  Ruff and strict mypy passed (50 source files).
 
 ## Phase 1 Acceptance Results
 
@@ -481,9 +487,10 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 - Phase 2 acceptance is documented in `docs/phase2-acceptance.md`; the missing staging
   evidence is a blocker to selecting the Phase 3 50–100-context operating range.
-- Phase 3 scale audit: `/status` and runtime startup load all sessions to calculate
-  status gauges; the Phase 2 restore harness also loads its full population. At 1,000
-  rows these paths need measurement and may need aggregate/paginated repository APIs.
+- Runtime startup and `/status` now use aggregate recovery counts instead of loading
+  all session rows. The Phase 2 restore harness still loads its full sample; an explicit
+  state consistency audit also scans all rows/files. Their 10,000-row costs are not
+  measured.
 - SQLite serializes each repository instance through one async lock and uses one commit
   per create/update/lease release. The scheduler still runs a due count followed by a
   bounded `BEGIN IMMEDIATE` claim when queue space exists. At 1,000 synthetic rows the
@@ -531,6 +538,11 @@ mechanics only; they are not Queue-it staging or performance measurements.
   findings, restart evidence, and local-storage decision for Prompt 6.
 - `docs/phase3-recovery.md` — 1,000-session repeated restart, lease recovery, identity
   preservation, scenario PASS/UNKNOWN results, and Prompt 7 limitations.
+- `docs/phase3-acceptance.md` — Phase 3 acceptance matrix and evidence limits.
+- `docs/phase4_readiness.md` — Phase 4 capacity model, measured baselines, conditional
+  persistence/distribution gates, and remaining unknowns.
+- `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
+  calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -669,10 +681,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 8 — Phase 3 Acceptance Report.** Consolidate configuration,
-repository, browser-capacity, acquisition, monitoring, storage, and recovery evidence;
-record explicit PASS/FAIL/UNKNOWN gates without treating synthetic results as real
-Queue-it scalability proof.
+**Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness.** Investigate persistence and
+leasing requirements using the Phase 4 capacity model and measured evidence; do not
+assume a database migration or multi-node design is needed.
 
 ## Instructions for Future AI Sessions
 

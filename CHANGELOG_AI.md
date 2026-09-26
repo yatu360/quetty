@@ -1903,3 +1903,69 @@ change.
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 acceptance report and project-status documentation
+
+## 2026-09-26 — Phase 4 Prompt 1 — Readiness and Capacity Model
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Prepare a measured-evidence capacity model for a 10,000-persisted-session target while
+retaining bounded Chrome capacity and deferring conditional backend decisions.
+
+### Changes Made
+
+- Added `docs/phase4_readiness.md` with Phase 3 baselines, creation and monitoring
+  formulas, a synthetic-only 10,000-check projection, resource and bottleneck audit,
+  and explicit PostgreSQL, shared-state, and distributed-worker decision gates.
+- Added pure `theoretical_throughput` and `projected_duration_seconds` helpers with
+  validation and an explicit planning-utilization input.
+- Validated `TARGET_QUEUE_IDS=10000` with the existing bounded Chrome, worker, queue,
+  claim-batch, and lease settings; retained the checked-in 1,000 default.
+- Updated `PROJECT_CONTEXT.md` and `PHASE_PLAN.md` to show Prompt 1 complete and name
+  Phase 4 Prompt 2 as the next task. Corrected stale startup/status scaling notes.
+
+### Measured Evidence and Decision
+
+- Phase 3 browser-free monitoring measured 944.98/947.26 synthetic checks/s. At an
+  unchanged rate, 10,000 synthetic checks would take 10.58/10.56 seconds; an assumed
+  50% utilization gives 21.16/21.11 seconds. Neither predicts a real Queue-it sweep.
+- No measured real creation duration or unique-ID acquisition rate exists, so the
+  10,000-ID acquisition time remains UNKNOWN. Real browser-backed check/s and sweep
+  duration are also UNKNOWN.
+- SQLite is adequate at the measured 1,000-row local scale. PostgreSQL, shared/object
+  state, multi-node need, and one-machine sufficiency at 10,000 remain UNKNOWN.
+- Short local 75/100-context cases crossed the conservative RAM-pressure indicator;
+  sustained Queue-it capacity remains UNKNOWN at 50, 75, and 100 contexts.
+
+### Tests and Checks Run
+
+- Focused capacity/configuration tests — 47 passed.
+- Full `.venv/bin/pytest -q` — 293 passed, 4 gated staging tests deselected in 19.55 s.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 50 source files.
+- `git diff --check` — passed.
+
+### Staging Tests
+
+- NOT RUN. This task made calculations and validated configuration only; no authorised
+  staging benchmark or 10,000-session run was started.
+
+### Known Issues
+
+- Real creation/restore/check rates, identity continuity, browser stability, and
+  recovery on the intended staging host are unmeasured.
+- SQLite write contention, actual state-file churn and size, and the required Phase 4
+  monitoring cadence have no 10,000-session measurements.
+
+### Follow-Up
+
+Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: readiness model, calculation helpers/tests, and project records

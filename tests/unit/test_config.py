@@ -44,6 +44,32 @@ def test_phase_three_defaults_are_conservative_and_bounded() -> None:
     assert settings.monitor_workers == 1
 
 
+def test_phase_four_target_uses_existing_bounded_benchmark_settings() -> None:
+    settings = Settings(
+        **settings_kwargs(
+            TARGET_QUEUE_IDS=10_000,
+            CHROME_PROCESS_COUNT=2,
+            MAX_CONTEXTS_PER_BROWSER=25,
+            MAX_ACTIVE_CONTEXTS=50,
+            CREATION_WORKERS=10,
+            CREATION_QUEUE_CAPACITY=10,
+            MONITOR_WORKERS=20,
+            MONITOR_QUEUE_CAPACITY=50,
+            MONITOR_CLAIM_BATCH_SIZE=50,
+            MONITOR_LEASE_SECONDS=180.0,
+        )
+    )
+
+    assert settings.target_queue_ids == 10_000
+    assert settings.chrome_process_count == 2
+    assert settings.max_contexts_per_browser == 25
+    assert settings.max_active_contexts == 50
+    assert settings.creation_workers == 10
+    assert settings.monitor_workers == 20
+    assert settings.monitor_claim_batch_size == settings.monitor_queue_capacity == 50
+    assert settings.monitor_lease_seconds == 180.0
+
+
 def test_valid_phase_two_single_browser_configuration() -> None:
     settings = Settings(**settings_kwargs())
 
