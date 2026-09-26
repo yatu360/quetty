@@ -282,6 +282,7 @@ async def test_transfer_identity_mismatch_is_observable_and_expected_id_is_uncha
     persisted = await repository.get(expected.session_id)
     assert persisted is not None
     assert persisted.queue_id == "queue-expected"
+    assert len(await repository.list()) == 1
     await repository.close()
 
 
@@ -386,4 +387,5 @@ async def test_hybrid_fallback_rejects_unexpected_queue_id(tmp_path: Path) -> No
     persisted = await repository.get(expected.session_id)
     assert persisted is not None
     assert persisted.queue_id == "queue-expected"
+    assert len(await repository.list()) == 1
     await repository.close()

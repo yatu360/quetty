@@ -3,12 +3,13 @@
 import asyncio
 import logging
 import signal
+from datetime import UTC, datetime
 from typing import Protocol
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
-from queue_load_test.repository import SessionRepository
+from queue_load_test.repository import RecoverySummary, SessionRepository
 from queue_load_test.scheduler import ParkedSessionScheduler
 
 logger = logging.getLogger(__name__)
@@ -41,10 +42,15 @@ class ApplicationRuntime:
         self._observability = observability
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[object]] = []
+        self._startup_recovery_summary: RecoverySummary | None = None
 
     @property
     def stopping(self) -> bool:
         return self._stop_event.is_set()
+
+    @property
+    def startup_recovery_summary(self) -> RecoverySummary | None:
+        return self._startup_recovery_summary
 
     def request_shutdown(self) -> None:
         """Stop producers; workers are drained by ``run`` within the timeout."""
@@ -57,10 +63,26 @@ class ApplicationRuntime:
         loop = asyncio.get_running_loop()
         installed_signals = self._install_signal_handlers(loop)
         try:
+            self._startup_recovery_summary = await self._repository.recovery_summary(
+                now=datetime.now(UTC)
+            )
+            summary = self._startup_recovery_summary
+            if self._observability is not None:
+                self._observability.sync_session_count_values(summary.status_counts)
+            log_event(
+                logger,
+                logging.INFO,
+                "startup_recovery_summary",
+                total_sessions=summary.total_persisted_sessions,
+                valid_queue_ids=summary.valid_queue_ids,
+                leased_sessions=summary.leased_sessions,
+                expired_leases=summary.expired_leases,
+                sessions_due=summary.sessions_due,
+                sessions_requiring_retry=summary.sessions_requiring_retry,
+                terminal_sessions=summary.terminal_sessions,
+            )
             await self._browser_manager.start()
             log_event(logger, logging.INFO, "application_runtime_started")
-            if self._observability is not None:
-                self._observability.sync_session_counts(await self._repository.list())
             self._tasks.append(
                 asyncio.create_task(
                     self._monitoring_scheduler.run(self._stop_event),

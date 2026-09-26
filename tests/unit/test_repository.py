@@ -318,6 +318,58 @@ async def test_sessions_survive_repository_restart(tmp_path: Path) -> None:
     await restarted_repository.close()
 
 
+async def test_recovery_summary_uses_aggregate_counts_for_mixed_sessions(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "recovery-summary.sqlite3")
+    due = make_session(
+        "due",
+        queue_id="queue-due",
+        status=QueueStatus.CONNECTION_LOST,
+        next_check_at=NOW,
+    )
+    due.last_error = "restore:NAVIGATION_FAILED"
+    expired_lease = make_session(
+        "expired-lease",
+        queue_id="queue-expired-lease",
+        status=QueueStatus.PARKED,
+        next_check_at=NOW,
+    )
+    expired_lease.worker_id = "old-worker"
+    expired_lease.lease_until = NOW - timedelta(seconds=1)
+    active_lease = make_session(
+        "active-lease",
+        queue_id="queue-active-lease",
+        status=QueueStatus.PARKED,
+        next_check_at=NOW,
+    )
+    active_lease.worker_id = "live-worker"
+    active_lease.lease_until = NOW + timedelta(seconds=30)
+    terminal = make_session(
+        "terminal",
+        queue_id="queue-terminal",
+        status=QueueStatus.ADMITTED,
+        next_check_at=None,
+    )
+    failed = make_session("failed", status=QueueStatus.FAILED, next_check_at=None)
+    for session in (due, expired_lease, active_lease, terminal, failed):
+        await repository.create(session)
+
+    summary = await repository.recovery_summary(now=NOW)
+
+    assert summary.total_persisted_sessions == 5
+    assert summary.valid_queue_ids == 4
+    assert summary.leased_sessions == 1
+    assert summary.expired_leases == 1
+    assert summary.sessions_due == 2
+    assert summary.sessions_requiring_retry == 1
+    assert summary.terminal_sessions == 2
+    assert summary.status_counts[QueueStatus.PARKED] == 2
+    assert summary.status_counts[QueueStatus.CONNECTION_LOST] == 1
+    assert not summary.state_scan_performed
+    await repository.close()
+
+
 async def test_progress_survives_repository_restart(tmp_path: Path) -> None:
     database = tmp_path / "sessions.sqlite3"
     first_repository = SQLiteSessionRepository(database)

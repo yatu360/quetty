@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from prometheus_client import CONTENT_TYPE_LATEST
 
@@ -73,13 +74,11 @@ class StatusSummaryProvider:
         self._metrics = metrics
 
     async def snapshot(self) -> StatusSummary:
-        sessions = await self._repository.list()
+        recovery = await self._repository.recovery_summary(now=datetime.now(UTC))
         self._metrics.set_target(self._settings.target_queue_ids)
-        self._metrics.sync_session_counts(sessions)
-        counts = {status: 0 for status in QueueStatus}
-        for session in sessions:
-            counts[session.status] += 1
-        acquired = await self._repository.count_successful_queue_ids()
+        self._metrics.sync_session_count_values(recovery.status_counts)
+        counts = recovery.status_counts
+        acquired = recovery.valid_queue_ids
         capacity = await self._browser_manager.capacity()
         self._metrics.set_browser_capacity(
             active_contexts=capacity.active_contexts,

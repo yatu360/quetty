@@ -355,8 +355,15 @@ Planned prompt breakdown:
    issues; tests prove detection of missing, orphaned, corrupt, duplicate/conflicting,
    and stale temporary files without deleting them. These synthetic files are not a
    claim about real Queue-it state size or 10,000-session suitability.
-7. **Failure recovery and restart at 1,000 sessions** — exercise interruption, expired
-   ownership, partial work, corrupt/missing state isolation, and bounded resume paths.
+7. **Failure recovery and restart at 1,000 sessions** — **completed synthetically on
+   2026-09-26; authorised staging restart NOT RUN.** Five repeated repository restarts
+   over 1,000 mixed sessions preserved all identity fields and terminal states. Startup
+   aggregation had 0.827 ms p50/0.907 ms p95 latency, and a five-worker/50-item bounded
+   scheduler recovered all 50 expired leases while leaving 50 active leases untouched.
+   Existing controlled tests cover interrupted creation/monitoring, browser/context
+   failure, transfer/state failure, missing/corrupt state, identity mismatch, and
+   613-to-1,000 continuation without replacement. Real Chrome/Queue-it restart behavior
+   remains UNKNOWN.
 8. **SQLite versus PostgreSQL decision** — use measured latency, locking, recovery, and
    operational requirements to decide whether migration is justified; do not migrate by
    default.

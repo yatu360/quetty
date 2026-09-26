@@ -371,6 +371,12 @@ class PrometheusMetrics:
         for status, gauge in self._session_gauges.items():
             gauge.set(counts[status])
 
+    def sync_session_count_values(self, counts: dict[QueueStatus, int]) -> None:
+        """Initialize lifecycle gauges from repository aggregate counts."""
+
+        for status, gauge in self._session_gauges.items():
+            gauge.set(counts.get(status, 0))
+
     def record_session_transition(
         self,
         previous: QueueStatus,

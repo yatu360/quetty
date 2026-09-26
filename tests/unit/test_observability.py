@@ -62,6 +62,8 @@ def test_structured_logging_includes_context_without_transfer_url() -> None:
         restore_method="TRANSFER",
         duration=0.25,
         error_type="TimeoutError",
+        total_sessions=1000,
+        expired_leases=25,
         transfer_url="https://secret.test/journey?q=queue-1",
     )
 
@@ -70,6 +72,8 @@ def test_structured_logging_includes_context_without_transfer_url() -> None:
     assert payload["queue_id"] == "queue-1"
     assert payload["browser_id"] == 0
     assert payload["restore_method"] == "TRANSFER"
+    assert payload["total_sessions"] == 1000
+    assert payload["expired_leases"] == 25
     assert "transfer_url" not in payload
     assert "secret.test" not in output.getvalue()
 

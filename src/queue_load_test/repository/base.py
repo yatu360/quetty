@@ -1,6 +1,7 @@
 """Persistence boundary for queue sessions."""
 
 import builtins
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -17,6 +18,27 @@ class SessionNotFoundError(RepositoryError):
 
 class QueueIdConflictError(RepositoryError):
     """Raised when a non-null Queue ID is already persisted."""
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverySummary:
+    """Low-cost aggregate view of persisted recovery state."""
+
+    generated_at: datetime
+    total_persisted_sessions: int
+    valid_queue_ids: int
+    leased_sessions: int
+    expired_leases: int
+    sessions_due: int
+    sessions_requiring_retry: int
+    terminal_sessions: int
+    status_counts: dict[QueueStatus, int]
+    missing_state_files: int | None = None
+    corrupt_state_files: int | None = None
+
+    @property
+    def state_scan_performed(self) -> bool:
+        return self.missing_state_files is not None and self.corrupt_state_files is not None
 
 
 class SessionRepository(Protocol):
@@ -41,6 +63,8 @@ class SessionRepository(Protocol):
     ) -> builtins.list[QueueSession]: ...
 
     async def count_successful_queue_ids(self) -> int: ...
+
+    async def recovery_summary(self, *, now: datetime) -> RecoverySummary: ...
 
     async def save_progress(self, progress: QueueProgress) -> QueueProgress: ...
 

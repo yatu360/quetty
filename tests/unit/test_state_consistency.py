@@ -50,6 +50,9 @@ async def test_consistency_checker_reports_missing_orphan_corrupt_and_conflictin
         (store.directory / ".interrupted.json.abc.tmp").write_text("partial", encoding="utf-8")
 
         report = await StateConsistencyChecker(repository, store).check()
+        recovery = await StateConsistencyChecker(repository, store).recovery_summary(
+            now=datetime(2026, 9, 26, 12, tzinfo=UTC)
+        )
 
         assert not report.is_consistent
         assert report.count("missing_state_file") == 1
@@ -60,6 +63,9 @@ async def test_consistency_checker_reports_missing_orphan_corrupt_and_conflictin
         assert report.count("stale_temporary_file") == 1
         assert report.temporary_files == 1
         assert report.to_dict()["database_sessions"] == 5
+        assert recovery.missing_state_files == 1
+        assert recovery.corrupt_state_files == 1
+        assert recovery.state_scan_performed
         assert (store.directory / "orphan.json").exists()
         assert (store.directory / ".interrupted.json.abc.tmp").exists()
     finally:

@@ -16,6 +16,11 @@ class TrackingRepository(SQLiteSessionRepository):
     def __init__(self, database: Path, order: list[str]) -> None:
         super().__init__(database)
         self.order = order
+        self.list_calls = 0
+
+    async def list(self, status: QueueStatus | None = None) -> list[QueueSession]:
+        self.list_calls += 1
+        return await super().list(status)
 
     async def close(self) -> None:
         self.order.append("database")
@@ -117,6 +122,11 @@ async def test_shutdown_finishes_active_work_and_preserves_restart_state(
     assert browser.started
     assert browser.stopped
     assert creation.stopped
+    assert repository.list_calls == 0
+    assert runtime.startup_recovery_summary is not None
+    assert runtime.startup_recovery_summary.total_persisted_sessions == 1
+    assert runtime.startup_recovery_summary.valid_queue_ids == 1
+    assert not runtime.startup_recovery_summary.state_scan_performed
     assert order[-2:] == ["browser", "database"]
 
     restarted = SQLiteSessionRepository(database)

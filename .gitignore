@@ -166,6 +166,8 @@ phase3-monitoring-synthetic*.sqlite3
 phase3-storage-benchmark*.json
 phase3-storage-synthetic*/
 state-consistency-report*.json
+phase3-recovery-benchmark*.json
+phase3-recovery-synthetic*/
 .phase2-concurrency-runs/
 .venv
 env/

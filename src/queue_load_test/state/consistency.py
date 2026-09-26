@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from queue_load_test.models import QueueSession, QueueStatus, SessionMode
-from queue_load_test.repository.base import SessionRepository
+from queue_load_test.repository.base import RecoverySummary, SessionRepository
 from queue_load_test.state.filesystem import FileSystemStateStore
 
 
@@ -62,6 +63,19 @@ class StateConsistencyChecker:
     async def check(self) -> StateConsistencyReport:
         sessions = await self._repository.list()
         return await asyncio.to_thread(self._check_filesystem, sessions)
+
+    async def recovery_summary(self, *, now: datetime) -> RecoverySummary:
+        """Add explicit filesystem findings to the aggregate database summary."""
+
+        database_summary, state_report = await asyncio.gather(
+            self._repository.recovery_summary(now=now),
+            self.check(),
+        )
+        return replace(
+            database_summary,
+            missing_state_files=state_report.count("missing_state_file"),
+            corrupt_state_files=state_report.count("corrupt_state_file"),
+        )
 
     def _check_filesystem(
         self,

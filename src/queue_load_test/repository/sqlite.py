@@ -17,6 +17,7 @@ from queue_load_test.models import (
 )
 from queue_load_test.repository.base import (
     QueueIdConflictError,
+    RecoverySummary,
     SessionNotFoundError,
 )
 
@@ -399,6 +400,76 @@ class SQLiteSessionRepository:
                 (QueueStatus.FAILED.value,),
             ).fetchone()
             return int(row["total"])
+
+        return await self._run(operation)
+
+    async def recovery_summary(self, *, now: datetime) -> RecoverySummary:
+        """Return startup recovery counts without materializing session rows."""
+
+        now_storage = _to_storage(now)
+        if now_storage is None:
+            raise ValueError("now is required")
+        status_columns = ",\n".join(
+            f"SUM(CASE WHEN status = '{status.value}' THEN 1 ELSE 0 END) "
+            f"AS status_{status.value.lower()}"
+            for status in QueueStatus
+        )
+        terminal_statuses = (
+            QueueStatus.ADMITTED.value,
+            QueueStatus.EXPIRED.value,
+            QueueStatus.FAILED.value,
+        )
+
+        def operation() -> RecoverySummary:
+            row = self._connect().execute(
+                f"""
+                SELECT
+                    COUNT(*) AS total_persisted_sessions,
+                    COUNT(DISTINCT CASE
+                        WHEN queue_id IS NOT NULL AND status != ? THEN queue_id
+                    END) AS valid_queue_ids,
+                    SUM(CASE WHEN lease_until > ? THEN 1 ELSE 0 END) AS leased_sessions,
+                    SUM(CASE WHEN lease_until IS NOT NULL AND lease_until <= ? THEN 1 ELSE 0 END)
+                        AS expired_leases,
+                    SUM(CASE WHEN {_DUE_FILTER_SQL} THEN 1 ELSE 0 END) AS sessions_due,
+                    SUM(CASE
+                        WHEN status NOT IN (?, ?, ?)
+                         AND (
+                            last_error IS NOT NULL
+                            OR status IN ('NEW', 'CREATING', 'CONNECTION_LOST')
+                         )
+                        THEN 1 ELSE 0
+                    END) AS sessions_requiring_retry,
+                    SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END)
+                        AS terminal_sessions,
+                    {status_columns}
+                FROM queue_sessions
+                """,
+                (
+                    QueueStatus.FAILED.value,
+                    now_storage,
+                    now_storage,
+                    now_storage,
+                    now_storage,
+                    *terminal_statuses,
+                    *terminal_statuses,
+                ),
+            ).fetchone()
+            status_counts = {
+                status: int(row[f"status_{status.value.lower()}"] or 0)
+                for status in QueueStatus
+            }
+            return RecoverySummary(
+                generated_at=now,
+                total_persisted_sessions=int(row["total_persisted_sessions"]),
+                valid_queue_ids=int(row["valid_queue_ids"]),
+                leased_sessions=int(row["leased_sessions"] or 0),
+                expired_leases=int(row["expired_leases"] or 0),
+                sessions_due=int(row["sessions_due"] or 0),
+                sessions_requiring_retry=int(row["sessions_requiring_retry"] or 0),
+                terminal_sessions=int(row["terminal_sessions"] or 0),
+                status_counts=status_counts,
+            )
 
         return await self._run(operation)
 

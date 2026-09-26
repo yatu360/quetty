@@ -15,6 +15,15 @@ _CONTEXT_FIELDS = (
     "restore_method",
     "duration",
     "error_type",
+    "total_sessions",
+    "valid_queue_ids",
+    "leased_sessions",
+    "expired_leases",
+    "sessions_due",
+    "sessions_requiring_retry",
+    "terminal_sessions",
+    "missing_state_files",
+    "corrupt_state_files",
 )
 
 

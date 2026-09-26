@@ -233,6 +233,21 @@ temporary files. See
 [the Phase 3 storage benchmark](docs/phase3-storage-benchmark.md) for measured results
 and the explicit cleanup policy.
 
+## Phase 3 Synthetic Recovery Benchmark
+
+The recovery benchmark seeds 1,000 mixed persisted sessions, performs repeated process-
+level repository reopen cycles, verifies a stable identity digest and terminal states,
+then resumes a bounded scheduler batch from expired leases:
+
+```powershell
+queue-load-test-phase3-recovery --database phase3-recovery-synthetic/sessions.sqlite3 --state-directory phase3-recovery-synthetic/state --restarts 5 --report phase3-recovery-benchmark.json
+```
+
+Normal runtime startup uses one aggregate SQLite recovery query and does not scan all
+state files. Missing/corrupt state counts require the explicit state consistency scan.
+See [the Phase 3 recovery benchmark](docs/phase3-recovery.md) for scenario outcomes and
+the boundary between synthetic PASS results and real-staging UNKNOWN results.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

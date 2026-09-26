@@ -1720,3 +1720,121 @@ Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000 Sessions
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 6 implementation, tests, benchmark, and documentation
+
+## 2026-09-26 — Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000 Sessions
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Validate identity-preserving restart, shutdown, lease recovery, browser failure
+handling, restoration failure isolation, and partial-target continuation with an
+approximately 1,000-session persisted population.
+
+### Changes Made
+
+- Added `RecoverySummary` and an aggregate SQLite `recovery_summary()` query covering
+  total persisted sessions, valid Queue IDs, active/expired leases, due sessions,
+  retry candidates, terminal sessions, and lifecycle status counts.
+- Changed `ApplicationRuntime` startup and `/status` snapshots to use aggregate counts
+  instead of loading every session row into Python solely to initialize gauges. Startup
+  records the summary before Chrome starts and exposes it for diagnostics.
+- Extended `PrometheusMetrics` with aggregate status-count initialization and added
+  approved low-cardinality recovery fields to structured logs.
+- Added a 1,000-session synthetic recovery harness with repeated repository reopen,
+  stable identity digest checks, terminal-state snapshots, explicit state consistency,
+  expired-lease recovery, and bounded scheduler resumption.
+- Added `queue-load-test-phase3-recovery` and documented the distinction between the
+  low-cost startup summary and the explicit full state-directory integrity scan.
+- Added tests for aggregate recovery counts, repeated 1,000-session restart,
+  interrupted runtime monitoring, identity preservation, terminal-state preservation,
+  restoration failure isolation, and structured recovery logging.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase3_recovery.py`
+- `tests/unit/test_phase3_recovery.py`
+- `docs/phase3-recovery.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PHASE_PLAN.md`
+- `PROJECT_CONTEXT.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/metrics/logging.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/metrics/status.py`
+- `src/queue_load_test/repository/__init__.py`
+- `src/queue_load_test/repository/base.py`
+- `src/queue_load_test/repository/sqlite.py`
+- `src/queue_load_test/runtime.py`
+- `src/queue_load_test/state/consistency.py`
+- `tests/unit/test_observability.py`
+- `tests/unit/test_repository.py`
+- `tests/unit/test_restoration.py`
+- `tests/unit/test_runtime.py`
+- `tests/unit/test_state_consistency.py`
+
+### Tests and Checks Run
+
+- Focused recovery/repository/runtime/monitoring/creation/restoration/browser tests —
+  95 passed in 4.38 seconds.
+- Full non-staging suite — 281 passed, 4 deselected in 19.20 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 49 source files.
+- `git diff --check` — passed.
+
+### Synthetic Recovery Results
+
+- Population: 1,000 persisted sessions, 960 valid Queue IDs, 960 associated HYBRID
+  state files, 50 active leases, 50 expired leases, 800 due sessions, 50 retry
+  candidates, and 100 terminal sessions.
+- Five repeated repository restarts preserved every stable identity field and all
+  terminal states. Startup initialize-plus-summary latency was 0.827 ms p50,
+  0.907 ms p95, and 0.925 ms maximum.
+- A five-worker, 50-item bounded scheduler recovered exactly the 50 expired leases,
+  processed 50 checks, reduced due work from 800 to 750, and left the 50 active leases
+  untouched. Queue peak was 50.
+- No Queue ID replacement, mass creation, missing state, or corrupt state occurred.
+
+### Scenario Outcomes
+
+- Synthetic PASS: interrupted acquisition, interrupted monitoring, repeated restart,
+  expired lease recovery, context/browser failure isolation, transfer/state restore
+  failures, missing/corrupt state, identity mismatch, and partial target continuation.
+- Authorised staging restart: **NOT RUN**. No `.env` or staging gates were available.
+  Real Queue-it transfer continuity, real Chrome crash recovery, power-loss behavior,
+  and host-level restart timing remain UNKNOWN.
+
+### Important Decisions
+
+- Normal startup performs one aggregate SQLite query and does not scan all state files.
+  Missing/corrupt state counts are explicitly “not scanned” until the operator invokes
+  the consistency checker or a recovery harness that requests the full audit.
+- Expired leases are recoverable through the existing bounded claim path. Active leases
+  are not stolen before expiry. Graceful shutdown still releases owned leases; a hard
+  process kill relies on `LEASE_SECONDS` expiry.
+- Existing successful Queue IDs remain authoritative. Failed restore or identity
+  mismatch updates the existing session outcome and never creates a replacement identity.
+
+### Known Issues / Unknowns
+
+- Real Queue-it and Chrome restart behavior remains unmeasured.
+- A crash between external Queue-it identity acquisition and the local SQLite commit,
+  abrupt power loss, disk exhaustion, and filesystem corruption are untested.
+- SQLite remains a single-host serialized writer; distributed leasing is out of scope.
+
+### Follow-Up
+
+Phase 3 Prompt 8 — Phase 3 Acceptance Report
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 7 implementation, tests, benchmark, and documentation

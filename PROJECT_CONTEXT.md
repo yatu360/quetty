@@ -9,16 +9,15 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–6 complete locally.
-- Last completed work: Phase 3 Prompt 6 — synthetic SQLite/local-state storage
-  benchmark, consistency checking, and restart reconstruction at 1,000 sessions.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–7 complete locally.
+- Last completed work: Phase 3 Prompt 7 — synthetic recovery, repeated restart, and
+  expired-lease resumption across 1,000 persisted sessions.
 - Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
   and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
   benchmark has run, and Phase 2 measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000
-  Sessions**.
+- Next planned work: **Phase 3 Prompt 8 — Phase 3 Acceptance Report**.
   No real acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
@@ -130,9 +129,9 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 - `SQLiteSessionRepository` uses the path from `DATABASE_URL`; the default is
   `sqlite:///queue_load_test.sqlite3`.
 - The repository protocol exposes create, update, get, list, successful-ID count,
-  progress operations, eligible due-session count, bounded due-session claims, lease
-  release, and close. This is the boundary intended to permit a future PostgreSQL
-  implementation.
+  progress operations, aggregate recovery summary, eligible due-session count, bounded
+  due-session claims, lease release, and close. This is the boundary intended to permit
+  a future PostgreSQL implementation.
 - SQLite has separate `queue_sessions` and `queue_progress` tables, a unique nullable
   `queue_id`, and lightweight `worker_id`/`lease_until` fields. The due-session query
   uses a partial ordered expression index on
@@ -147,7 +146,9 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   on the event loop.
 - `StateConsistencyChecker` performs an explicitly non-mutating database/filesystem
   audit in a worker thread. It reports missing, orphaned, corrupt, duplicate/conflicting,
-  and stale temporary state paths; cleanup is never automatic.
+  and stale temporary state paths; cleanup is never automatic. Its optional recovery
+  summary adds missing/corrupt counts to the database aggregates, while normal startup
+  deliberately avoids this full directory scan.
 - SQLite files, `.browser-state/`, and generated Phase 1 JSON reports are git-ignored.
 
 ## Browser Model
@@ -297,6 +298,9 @@ generated intervals.
   restart; monitor retry policy can retry through healthy capacity.
 - SIGINT/SIGTERM stop producers, drain in-flight work within a timeout, release queued
   leases, close contexts/Chrome, and close SQLite. Persisted journeys are not deleted.
+- Runtime startup uses one aggregate SQLite query for persisted totals, valid Queue IDs,
+  active/expired leases, due work, retry candidates, terminal sessions, and lifecycle
+  counts. It no longer loads every session row into Python to initialize gauges.
 
 ## Observability
 
@@ -456,6 +460,15 @@ mechanics only; they are not Queue-it staging or performance measurements.
   `storage_state` sizing. Local-disk behavior under concurrent browser refreshes,
   sustained churn, disk exhaustion, power loss, network filesystems, and 10,000 files
   remains unmeasured.
+- The 1,000-session recovery benchmark reopened SQLite five times with 0.827 ms p50 and
+  0.907 ms p95 initialize-plus-summary latency. Stable identity fields and 100 terminal
+  states remained unchanged. A bounded five-worker/50-item scheduler then recovered the
+  exact 50 expired leases, processed 50 checks, left 50 unexpired leases untouched, and
+  preserved all 960 valid Queue IDs and state associations.
+- Interrupted acquisition/monitoring, browser/context failure, transfer/state failure,
+  missing/corrupt state, identity mismatch, and partial-target continuation pass with
+  controlled local doubles. Their real Queue-it/Chrome recovery outcomes remain UNKNOWN
+  because no authorised staging restart was run.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
@@ -514,6 +527,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   synthetic results, resource observations, and Queue-it UNKNOWN fields for Prompt 5.
 - `docs/phase3-storage-benchmark.md` — 1,000-file footprint and latency, consistency
   findings, restart evidence, and local-storage decision for Prompt 6.
+- `docs/phase3-recovery.md` — 1,000-session repeated restart, lease recovery, identity
+  preservation, scenario PASS/UNKNOWN results, and Prompt 7 limitations.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -637,6 +652,12 @@ Read-only state consistency report for an existing database:
 queue-load-test-state-check --database queue_load_test.sqlite3 --state-directory .browser-state --report state-consistency-report.json
 ```
 
+Local synthetic Phase 3 recovery benchmark:
+
+```powershell
+queue-load-test-phase3-recovery --database phase3-recovery-synthetic/sessions.sqlite3 --state-directory phase3-recovery-synthetic/state --restarts 5 --report phase3-recovery-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -646,9 +667,10 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000 Sessions.** Exercise
-interrupted creation/monitoring, expired leases, missing or corrupt state, browser loss,
-partial progress, and bounded restart/resume behavior without identity replacement.
+**Phase 3 Prompt 8 — Phase 3 Acceptance Report.** Consolidate configuration,
+repository, browser-capacity, acquisition, monitoring, storage, and recovery evidence;
+record explicit PASS/FAIL/UNKNOWN gates without treating synthetic results as real
+Queue-it scalability proof.
 
 ## Instructions for Future AI Sessions
 
