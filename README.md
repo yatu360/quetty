@@ -228,10 +228,13 @@ or repairing anything, run:
 queue-load-test-state-check --database queue_load_test.sqlite3 --state-directory .browser-state
 ```
 
-The checker reports missing, orphaned, corrupt, duplicate/conflicting, and stale
-temporary files. See
+The checker reports missing, orphaned, corrupt, unreadable, other-session (mismatched),
+duplicate/conflicting, insecure-permission, and stale temporary files, and counts
+legacy pre-envelope state files. See
 [the Phase 3 storage benchmark](docs/phase3-storage-benchmark.md) for measured results
-and the explicit cleanup policy.
+and the explicit cleanup policy, and
+[Phase 4 state storage readiness](docs/phase4_state_storage_readiness.md) for the
+10,000-file results and the state document format.
 
 ## Phase 3 Synthetic Recovery Benchmark
 

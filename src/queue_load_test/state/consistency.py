@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import os
+import stat
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from queue_load_test.models import QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository.base import RecoverySummary, SessionRepository
-from queue_load_test.state.filesystem import FileSystemStateStore
+from queue_load_test.state.base import (
+    StateCorruptError,
+    StateSessionMismatchError,
+    StateUnreadableError,
+)
+from queue_load_test.state.filesystem import FileSystemStateStore, read_state_document
+
+_UNUSABLE_STATE_KINDS = frozenset(
+    {"corrupt_state_file", "unreadable_state_file", "mismatched_state_file"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +43,7 @@ class StateConsistencyReport:
     state_files: int
     temporary_files: int
     findings: tuple[StateConsistencyFinding, ...]
+    legacy_state_files: int = 0
 
     @property
     def is_consistent(self) -> bool:
@@ -49,7 +60,8 @@ class StateConsistencyChecker:
     """Compare repository state references with one local state directory.
 
     The scan is intentionally report-only. It never removes or repairs files, and all
-    filesystem traversal and JSON parsing run in a worker thread.
+    filesystem traversal and JSON parsing run in a worker thread. Findings carry paths
+    and session IDs only, never state contents, Queue IDs, or transfer URLs.
     """
 
     def __init__(
@@ -74,7 +86,9 @@ class StateConsistencyChecker:
         return replace(
             database_summary,
             missing_state_files=state_report.count("missing_state_file"),
-            corrupt_state_files=state_report.count("corrupt_state_file"),
+            corrupt_state_files=sum(
+                finding.kind in _UNUSABLE_STATE_KINDS for finding in state_report.findings
+            ),
         )
 
     def _check_filesystem(
@@ -82,6 +96,7 @@ class StateConsistencyChecker:
         sessions: list[QueueSession],
     ) -> StateConsistencyReport:
         directory = self._state_store.directory
+        normalize = _PathNormalizer()
         paths_to_sessions: dict[Path, list[str]] = {}
         display_paths: dict[Path, Path] = {}
         required_paths: set[Path] = set()
@@ -89,21 +104,21 @@ class StateConsistencyChecker:
         findings: list[StateConsistencyFinding] = []
 
         for session in sessions:
-            normalized = _normalized(session.state_path)
+            normalized = normalize(session.state_path)
             paths_to_sessions.setdefault(normalized, []).append(session.session_id)
             display_paths.setdefault(normalized, session.state_path)
             if _requires_state(session):
                 required_paths.add(normalized)
                 required_session_count += 1
 
-            expected = _normalized(self._state_store.path_for(session.session_id))
-            if session.mode is SessionMode.HYBRID and normalized != expected:
+            expected_path = self._state_store.path_for(session.session_id)
+            if session.mode is SessionMode.HYBRID and normalized != normalize(expected_path):
                 findings.append(
                     StateConsistencyFinding(
                         kind="conflicting_state_path",
                         state_path=str(session.state_path),
                         session_ids=(session.session_id,),
-                        detail=f"expected {self._state_store.path_for(session.session_id)}",
+                        detail=f"expected {expected_path}",
                     )
                 )
 
@@ -118,10 +133,13 @@ class StateConsistencyChecker:
                 )
 
         state_files, temporary_files = _directory_files(directory)
-        state_files_by_normalized = {_normalized(path): path for path in state_files}
+        state_files_by_normalized = {normalize(path): path for path in state_files}
+
+        def exists(normalized: Path) -> bool:
+            return normalized in state_files_by_normalized or normalized.is_file()
 
         for normalized in sorted(required_paths, key=str):
-            if not normalized.is_file():
+            if not exists(normalized):
                 findings.append(
                     StateConsistencyFinding(
                         kind="missing_state_file",
@@ -130,7 +148,9 @@ class StateConsistencyChecker:
                     )
                 )
 
-        for normalized, path in sorted(state_files_by_normalized.items(), key=lambda item: str(item[0])):
+        for normalized, path in sorted(
+            state_files_by_normalized.items(), key=lambda item: str(item[0])
+        ):
             if normalized not in paths_to_sessions:
                 findings.append(
                     StateConsistencyFinding(
@@ -141,17 +161,21 @@ class StateConsistencyChecker:
 
         candidate_files = dict(state_files_by_normalized)
         for normalized in paths_to_sessions:
-            if normalized.is_file():
-                candidate_files.setdefault(normalized, display_paths[normalized])
+            if normalized not in candidate_files and normalized.is_file():
+                candidate_files[normalized] = display_paths[normalized]
+        legacy_state_files = 0
         for normalized, path in sorted(candidate_files.items(), key=lambda item: str(item[0])):
-            error = _json_error(path)
-            if error is not None:
+            referencing = tuple(sorted(paths_to_sessions.get(normalized, ())))
+            expected_session_id = referencing[0] if len(referencing) == 1 else path.stem
+            kind, detail, legacy = _inspect_state_file(path, expected_session_id)
+            legacy_state_files += legacy
+            if kind is not None:
                 findings.append(
                     StateConsistencyFinding(
-                        kind="corrupt_state_file",
+                        kind=kind,
                         state_path=str(path),
-                        session_ids=tuple(sorted(paths_to_sessions.get(normalized, ()))),
-                        detail=error,
+                        session_ids=referencing,
+                        detail=detail,
                     )
                 )
 
@@ -172,6 +196,7 @@ class StateConsistencyChecker:
             state_files=len(state_files),
             temporary_files=len(temporary_files),
             findings=tuple(findings),
+            legacy_state_files=legacy_state_files,
         )
 
 
@@ -183,32 +208,62 @@ def _requires_state(session: QueueSession) -> bool:
     )
 
 
-def _normalized(path: Path) -> Path:
-    return path.expanduser().resolve(strict=False)
+class _PathNormalizer:
+    """Resolve paths to absolute form, resolving each parent directory only once.
+
+    Resolving every path individually cost about half of a 10,000-file scan in
+    ``lstat`` calls. The final component is not followed, so a symlinked state file is
+    compared by its own location rather than its target.
+    """
+
+    def __init__(self) -> None:
+        self._parents: dict[Path, Path] = {}
+
+    def __call__(self, path: Path) -> Path:
+        path = path.expanduser()
+        parent = self._parents.get(path.parent)
+        if parent is None:
+            parent = path.parent.resolve(strict=False)
+            self._parents[path.parent] = parent
+        return parent / path.name
 
 
 def _directory_files(directory: Path) -> tuple[list[Path], list[Path]]:
     try:
-        entries = list(directory.iterdir())
+        with os.scandir(directory) as entries:
+            files = [Path(entry.path) for entry in entries if entry.is_file()]
     except FileNotFoundError:
         return [], []
-    state_files = sorted(
-        (path for path in entries if path.is_file() and path.suffix == ".json"),
-        key=str,
-    )
-    temporary_files = sorted(
-        (path for path in entries if path.is_file() and path.name.endswith(".tmp")),
-        key=str,
-    )
+    state_files = sorted((path for path in files if path.suffix == ".json"), key=str)
+    temporary_files = sorted((path for path in files if path.name.endswith(".tmp")), key=str)
     return state_files, temporary_files
 
 
-def _json_error(path: Path) -> str | None:
+def _inspect_state_file(path: Path, session_id: str) -> tuple[str | None, str | None, bool]:
+    """Return ``(finding kind, detail, legacy)`` for one state file."""
+
     try:
-        with path.open(encoding="utf-8") as handle:
-            value = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        return type(exc).__name__
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        return "browser state is not a JSON object with string keys"
-    return None
+        document = read_state_document(path, session_id)
+    except FileNotFoundError:
+        return "missing_state_file", "removed during scan", False
+    except StateUnreadableError as exc:
+        return "unreadable_state_file", _cause_name(exc), False
+    except StateSessionMismatchError:
+        return "mismatched_state_file", "document belongs to another session", False
+    except StateCorruptError as exc:
+        return "corrupt_state_file", str(exc), False
+    try:
+        mode = path.stat().st_mode
+    except OSError as exc:
+        return "unreadable_state_file", type(exc).__name__, document.legacy
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        return (
+            "insecure_state_permissions",
+            f"mode {stat.S_IMODE(mode):04o}; expected 0600",
+            document.legacy,
+        )
+    return None, None, document.legacy
+
+
+def _cause_name(exc: BaseException) -> str:
+    return type(exc.__cause__).__name__ if exc.__cause__ is not None else type(exc).__name__

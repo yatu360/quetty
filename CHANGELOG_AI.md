@@ -2054,3 +2054,92 @@ Phase 4 Prompt 3 — Shared State Storage Readiness
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: lease fencing, repository contract, readiness report, and project records
+
+## 2026-09-26 — Phase 4 Prompt 3 — Shared State Storage Readiness
+
+### Agent / Model
+
+Claude Code (Claude Opus 5.5)
+
+### Goal
+
+Make browser-state storage ready for Phase 4 scale, deciding from the distribution gate
+whether shared/object storage is needed, and validate local storage at 10,000 files.
+
+### Changes Made
+
+- Confirmed that the Phase 4 Prompt 1 distribution decision is still UNKNOWN need with no
+  measured single-host shortfall. Phase 4 stays single-machine; `FileSystemStateStore`
+  remains the only store, and shared/object storage is deferred. No cloud dependency was
+  added.
+- State files are now a self-describing envelope (`format`, `version`, `session_id`,
+  `sha256`, `state`). `load()` rejects another session's document
+  (`StateSessionMismatchError`), detects invalid, tampered, or unknown-format documents
+  (`StateCorruptError`), and distinguishes unreadable files (`StateUnreadableError`).
+  All errors are `StateStoreError` subclasses, and messages never include state
+  contents. Plain pre-envelope files still load and are counted as legacy.
+- `save()` now fsyncs the state directory after the atomic rename. The `StateStore`
+  protocol is unchanged.
+- The consistency audit resolves each parent directory once and uses `os.scandir`.
+  Profiling had shown per-path `resolve()` took about half of a 10,000-file scan. It
+  now also reports `unreadable_state_file`, `mismatched_state_file`, and
+  `insecure_state_permissions`, plus `legacy_state_files`, and remains report-only.
+- `recovery_summary()` counts corrupt, unreadable, and mismatched files as
+  `corrupt_state_files`.
+- The storage benchmark now records allocated disk bytes, directory traversal time,
+  and concurrent save/load throughput (`--concurrency`, default 20).
+- Added `docs/phase4_state_storage_readiness.md` and updated `PROJECT_CONTEXT.md`,
+  `PHASE_PLAN.md`, `README.md`, and `.gitignore` (Phase 4 storage benchmark outputs).
+
+### Synthetic 10,000-State Result
+
+Two runs on local APFS (macOS 26.5.1, Python 3.14.7), 20-way concurrency:
+
+- 10,000 files; 14,160,000 logical bytes (1,416 B average; baseline format 1,249 B);
+  40,960,000 bytes allocated, unchanged from the baseline format at one 4 KiB block
+  per file.
+- Save 5,310.7/5,296.4 files/s; p50/p95 0.179/0.252 and 0.179/0.253 ms. Pre-change
+  baseline was 5,351.6/s, 0.176/0.241 ms.
+- Load 15,798.3/15,895.4 files/s; p50/p95 0.063/0.076 and 0.062/0.075 ms. Baseline was
+  17,672.7/s, 0.055/0.069 ms.
+- Concurrent save ×20: 7,597.7/7,608.9 files/s, p95 3.724/3.693 ms. Concurrent load ×20:
+  15,812.6/15,731.4 files/s.
+- Directory traversal 21.6/18.2 ms. Report-only audit 414–447 ms (baseline 670–677 ms)
+  with zero findings before and after restart.
+
+### Tests and Checks Run
+
+- State, storage-benchmark, restoration, recovery, and creation tests — 64 passed.
+- Full `.venv/bin/pytest -q` — 315 passed, 4 gated staging tests deselected in 21.96 s.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 50 source files.
+- `git diff --check` — passed.
+
+### Shared-Store and Staging Tests
+
+- NOT RUN. No shared store was implemented and no object-storage backend is configured.
+  No shared-store latency, retry, or missing-object result is claimed. No staging
+  traffic was sent.
+
+### Known Issues
+
+- Real `storage_state` size and churn, shared or network filesystems, Linux
+  filesystems, and disk-full behavior are unmeasured. macOS `fsync` is not a
+  physical-media flush.
+- Legacy plain files have no embedded identity until rewritten.
+- Concurrent saves of one session are last-writer-wins; ownership depends on the
+  repository lease.
+- A crash between the state save and the creation commit can leave an orphan, which is
+  reported but never deleted automatically.
+- A shared store needs a URI/key instead of the `Path`-typed `state_path`, plus
+  conditional puts and transient-error retries.
+
+### Follow-Up
+
+Phase 4 Prompt 4 — Distributed Worker Gate and Implementation
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: state envelope, audit improvements, benchmark fields, tests, and docs

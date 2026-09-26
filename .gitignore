@@ -168,6 +168,8 @@ phase3-storage-synthetic*/
 state-consistency-report*.json
 phase3-recovery-benchmark*.json
 phase3-recovery-synthetic*/
+phase4-storage-benchmark*.json
+phase4-storage-synthetic*/
 .phase2-concurrency-runs/
 .venv
 env/

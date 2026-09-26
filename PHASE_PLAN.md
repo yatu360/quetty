@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–2 completed on 2026-09-26; 10,000-session staging run not started.**
+**Status: Prompts 1–3 completed on 2026-09-26; 10,000-session staging run not started.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -407,13 +407,18 @@ Planned prompt breakdown:
    index. The repository protocol now includes initialization, and leased/unleased
    updates are owner-fenced against stale snapshots. No measurement justifies a second
    backend yet; PostgreSQL and distributed `SKIP LOCKED` behavior remain UNKNOWN.
-3. **Phase 4 Prompt 3 — Shared State Storage Readiness (next)** — measure local state
-   behavior and introduce an object/shared `StateStore` only if multiple nodes or
-   storage evidence requires it, retaining atomic/version-safe writes and sensitive-data
-   controls.
-4. **Distributed worker leasing (conditional)** — add creation/monitor workers and
-   ownership/heartbeat behavior only after backend prerequisites and failure semantics
-   are proven.
+3. **Phase 4 Prompt 3 — Shared State Storage Readiness** — **completed on 2026-09-26
+   with shared storage deferred.** Phase 4 remains single-machine, so
+   `FileSystemStateStore` stays active. At 10,000 synthetic files, save p95 was
+   0.25 ms, load p95 0.08 ms, 20-way concurrent saves about 7,600/s, and the
+   report-only audit took about 0.4 s with zero findings. State files now embed their
+   session ID and a digest, and the audit reports unreadable, mismatched, and
+   insecure-permission files. Shared-store prerequisites are recorded in
+   `docs/phase4_state_storage_readiness.md`.
+4. **Phase 4 Prompt 4 — Distributed Worker Gate and Implementation (next)** — decide
+   from measured evidence whether distribution is required; add creation/monitor
+   workers and ownership/heartbeat behavior only after backend prerequisites and failure
+   semantics are proven.
 5. **10,000-session acquisition benchmark** — run bounded acquisition with throughput,
    reliability, and resource evidence.
 6. **10,000-session monitoring/backlog benchmark** — validate adaptive cadence,

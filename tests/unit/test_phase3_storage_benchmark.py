@@ -28,6 +28,11 @@ async def test_storage_benchmark_measures_one_thousand_files_and_restart(
     assert report.load.samples == 1000
     assert report.replace.samples == 1000
     assert report.delete.samples == 10
+    assert report.concurrent_save.samples == report.concurrent_load.samples == 1000
+    assert report.concurrent_save.concurrency == 20
+    assert report.state_directory_allocated_bytes >= report.state_directory_size_bytes
+    assert report.directory_traversal_ms >= 0
+    assert report.baseline_consistency.legacy_state_files == 0
     assert report.save.p95_ms >= 0
     assert report.load.p95_ms >= 0
     assert report.baseline_consistency.consistent
@@ -70,4 +75,15 @@ async def test_storage_benchmark_rejects_invalid_counts(
             tmp_path / "state",
             session_count=session_count,
             delete_samples=delete_samples,
+        )
+
+
+async def test_storage_benchmark_rejects_non_positive_concurrency(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="concurrency"):
+        await run_phase3_storage_benchmark(
+            tmp_path / "sessions.sqlite3",
+            tmp_path / "state",
+            session_count=1,
+            delete_samples=1,
+            concurrency=0,
         )

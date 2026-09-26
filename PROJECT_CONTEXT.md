@@ -9,10 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4 readiness; Prompts 1–2 complete. The 10,000-session target run
+- Current phase: Phase 4 readiness; Prompts 1–3 complete. The 10,000-session target run
   has not begun.
-- Last completed work: Phase 4 PostgreSQL and leasing readiness,
-  `docs/phase4_postgresql_readiness.md`.
+- Last completed work: Phase 4 shared state storage readiness,
+  `docs/phase4_state_storage_readiness.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -31,8 +31,16 @@ live monitoring.
   sustained SQLite writes and distributed PostgreSQL leasing remain UNKNOWN.
 - Lease updates are now owner-fenced. A stale worker cannot overwrite a row after an
   expired lease is reclaimed, and an unleased stale snapshot cannot clear a new lease.
-- Next planned work: **Phase 4 Prompt 3 — Shared State Storage Readiness**. No real
-  acquisition or monitoring throughput should be inferred from synthetic tests.
+- State storage decision: Phase 4 stays single-machine, so `FileSystemStateStore`
+  remains the only state store and shared/object storage is deferred. At 10,000
+  synthetic files it measured save p50/p95 0.179/0.252 ms, load 0.063/0.076 ms,
+  about 7,600 saves/s at 20-way concurrency, 14.16 MB logical / 40.96 MB allocated,
+  and a 0.41–0.45 s report-only consistency audit with zero findings.
+- State files now embed `session_id` and a SHA-256 digest. Loads reject another
+  session's document and detect tampering; older plain files still load and are
+  counted as legacy by the audit.
+- Next planned work: **Phase 4 Prompt 4 — Distributed Worker Gate and Implementation**.
+  No real acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -158,14 +166,22 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   preventing late browser work from overwriting newer ownership or session data.
 - `FileSystemStateStore` defaults to `.browser-state/<session_id>.json`, validates safe
   session IDs, writes a temporary file, flushes/fsyncs it, applies restrictive file
-  permissions, and atomically replaces the destination. Save, load, and delete work is
-  dispatched with `asyncio.to_thread`, so filesystem operations do not execute directly
-  on the event loop.
+  permissions, atomically replaces the destination, and fsyncs the directory. Save,
+  load, and delete work is dispatched with `asyncio.to_thread`, so filesystem
+  operations do not execute directly on the event loop.
+- State documents are an envelope of `format`, `version`, `session_id`, `sha256`, and
+  `state`. `load()` raises `StateSessionMismatchError` for another session's document,
+  `StateCorruptError` for invalid JSON, format, or digest, and `StateUnreadableError`
+  for I/O or permission failures (all `StateStoreError`). Plain pre-envelope
+  `storage_state` files still load as legacy documents and are rewritten on the next
+  HYBRID refresh. Save is idempotent and safe to retry; the store has no internal retry
+  loop.
 - `StateConsistencyChecker` performs an explicitly non-mutating database/filesystem
-  audit in a worker thread. It reports missing, orphaned, corrupt, duplicate/conflicting,
-  and stale temporary state paths; cleanup is never automatic. Its optional recovery
-  summary adds missing/corrupt counts to the database aggregates, while normal startup
-  deliberately avoids this full directory scan.
+  audit in a worker thread. It reports missing, orphaned, corrupt, unreadable,
+  mismatched, duplicate/conflicting, insecure-permission, and stale temporary state,
+  plus a legacy-file count; cleanup is never automatic. Its optional recovery summary
+  adds missing and unusable (corrupt, unreadable, or mismatched) counts to the database
+  aggregates, while normal startup deliberately avoids this full directory scan.
 - SQLite files, `.browser-state/`, and generated Phase 1 JSON reports are git-ignored.
 
 ## Browser Model
@@ -493,6 +509,9 @@ mechanics only; they are not Queue-it staging or performance measurements.
   96-session due backlog under blocked workers. Real restore/check latency, sustainable
   checks per second, polling sweep time, and backlog drain rate remain unmeasured.
 - PostgreSQL, distributed workers, and shared/object state storage are not implemented.
+  A shared store would need a URI/key instead of the `Path`-typed `state_path`,
+  conditional (fenced) puts, and bounded transient-error retries; see
+  `docs/phase4_state_storage_readiness.md` section 5.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 - Phase 2 acceptance is documented in `docs/phase2-acceptance.md`; the missing staging
   evidence is a blocker to selecting the Phase 3 50–100-context operating range.
@@ -510,9 +529,10 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - Every creation/monitor/restore operation can emit a structured per-session event.
   Logging volume and sink backpressure are unmeasured at 1,000 sessions, although
   Prometheus labels remain aggregate/low-cardinality.
-- HYBRID state saves are correctly offloaded to threads but perform an fsync and atomic
-  replacement per session. Thread-pool and disk pressure require later measurement;
-  no directory-wide scan occurs in the hot path.
+- HYBRID state saves are correctly offloaded to threads but perform a file fsync, atomic
+  replacement, and directory fsync per session. Synthetic 20-way concurrency reached
+  about 7,600 saves/s locally; real `storage_state` size, churn, and disk pressure under
+  browser load remain unmeasured. No directory-wide scan occurs in the hot path.
 
 ## Important Files
 
@@ -523,7 +543,7 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `src/queue_load_test/models/` — identity/progress/lifecycle domain.
 - `src/queue_load_test/browser/manager.py` — Chrome/context ownership and recovery.
 - `src/queue_load_test/repository/sqlite.py` — persistence and leases.
-- `src/queue_load_test/state/filesystem.py` — atomic JSON storage state.
+- `src/queue_load_test/state/filesystem.py` — atomic, self-verifying JSON storage state.
 - `src/queue_load_test/scheduler/creation.py` — bounded acquisition.
 - `src/queue_load_test/scheduler/monitoring.py` — bounded monitoring scheduler.
 - `src/queue_load_test/transfer/` — transfer capture and restoration.
@@ -552,6 +572,9 @@ mechanics only; they are not Queue-it staging or performance measurements.
   persistence/distribution gates, and remaining unknowns.
 - `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
   lease-fencing audit, PostgreSQL deferral, and future `SKIP LOCKED` design.
+- `docs/phase4_state_storage_readiness.md` — 10,000-file local state results, state
+  envelope and audit finding kinds, shared-storage deferral, and distribution
+  prerequisites.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -671,6 +694,12 @@ Local synthetic Phase 3 persistence benchmark:
 queue-load-test-phase3-storage --database phase3-storage-synthetic/sessions.sqlite3 --state-directory phase3-storage-synthetic/state --sessions 1000 --report phase3-storage-benchmark.json
 ```
 
+Phase 4 10,000-file state benchmark (dedicated empty paths; 20 concurrent operations):
+
+```powershell
+queue-load-test-phase3-storage --database phase4-storage-synthetic/sessions.sqlite3 --state-directory phase4-storage-synthetic/state --sessions 10000 --concurrency 20 --report phase4-storage-benchmark.json
+```
+
 Read-only state consistency report for an existing database:
 
 ```powershell
@@ -692,8 +721,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 3 — Shared State Storage Readiness.** Assess local state-file behavior
-and the evidence gate for shared/object storage without assuming distribution is needed.
+**Phase 4 Prompt 4 — Distributed Worker Gate and Implementation.** Decide from measured
+evidence whether one machine is insufficient before adding distributed workers. Shared
+state storage and PostgreSQL remain prerequisites only if distribution is selected.
 
 ## Instructions for Future AI Sessions
 

@@ -19,3 +19,15 @@ class StateStore(Protocol):
 
 class StateStoreError(RuntimeError):
     """Raised when stored browser state is invalid or inaccessible."""
+
+
+class StateUnreadableError(StateStoreError):
+    """Raised when a stored state document exists but cannot be read."""
+
+
+class StateCorruptError(StateStoreError):
+    """Raised when a stored state document fails format or integrity validation."""
+
+
+class StateSessionMismatchError(StateStoreError):
+    """Raised when a stored state document belongs to a different session."""
