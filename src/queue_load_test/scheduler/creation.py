@@ -120,12 +120,15 @@ type TransferExtractorFactory = Callable[[str], TransferExtractor]
 @dataclass(slots=True)
 class CreationMetrics:
     attempts: int = 0
+    completed_work_items: int = 0
     initial_successful_unique_ids: int = 0
     successful_unique_ids: int = 0
     unique_ids_acquired: int = 0
     duplicates: int = 0
     temporary_failures: int = 0
+    temporary_failure_outcomes: int = 0
     permanent_failures: int = 0
+    retries: int = 0
     currently_creating: int = 0
     maximum_concurrent_creating: int = 0
     queue_depth: int = 0
@@ -241,6 +244,8 @@ class QueueSessionCreator:
                     else "transient_browser_error"
                 )
                 if attempt < self._retry_policy.max_attempts:
+                    if self._observability is not None:
+                        self._observability.record_creation_retry()
                     await self._sleep(self._retry_policy.delay(attempt, self._jitter))
 
         await self._persist_failed(work_item, self._retry_policy.max_attempts, last_failure)
@@ -497,10 +502,16 @@ class SessionCreationController:
                 self.metrics.successful_unique_ids = (
                     await self._repository.count_successful_queue_ids()
                 )
-        finally:
+        except BaseException:
+            for worker in workers:
+                worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
+        else:
             for _ in workers:
                 await work_queue.put(None)
             await asyncio.gather(*workers)
+        finally:
             self.metrics.elapsed_seconds = time.perf_counter() - started
             self.metrics.queue_depth = 0
             if self._observability is not None:
@@ -549,7 +560,9 @@ class SessionCreationController:
                 work_queue.task_done()
 
     def _record(self, outcome: CreationOutcome) -> None:
+        self.metrics.completed_work_items += 1
         self.metrics.attempts += outcome.attempts
+        self.metrics.retries += max(0, outcome.attempts - 1)
         self.metrics.temporary_failures += outcome.temporary_failures
         self.metrics.total_creation_duration_seconds += outcome.duration_seconds
         if outcome.kind is CreationOutcomeKind.SUCCESS:
@@ -559,6 +572,8 @@ class SessionCreationController:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
             self.metrics.permanent_failures += 1
+        elif outcome.kind is CreationOutcomeKind.TEMPORARY_FAILURE:
+            self.metrics.temporary_failure_outcomes += 1
 
     def _set_creation_activity(
         self,

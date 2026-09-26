@@ -288,7 +288,7 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: Prompts 1–3 completed locally; Queue-it staging scalability remains
+**Status: Prompts 1–4 completed locally; Queue-it staging scalability remains
 unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
 
 Target profile:
@@ -330,8 +330,14 @@ Planned prompt breakdown:
    pressure indicator at 75 and 100, with the explicit caveat that shared Chrome pages
    may be double-counted. Queue-it staging is NOT RUN; no optimal or staging-safe
    active-context value has been selected.
-4. **1,000-session acquisition run** — acquire unique identities with bounded creation
-   and record throughput/failure/resource data.
+4. **1,000-session acquisition run** — **implementation and synthetic validation
+   completed on 2026-09-26; authorised staging run NOT RUN.** The controller reaches
+   exactly 1,000 synthetic unique IDs with 20 fixed workers and a 20-item queue, ignores
+   duplicates/failures, resumes from 613, schedules nothing when already satisfied,
+   and resumes safely after graceful or forced shutdown. The gated aggregate benchmark
+   uses the conservative 50-context/two-process candidate and records attempts,
+   retries, latency, throughput, CPU/RAM, failures, and active-context peak without
+   identities. Real Queue-it acquisition rates and resource results remain UNKNOWN.
 5. **Large-population scheduler fairness** — measure due ordering, lease contention,
    starvation, queue backpressure, and backlog behavior.
 6. **Monitoring sweep benchmark** — measure full and priority-state sweep times under

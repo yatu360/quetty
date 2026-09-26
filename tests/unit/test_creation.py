@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
@@ -318,8 +320,238 @@ async def test_target_one_thousand_uses_fixed_workers_and_constant_count_queries
     assert metrics.maximum_queue_depth <= 20
     assert handler.maximum_active == 20
     assert handler.calls == 1000
+    assert metrics.completed_work_items == 1000
+    assert metrics.retries == 0
     assert repository.successful_count_queries == 2
     assert await repository.count_successful_queue_ids() == 1000
+    await repository.close()
+
+
+async def test_target_one_thousand_ignores_duplicates_and_failures(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "mixed-one-thousand.sqlite3")
+    steps = [
+        ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id="same-queue"),
+        ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id="same-queue"),
+        ScriptedStep(
+            CreationOutcomeKind.TEMPORARY_FAILURE,
+            attempts=3,
+            temporary_failures=3,
+        ),
+        ScriptedStep(CreationOutcomeKind.PERMANENT_FAILURE),
+        *(
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"queue-{index}")
+            for index in range(1, 1000)
+        ),
+    ]
+    handler = ScriptedCreationHandler(repository, steps)
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.successful_unique_ids == 1000
+    assert metrics.unique_ids_acquired == 1000
+    assert metrics.duplicates == 1
+    assert metrics.temporary_failures == 3
+    assert metrics.temporary_failure_outcomes == 1
+    assert metrics.permanent_failures == 1
+    assert metrics.retries == 2
+    assert metrics.attempts == 1005
+    assert metrics.completed_work_items == 1003
+    assert handler.calls == 1003
+    assert handler.maximum_active <= 20
+    assert await repository.count_successful_queue_ids() == 1000
+    await repository.close()
+
+
+async def test_restart_at_613_continues_to_one_thousand(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "restart-613.sqlite3")
+    await seed_successful_sessions(repository, 613)
+    handler = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"new-queue-{index}")
+            for index in range(387)
+        ],
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.initial_successful_unique_ids == 613
+    assert metrics.successful_unique_ids == 1000
+    assert metrics.unique_ids_acquired == 387
+    assert handler.calls == 387
+    assert handler.maximum_active == 20
+    await repository.close()
+
+
+async def test_near_one_thousand_schedules_only_one_remaining_attempt(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "near-1000.sqlite3")
+    await seed_successful_sessions(repository, 999)
+    handler = ScriptedCreationHandler(
+        repository,
+        [ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id="queue-1000")],
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.initial_successful_unique_ids == 999
+    assert metrics.successful_unique_ids == 1000
+    assert metrics.maximum_concurrent_creating == 1
+    assert metrics.completed_work_items == 1
+    assert handler.calls == 1
+    await repository.close()
+
+
+async def test_one_thousand_target_already_satisfied_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "satisfied-1000.sqlite3")
+    await seed_successful_sessions(repository, 1000)
+    handler = ScriptedCreationHandler(repository, [])
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.initial_successful_unique_ids == 1000
+    assert metrics.successful_unique_ids == 1000
+    assert metrics.attempts == 0
+    assert metrics.maximum_concurrent_creating == 0
+    assert handler.calls == 0
+    await repository.close()
+
+
+class GatedCreationHandler:
+    def __init__(
+        self,
+        delegate: ScriptedCreationHandler,
+        expected_active: int,
+    ) -> None:
+        self.delegate = delegate
+        self.expected_active = expected_active
+        self.entered = 0
+        self.all_entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.cancelled = 0
+
+    async def create(self, work_item: CreationWorkItem) -> CreationOutcome:
+        self.entered += 1
+        if self.entered >= self.expected_active:
+            self.all_entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled += 1
+            raise
+        return await self.delegate.create(work_item)
+
+
+async def test_shutdown_during_acquisition_then_resume_to_target(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "shutdown-resume.sqlite3")
+    first_delegate = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"first-{index}")
+            for index in range(5)
+        ],
+    )
+    first_handler = GatedCreationHandler(first_delegate, expected_active=5)
+    first_controller = SessionCreationController(
+        repository=repository,
+        handler=first_handler,
+        target_queue_ids=1000,
+        worker_count=5,
+        queue_capacity=5,
+    )
+    stop_event = asyncio.Event()
+    run_task = asyncio.create_task(first_controller.run(stop_event))
+    await asyncio.wait_for(first_handler.all_entered.wait(), timeout=1)
+
+    stop_event.set()
+    first_handler.release.set()
+    stopped_metrics = await asyncio.wait_for(run_task, timeout=1)
+
+    assert stopped_metrics.successful_unique_ids == 5
+    assert stopped_metrics.maximum_concurrent_creating == 5
+    assert await repository.count_successful_queue_ids() == 5
+
+    resumed_handler = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"resumed-{index}")
+            for index in range(995)
+        ],
+    )
+    resumed_controller = SessionCreationController(
+        repository=repository,
+        handler=resumed_handler,
+        target_queue_ids=1000,
+        worker_count=20,
+        queue_capacity=20,
+    )
+
+    resumed_metrics = await resumed_controller.run()
+
+    assert resumed_metrics.initial_successful_unique_ids == 5
+    assert resumed_metrics.unique_ids_acquired == 995
+    assert resumed_metrics.successful_unique_ids == 1000
+    assert resumed_handler.maximum_active == 20
+    await repository.close()
+
+
+async def test_cancelling_controller_cancels_fixed_workers_without_deadlock(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "cancel-controller.sqlite3")
+    handler = GatedCreationHandler(
+        ScriptedCreationHandler(repository, []),
+        expected_active=5,
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=1000,
+        worker_count=5,
+        queue_capacity=5,
+    )
+    run_task = asyncio.create_task(controller.run())
+    await asyncio.wait_for(handler.all_entered.wait(), timeout=1)
+
+    run_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run_task, timeout=1)
+
+    assert handler.cancelled == 5
+    assert controller.metrics.currently_creating == 0
     await repository.close()
 
 
@@ -607,5 +839,6 @@ async def test_temporary_server_failure_retries_without_transfer_only_state(
     assert persisted is not None
     assert persisted.mode is SessionMode.TRANSFER_ONLY
     assert observability.registry.get_sample_value("queue_creation_transient_failures_total") == 1
+    assert observability.registry.get_sample_value("queue_creation_retries_total") == 1
     assert observability.registry.get_sample_value("queue_ids_acquired_total") == 1
     await repository.close()

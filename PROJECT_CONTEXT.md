@@ -9,16 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–3 complete locally.
-- Last completed work: Phase 3 Prompt 3 — controlled installed-Chrome capacity
-  benchmark at 50, 75, and 100 active contexts.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–4 complete locally.
+- Last completed work: Phase 3 Prompt 4 — bounded 1,000-target acquisition logic and
+  benchmark harness; authorised staging acquisition was NOT RUN.
 - Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
   and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
   benchmark has run, and Phase 2 measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 4 — Queue ID Acquisition to 1,000**. The browser
-  results do not by themselves authorize or establish a safe 1,000-ID staging run.
+- Next planned work: **Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep**. No real
+  acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -178,6 +178,14 @@ completion rather than after every one of 1,000 outcomes. Concurrency contracts 
 target approaches. Existing persisted successes support restart continuation, while
 failed and duplicate records do not count.
 
+The controller records completed work items and retries separately from creation
+attempts and failure outcomes. A graceful stop ceases replenishment and drains only the
+already-issued bounded work. Forced cancellation cancels and joins the fixed workers
+instead of trying to enqueue shutdown sentinels into a potentially full queue. Sessions
+committed before cancellation remain in SQLite and are counted on restart. Synthetic
+tests cover a 613-to-1,000 resume, shutdown after five completions followed by resume,
+an already-satisfied 1,000 target, and mixed duplicates/failures without overshoot.
+
 `QueueSessionCreator` always obtains a fresh context through `BrowserManager`, follows
 the configured staging URL, extracts page-exposed transfer identity and live progress,
 saves HYBRID state, persists, and releases the context. SQLite's unique nullable
@@ -310,6 +318,11 @@ releases active/queued leases without deleting persisted identities.
   CPU/RSS samples, managed and observed process counts, machine-readable JSON, and a
   concise comparison. CPU is aggregate core-percent; summed Chrome RSS can double-count
   shared pages and is treated as a pressure indicator rather than unique memory.
+- The Phase 3 acquisition harness reports initial/final unique counts, attempts,
+  duplicates, retry/failure classifications, throughput, p50/p95 latency, navigation
+  and browser failures, context peak, bounded queue depth, and sampled CPU/RSS without
+  emitting session identities or transfer data. It requires the 50-context/two-process
+  candidate and two explicit staging gates. The authorised run is NOT RUN.
 
 ## Tests
 
@@ -321,10 +334,10 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **251 passed, 4 deselected
-  in 11.47 seconds**. The deselected tests were explicitly gated staging harnesses.
-  Phase 3 Prompt 3 focused browser/harness/observability tests reported 32 passed; Ruff
-  and strict mypy passed.
+- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **261 passed, 4 deselected
+  in 12.32 seconds**. The deselected tests were explicitly gated staging harnesses.
+  Phase 3 Prompt 4 focused creation/acquisition/observability/runtime tests reported 25
+  passed; Ruff and strict mypy passed.
 
 ## Phase 1 Acceptance Results
 
@@ -399,6 +412,11 @@ mechanics only; they are not Queue-it staging or performance measurements.
   double-counted. Sustained operation, Queue-it navigation, and real crash recovery
   still require authorised staging observation; no optimal or staging-safe value is
   selected.
+- The 1,000-target acquisition path is validated synthetically with fixed workers,
+  bounded queues, uniqueness conflicts, retries, graceful stop, forced cancellation,
+  and restart continuation. The real 1,000-ID staging result is NOT RUN, so creation
+  throughput, Queue-it duplicate/failure incidence, acquisition CPU/RAM, and observed
+  active-context peak remain UNKNOWN.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
@@ -451,6 +469,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   and SQLite decision for Phase 3 Prompt 2.
 - `docs/phase3-browser-capacity-benchmark.md` — local installed-Chrome comparison,
   resource caveats, and staging NOT RUN status for Phase 3 Prompt 3.
+- `docs/phase3-acquisition-benchmark.md` — bounded 1,000-target procedure, aggregate
+  report fields, restart behavior, and staging NOT RUN status for Phase 3 Prompt 4.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -548,6 +568,14 @@ Local installed-Chrome Phase 3 browser-capacity benchmark:
 queue-load-test-phase3-browser-capacity --hold-seconds 2 --sample-interval-seconds 0.25 --report phase3-browser-capacity-benchmark.json
 ```
 
+Authorised Phase 3 acquisition/resume benchmark:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE3_ACQUISITION_BENCHMARK = "1"
+queue-load-test-phase3-acquisition --confirm-authorized-staging --report phase3-acquisition-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -557,9 +585,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 4 — Queue ID Acquisition to 1,000.** Exercise bounded acquisition and
-record unique-ID, throughput, latency, resource, failure, and cleanup evidence without
-turning 1,000 persisted sessions into 1,000 live contexts.
+**Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep.** Measure bounded restore/check/
+persist/re-park behavior, sweep duration, backlog, fairness, resource use, and failures
+without turning the persisted population into a matching live-context population.
 
 ## Instructions for Future AI Sessions
 

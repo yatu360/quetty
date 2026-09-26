@@ -32,6 +32,7 @@ queue-load-test-phase2-resources = "queue_load_test.harness.phase2_resources:mai
 queue-load-test-phase2-tuning = "queue_load_test.harness.phase2_tuning:main"
 queue-load-test-phase3-repository = "queue_load_test.harness.phase3_repository:main"
 queue-load-test-phase3-browser-capacity = "queue_load_test.harness.phase3_browser_capacity:main"
+queue-load-test-phase3-acquisition = "queue_load_test.harness.phase3_acquisition:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

@@ -177,6 +177,25 @@ the verified local comparison, resource-measurement caveats, and current staging
 `NOT RUN` result. Completing a case does not make its context count a recommended
 operating point.
 
+## Phase 3 Queue ID Acquisition Benchmark
+
+The gated acquisition harness creates or resumes toward 1,000 successful unique Queue
+IDs using the existing fixed creation workers, bounded queue, shared Chrome processes,
+and parked-session persistence. It accepts the conservative 50-context, two-process
+Phase 3 profile; this remains a ceiling rather than a staging-safe concurrency claim.
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE3_ACQUISITION_BENCHMARK = "1"
+queue-load-test-phase3-acquisition --confirm-authorized-staging --sample-interval-seconds 5 --creation-timeout-seconds 14400 --report phase3-acquisition-benchmark.json
+```
+
+An existing partial database is resumed rather than reset. Only successful unique IDs
+count, duplicates remain observable failed attempts, and the report contains aggregates
+without Queue IDs or transfer URLs. See
+[the Phase 3 acquisition benchmark](docs/phase3-acquisition-benchmark.md) for the exact
+profile, shutdown behavior, report fields, and current `NOT RUN` result.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

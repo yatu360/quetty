@@ -59,6 +59,11 @@ class PrometheusMetrics:
             "Transient creation failures, including failures recovered by retry.",
             registry=self.registry,
         )
+        self.queue_creation_retries_total = Counter(
+            "queue_creation_retries_total",
+            "Creation retries started after a transient failure.",
+            registry=self.registry,
+        )
         self.queue_creation_permanent_failures_total = Counter(
             "queue_creation_permanent_failures_total",
             "Permanent creation failures that are not retried.",
@@ -260,6 +265,9 @@ class PrometheusMetrics:
 
     def record_creation_transient_failure(self) -> None:
         self.queue_creation_transient_failures_total.inc()
+
+    def record_creation_retry(self) -> None:
+        self.queue_creation_retries_total.inc()
 
     def record_creation_permanent_failure(self) -> None:
         self.queue_creation_permanent_failures_total.inc()

@@ -160,6 +160,7 @@ phase2-resource-benchmark*.json
 phase2-concurrency-benchmark*.json
 phase3-repository-benchmark*.json
 phase3-browser-capacity-benchmark*.json
+phase3-acquisition-benchmark*.json
 .phase2-concurrency-runs/
 .venv
 env/

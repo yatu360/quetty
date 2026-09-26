@@ -1386,3 +1386,117 @@ Phase 3 Prompt 4 — Queue ID Acquisition to 1,000
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 3 implementation, tests, benchmark, and documentation
+
+## 2026-09-26 — Phase 3 Prompt 4 — Queue ID Acquisition to 1,000
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Validate bounded target acquisition, uniqueness, shutdown, and restart behavior at
+`TARGET_QUEUE_IDS=1000`, and provide an explicitly gated aggregate staging benchmark
+without creating 1,000 tasks or retaining 1,000 BrowserContexts.
+
+### Changes Made
+
+- Added a Phase 3 acquisition harness restricted to the conservative locally exercised
+  50-context/two-Chrome-process candidate, with the existing fixed creation workers,
+  bounded queue, shared BrowserManager, HYBRID persistence, and SQLite uniqueness.
+- Added machine-readable and concise text results for initial/final unique IDs,
+  attempts, completed work, duplicates, temporary/permanent failures, retries, wall and
+  summed duration, sessions/s, p50/p95 latency, navigation/context/browser/cleanup
+  failures, peak active contexts, and sampled CPU/RSS/process/queue observations.
+- Kept reports free of Queue IDs, session IDs, transfer URLs, and browser state. Added
+  independent `RUN_STAGING_TESTS` and `RUN_PHASE3_ACQUISITION_BENCHMARK` gates.
+- Extended creation metrics with completed-work, exhausted-temporary-outcome, and retry
+  accounting. Added a low-cardinality Prometheus retry counter so timed-out runs retain
+  retries that began before cancellation.
+- Made controller cancellation safe: exceptional or forced cancellation now cancels
+  and joins the fixed workers instead of potentially blocking while adding sentinels to
+  a full queue. Graceful stop still drains only already-issued bounded work.
+- Added synthetic tests reaching 1,000 with mixed duplicate/temporary/permanent
+  outcomes, resuming from 613, doing no work when already satisfied, stopping after
+  five in-flight completions and resuming to 1,000, and forced cancellation without a
+  worker deadlock.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase3_acquisition.py`
+- `tests/unit/test_phase3_acquisition.py`
+- `docs/phase3-acquisition-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/scheduler/creation.py`
+- `tests/unit/test_creation.py`
+
+### Tests and Checks Run
+
+- Focused creation/acquisition/observability/runtime tests — 25 passed in 1.80 seconds.
+- Focused creation/acquisition/repository/runtime/browser regression — 61 passed in
+  2.48 seconds before the final retry-accounting update.
+- Full non-staging suite — 261 passed, 4 deselected in 12.32 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 44 source files.
+- `git diff --check` — passed.
+
+### Synthetic Creation Results
+
+- Exact target: 1,000 successful unique Queue IDs using 20 fixed workers and a bounded
+  20-item queue; 1,000 completed work items and two authoritative target-count queries.
+- Mixed case: 1,000 unique successes after 1 duplicate, 3 transient failed attempts in
+  1 exhausted outcome, and 1 permanent failure. It completed 1,003 work items and
+  1,005 attempts with 2 retries; only the 1,000 unique successes counted.
+- Restart case: 613 persisted successes required and acquired exactly 387 new unique
+  IDs. A 999-to-1,000 case scheduled exactly one attempt despite 20 configured workers,
+  and the already-satisfied 1,000 case scheduled zero work.
+- Shutdown/resume case: five issued successes drained after stop, then a new controller
+  discovered those five and acquired the remaining 995. Forced cancellation joined all
+  five fixed workers without deadlock.
+- Synthetic sleeps and IDs are correctness evidence only. No throughput or latency
+  value from these tests is reported as benchmark evidence.
+
+### Staging Benchmark
+
+- **NOT RUN.** No `.env`, authorised staging configuration, or execution gates were
+  available. No Queue-it traffic was sent and no real creation result file was created.
+
+### Important Decisions
+
+- The acquisition harness uses the 50-context/two-process candidate because it was the
+  only Prompt 3 case below the conservative summed-RSS pressure indicator. This does
+  not declare 50 contexts staging-safe; actual worker demand remains independently
+  bounded and defaults to one.
+- Final persisted count, not scheduled work or successful-looking browser outcomes,
+  determines target completion. SQLite `UNIQUE(queue_id)` remains authoritative.
+- A partial database is valid benchmark input and is resumed. Existing successful
+  identities are not replaced or reset.
+
+### Known Issues / Unknowns
+
+- Real sessions/s, p50/p95 creation latency, duplicate/failure/retry incidence,
+  navigation reliability, CPU/RAM, browser crashes, and peak contexts remain UNKNOWN.
+- The controller is single-process target coordination. Separate simultaneous
+  controllers do not reserve a shared remaining-target budget, although uniqueness
+  still prevents duplicate Queue IDs.
+- Per-session state fsync and INFO logging volume remain unmeasured at 1,000 real
+  acquisitions.
+
+### Follow-Up
+
+Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 4 implementation, tests, harness, and documentation
