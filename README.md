@@ -11,6 +11,7 @@ This phase intentionally implements only:
 - atomic local JSON browser-state persistence
 - shared Google Chrome process and isolated BrowserContext resource management
 - live, defensive Queue-it DOM state extraction after JavaScript execution
+- supported Queue-it transfer-link capture with explicit identity-mismatch handling
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
@@ -38,7 +39,8 @@ Copy-Item .env.example .env
 
 The SQLite database, transfer URLs, and browser-state files contain sensitive
 session data. The default local files are git-ignored and should not be logged
-or shared.
+or shared. Queue IDs and transfer URLs are also excluded from model result
+representations.
 
 ## Test
 

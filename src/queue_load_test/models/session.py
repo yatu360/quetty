@@ -63,7 +63,7 @@ class QueueSession:
     transfer_url: str = field(repr=False)
     mode: SessionMode
     state_path: Path = field(repr=False)
-    queue_id: str | None = None
+    queue_id: str | None = field(default=None, repr=False)
     session_id: str = field(default_factory=lambda: str(uuid4()))
     status: QueueStatus = QueueStatus.NEW
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

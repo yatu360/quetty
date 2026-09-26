@@ -156,9 +156,7 @@ class SQLiteSessionRepository:
             except sqlite3.IntegrityError as exc:
                 connection.rollback()
                 if "queue_sessions.queue_id" in str(exc):
-                    raise QueueIdConflictError(
-                        f"Queue ID {session.queue_id!r} already exists"
-                    ) from exc
+                    raise QueueIdConflictError("Queue ID already exists") from exc
                 raise
             return session
 
@@ -189,9 +187,7 @@ class SQLiteSessionRepository:
             except sqlite3.IntegrityError as exc:
                 connection.rollback()
                 if "queue_sessions.queue_id" in str(exc):
-                    raise QueueIdConflictError(
-                        f"Queue ID {session.queue_id!r} already exists"
-                    ) from exc
+                    raise QueueIdConflictError("Queue ID already exists") from exc
                 raise
             if cursor.rowcount != 1:
                 raise SessionNotFoundError(f"Session {session.session_id!r} does not exist")

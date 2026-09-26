@@ -52,6 +52,7 @@ def test_queue_session_construction_keeps_identity_separate_from_progress() -> N
     assert session.mode is SessionMode.HYBRID
     assert session.state_path == Path(".browser-state/session.json")
     assert session.created_at.tzinfo is not None
+    assert "queue-a" not in repr(session)
     assert not hasattr(session, "users_ahead")
 
 
