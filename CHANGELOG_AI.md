@@ -422,3 +422,93 @@ Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 2 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Validate and complete bounded acquisition of 100 successful unique Queue IDs without
+counting failed, duplicate, or pre-identity attempts and without creating population-
+sized task sets.
+
+### Changes Made
+
+- Preserved the fixed-worker, bounded-queue creation architecture and made its runtime
+  activity visible through controller metrics.
+- Added initial persisted count, IDs acquired during the current run, maximum active
+  workers, current/maximum queue depth, and sessions-per-second to `CreationMetrics`.
+- Added low-cardinality Prometheus counters for duplicate, transient, and permanent
+  outcomes plus gauges for active creation, queue depth, and current-run acquisition
+  rate; retained the existing creation-duration histogram.
+- Wired transient/permanent classification and duplicate detection from the real
+  creator into the new metrics.
+- Verified duplicate persistence leaves the original session untouched, removes the
+  duplicate attempt's HYBRID state file, and stores the attempt as `FAILED` without a
+  Queue ID.
+- Added deterministic partial-restart and 99/100 near-target tests, plus stronger
+  worker saturation and 100-target telemetry assertions.
+- Updated persistent project context and the Phase 2 roadmap.
+
+### Files Added
+
+- None.
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `tests/unit/test_creation.py`
+- `tests/unit/test_observability.py`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_creation.py -q` — 11 passed.
+- `python -m pytest tests/unit/test_creation.py tests/unit/test_observability.py -q` —
+  14 passed during focused development.
+- `python -m pytest -q` — 196 passed, 1 deselected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 35 source files.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN**.
+- Reason: this prompt requested acquisition correctness, not Phase 2 benchmarking, and
+  no authorised 100-session staging run configuration/window was supplied.
+
+### Important Decisions
+
+- Retained repository recounting as the source of truth after each completed result;
+  in-memory success totals never decide target completion alone.
+- Near the target, scheduled work is capped by the remaining repository deficit. At
+  99/100 only one item is submitted even if ten workers are configured.
+- Completed in-flight work is drained on target completion/shutdown. Within the single
+  controller, in-flight work is already bounded by the deficit; no queued item is
+  cancelled after it may have created a staging identity.
+- Kept target coordination single-process and SQLite-backed; no distributed reservation
+  mechanism or PostgreSQL behavior was introduced.
+
+### Known Issues
+
+- No authorised 100-session Queue-it staging acquisition, throughput measurement, or
+  resource benchmark has been run.
+- Multiple independent creation controllers are not supported. If introduced outside
+  the intended runtime, they could produce a bounded-per-controller target overshoot
+  with different valid Queue IDs, although database uniqueness still rejects duplicates.
+- Real Queue-it duplicate frequency and transient/permanent failure rates remain unknown.
+
+### Follow-Up
+
+Phase 2 Prompt 4 — Monitoring Throughput
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 3 changes present; clean before this prompt

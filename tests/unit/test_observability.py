@@ -90,6 +90,11 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     metrics.record_creation_attempt()
     metrics.record_creation_success(0.5)
     metrics.record_creation_failure(1.0)
+    metrics.record_creation_duplicate()
+    metrics.record_creation_transient_failure()
+    metrics.record_creation_permanent_failure()
+    metrics.set_creation_activity(in_flight=2, queue_depth=3)
+    metrics.set_creation_rate(4.5)
     metrics.record_restore(
         0.2,
         success=False,
@@ -120,6 +125,12 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     assert metrics.registry.get_sample_value("queue_ids_acquired_total") == 1
     assert metrics.registry.get_sample_value("queue_creation_attempts_total") == 1
     assert metrics.registry.get_sample_value("queue_creation_failures_total") == 1
+    assert metrics.registry.get_sample_value("queue_creation_duplicates_total") == 1
+    assert metrics.registry.get_sample_value("queue_creation_transient_failures_total") == 1
+    assert metrics.registry.get_sample_value("queue_creation_permanent_failures_total") == 1
+    assert metrics.registry.get_sample_value("queue_creation_in_flight") == 2
+    assert metrics.registry.get_sample_value("queue_creation_queue_depth") == 3
+    assert metrics.registry.get_sample_value("queue_sessions_created_per_second") == 4.5
     assert metrics.registry.get_sample_value("queue_sessions_active") == 1
     assert metrics.registry.get_sample_value("queue_sessions_admitted") == 1
     assert metrics.registry.get_sample_value("browser_crashes_total") == 1

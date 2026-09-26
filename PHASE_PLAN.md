@@ -34,8 +34,9 @@ proceed without it.
 
 ## Phase 2 — 100 Sessions
 
-**Status: in progress. Prompt 1 configuration/scaling readiness is complete; Prompt 2
-is next. No 100-session staging run or performance tuning has started.**
+**Status: in progress. Prompts 1–3 are complete for local configuration, multi-browser,
+and acquisition correctness. Prompt 4 is next. No 100-session staging run or
+performance tuning has started.**
 
 Target profile:
 
@@ -86,6 +87,9 @@ traffic execution, not Prompt 2's local BrowserManager work.
 
 ### Prompt 2 — Multi-Browser BrowserManager
 
+**Status: completed on 2026-09-26 with fake-based process failure tests; real Chrome
+crash behavior remains unverified.**
+
 Objective: validate and, only where tests show a gap, harden least-loaded allocation and
 failed-process recovery with one to two Chrome processes and about 25 global contexts.
 
@@ -104,6 +108,9 @@ Exit criteria:
 
 ### Prompt 3 — Scale Queue ID Acquisition to 100 Sessions
 
+**Status: completed on 2026-09-26 for controller correctness and observability. The
+authorised 100-session staging acquisition/benchmark remains not run.**
+
 Objective: run bounded creation until 100 successful unique Queue IDs exist and measure
 creation throughput under controlled concurrency.
 
@@ -120,6 +127,14 @@ Exit criteria:
 - Exactly 100 successful unique persisted Queue IDs, or an honest FAIL/UNKNOWN report.
 - Active contexts remain within the configured limit with no leaks.
 - Sensitive transfer/state data is not emitted in normal logs or benchmark results.
+
+Implemented evidence: deterministic tests cover targets 1, 10, and 100, bounded worker
+and queue concurrency, temporary/permanent failures, duplicate isolation, startup with
+an already-satisfied target, restart from a partially populated repository, and a
+99/100 near-target case that schedules only one new attempt. Prometheus exposes
+low-cardinality creation attempts, acquisitions, duplicate/failure classifications,
+in-flight work, queue depth, duration, and current-run rate. No staging throughput or
+resource claim is made.
 
 ### Prompt 4 — Phase 2 Monitoring Throughput
 

@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 2 — Multi-Browser BrowserManager.
+- Last completed work: Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions.
+- Next planned work: Phase 2 Prompt 4 — Monitoring Throughput.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -80,7 +80,8 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/transfer/extractor.py`.
 - Identity-safe transfer/state restoration:
   `src/queue_load_test/transfer/restoration.py`.
-- Bounded target acquisition and creation workers:
+- Bounded target acquisition and creation workers with deficit-aware scheduling,
+  restart continuation, duplicate isolation, and aggregate activity/rate metrics:
   `src/queue_load_test/scheduler/creation.py`.
 - Adaptive per-session monitoring and bounded due-session scheduling:
   `src/queue_load_test/scheduler/monitoring.py`.
@@ -145,6 +146,23 @@ disconnected browsers; restart immediately removes and invalidates lost contexts
 relaunches only the failed slot, preserves persisted session identity outside the
 browser, and updates metrics. Relaunch runs outside the global manager lock, so a
 healthy process can continue accepting contexts while another process restarts.
+
+## Target Acquisition Model
+
+`SessionCreationController` reads the successful unique Queue ID count from the
+repository on startup and schedules at most `min(CREATION_WORKERS, remaining target)`
+work items. Its `asyncio.Queue` is bounded and the worker-task count is fixed; it never
+creates one task per requested or persisted session. Each successful result causes a
+fresh repository count before more work is scheduled, so concurrency contracts as the
+target approaches. Existing persisted successes support restart continuation, while
+failed and duplicate records do not count.
+
+`QueueSessionCreator` always obtains a fresh context through `BrowserManager`, follows
+the configured staging URL, extracts page-exposed transfer identity and live progress,
+saves HYBRID state, persists, and releases the context. SQLite's unique nullable
+`queue_id` constraint remains authoritative. A duplicate deletes newly saved state,
+creates an explicit `FAILED` attempt without a Queue ID, and leaves the existing
+session unchanged.
 
 ## Session Lifecycle
 
@@ -217,7 +235,9 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
   duration, and error type). Transfer URLs are not approved log fields.
 - `PrometheusMetrics` implements aggregate creation, lifecycle, browser, restore,
   identity, navigation, check, duration, and progress metrics without Queue ID or
-  session ID labels.
+  session ID labels. Creation telemetry includes attempts, acquired IDs, duplicates,
+  transient/permanent failures, active workers, bounded queue depth, duration, and the
+  current-run acquisition rate.
 - `ObservabilityHttpServer` serves `/status` and `/metrics`; `StatusSummary` also renders
   terminal-readable text.
 - The Phase 1 harness records creation/context/navigation/restore/monitor latency,
@@ -236,7 +256,7 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **193 passed, 1 deselected**. The deselected test was the opt-in staging test.
+  **196 passed, 1 deselected**. The deselected test was the opt-in staging test.
 
 ## Phase 1 Acceptance Results
 
@@ -269,10 +289,15 @@ PASS for the corresponding mechanisms.
   assembled `ApplicationRuntime`. The Phase 1 acceptance CLI is fully assembled for its
   narrower controlled purpose.
 - The 100-session configuration and bounded controller/scheduler behavior are covered by
-  tests, but no 100-session browser/staging run or performance tuning has been performed.
+  tests. Acquisition correctness is verified for targets 1, 10, and 100, including a
+  restart from 90 persisted IDs and 99/100 near-target scheduling, but no 100-session
+  browser/staging run or performance tuning has been performed.
 - Two-process allocation, the 25-context global cap, isolated process restart, and
   capacity recovery are verified with fakes. Actual two-process installed-Chrome
   behavior and crash recovery still require authorised staging observation.
+- Target coordination is intentionally single-controller. If multiple independent
+  application processes acquire different valid IDs concurrently, aggregate overshoot
+  is not reserved transactionally; distributed target coordination is out of scope.
 - PostgreSQL, distributed workers, and shared/object state storage are not implemented.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
 
@@ -357,7 +382,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 3 — Scale Queue ID Acquisition to 100 Sessions**
+**Phase 2 Prompt 4 — Monitoring Throughput**
 
 Do not implement it as part of this handoff.
 

@@ -119,13 +119,24 @@ type TransferExtractorFactory = Callable[[str], TransferExtractor]
 @dataclass(slots=True)
 class CreationMetrics:
     attempts: int = 0
+    initial_successful_unique_ids: int = 0
     successful_unique_ids: int = 0
+    unique_ids_acquired: int = 0
     duplicates: int = 0
     temporary_failures: int = 0
     permanent_failures: int = 0
     currently_creating: int = 0
+    maximum_concurrent_creating: int = 0
+    queue_depth: int = 0
+    maximum_queue_depth: int = 0
     total_creation_duration_seconds: float = 0.0
     elapsed_seconds: float = 0.0
+
+    @property
+    def sessions_created_per_second(self) -> float:
+        if self.elapsed_seconds <= 0:
+            return 0.0
+        return self.unique_ids_acquired / self.elapsed_seconds
 
 
 class QueueSessionCreator:
@@ -203,6 +214,8 @@ class QueueSessionCreator:
             try:
                 return await self._attempt(work_item, attempt, started, temporary_failures)
             except PermanentCreationError as exc:
+                if self._observability is not None:
+                    self._observability.record_creation_permanent_failure()
                 await self._persist_failed(work_item, attempt, exc.code)
                 return CreationOutcome(
                     kind=CreationOutcomeKind.PERMANENT_FAILURE,
@@ -219,6 +232,8 @@ class QueueSessionCreator:
                 OSError,
             ) as exc:
                 temporary_failures += 1
+                if self._observability is not None:
+                    self._observability.record_creation_transient_failure()
                 last_failure = (
                     exc.code
                     if isinstance(exc, TransientCreationError)
@@ -288,6 +303,8 @@ class QueueSessionCreator:
             except QueueIdConflictError:
                 if state_saved:
                     await self._state_store.delete(work_item.session_id)
+                if self._observability is not None:
+                    self._observability.record_creation_duplicate()
                 await self._persist_failed(work_item, attempt, "duplicate_queue_id")
                 return CreationOutcome(
                     kind=CreationOutcomeKind.DUPLICATE,
@@ -401,7 +418,10 @@ class SessionCreationController:
         sequence = 0
         in_flight = 0
         try:
-            self.metrics.successful_unique_ids = await self._repository.count_successful_queue_ids()
+            existing = await self._repository.count_successful_queue_ids()
+            self.metrics.initial_successful_unique_ids = existing
+            self.metrics.successful_unique_ids = existing
+            self._set_creation_activity(work_queue)
             while self.metrics.successful_unique_ids < self._target and not (
                 stop_event is not None and stop_event.is_set()
             ):
@@ -411,6 +431,7 @@ class SessionCreationController:
                     sequence += 1
                     await work_queue.put(CreationWorkItem(sequence=sequence))
                     in_flight += 1
+                    self._set_creation_activity(work_queue)
 
                 outcome = await result_queue.get()
                 in_flight -= 1
@@ -418,6 +439,11 @@ class SessionCreationController:
                 self.metrics.successful_unique_ids = (
                     await self._repository.count_successful_queue_ids()
                 )
+                if self._observability is not None:
+                    elapsed = max(time.perf_counter() - started, 1e-9)
+                    self._observability.set_creation_rate(
+                        self.metrics.unique_ids_acquired / elapsed
+                    )
 
             if in_flight:
                 for _ in range(in_flight):
@@ -431,6 +457,12 @@ class SessionCreationController:
                 await work_queue.put(None)
             await asyncio.gather(*workers)
             self.metrics.elapsed_seconds = time.perf_counter() - started
+            self.metrics.queue_depth = 0
+            if self._observability is not None:
+                self._observability.set_creation_activity(in_flight=0, queue_depth=0)
+                self._observability.set_creation_rate(
+                    self.metrics.sessions_created_per_second
+                )
         return self.metrics
 
     async def _worker(
@@ -443,11 +475,20 @@ class SessionCreationController:
             try:
                 if work_item is None:
                     return
+                self._set_creation_activity(work_queue)
                 self.metrics.currently_creating += 1
+                self.metrics.maximum_concurrent_creating = max(
+                    self.metrics.maximum_concurrent_creating,
+                    self.metrics.currently_creating,
+                )
+                self._set_creation_activity(work_queue)
                 try:
                     try:
                         outcome = await self._handler.create(work_item)
                     except Exception:  # noqa: BLE001 - isolate one failed worker job
+                        if self._observability is not None:
+                            self._observability.record_creation_transient_failure()
+                            self._observability.record_creation_failure(0.0)
                         outcome = CreationOutcome(
                             kind=CreationOutcomeKind.TEMPORARY_FAILURE,
                             attempts=1,
@@ -457,6 +498,7 @@ class SessionCreationController:
                         )
                 finally:
                     self.metrics.currently_creating -= 1
+                    self._set_creation_activity(work_queue)
                 await result_queue.put(outcome)
             finally:
                 work_queue.task_done()
@@ -465,7 +507,25 @@ class SessionCreationController:
         self.metrics.attempts += outcome.attempts
         self.metrics.temporary_failures += outcome.temporary_failures
         self.metrics.total_creation_duration_seconds += outcome.duration_seconds
-        if outcome.kind is CreationOutcomeKind.DUPLICATE:
+        if outcome.kind is CreationOutcomeKind.SUCCESS:
+            self.metrics.unique_ids_acquired += 1
+        elif outcome.kind is CreationOutcomeKind.DUPLICATE:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
             self.metrics.permanent_failures += 1
+
+    def _set_creation_activity(
+        self,
+        work_queue: asyncio.Queue[CreationWorkItem | None],
+    ) -> None:
+        queue_depth = work_queue.qsize()
+        self.metrics.queue_depth = queue_depth
+        self.metrics.maximum_queue_depth = max(
+            self.metrics.maximum_queue_depth,
+            queue_depth,
+        )
+        if self._observability is not None:
+            self._observability.set_creation_activity(
+                in_flight=self.metrics.currently_creating,
+                queue_depth=queue_depth,
+            )

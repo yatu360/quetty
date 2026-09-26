@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from queue_load_test.browser import BrowserManager
+from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import QueueIdConflictError, SQLiteSessionRepository
 from queue_load_test.scheduler import (
@@ -104,6 +105,23 @@ class ScriptedCreationHandler:
                 state_path=Path(f".browser-state/{work_item.session_id}.json"),
                 attempt_count=step.attempts,
                 last_error=error,
+            )
+        )
+
+
+async def seed_successful_sessions(
+    repository: SQLiteSessionRepository,
+    count: int,
+) -> None:
+    for index in range(count):
+        await repository.create(
+            QueueSession(
+                session_id=f"existing-{index}",
+                queue_id=f"existing-queue-{index}",
+                transfer_url=f"https://queue.test/journey?q=existing-queue-{index}",
+                mode=SessionMode.HYBRID,
+                status=QueueStatus.PARKED,
+                state_path=Path(f".browser-state/existing-{index}.json"),
             )
         )
 
@@ -233,6 +251,44 @@ async def test_target_one_hundred_uses_fixed_worker_concurrency(tmp_path: Path) 
             for index in range(100)
         ],
     )
+    observability = PrometheusMetrics()
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=100,
+        worker_count=10,
+        queue_capacity=10,
+        observability=observability,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.successful_unique_ids == 100
+    assert metrics.initial_successful_unique_ids == 0
+    assert metrics.unique_ids_acquired == 100
+    assert metrics.attempts == 100
+    assert metrics.currently_creating == 0
+    assert metrics.maximum_concurrent_creating == 10
+    assert metrics.maximum_queue_depth <= 10
+    assert metrics.sessions_created_per_second > 0
+    assert handler.calls == 100
+    assert 1 < handler.maximum_active <= 10
+    assert await repository.count_successful_queue_ids() == 100
+    assert observability.registry.get_sample_value("queue_creation_in_flight") == 0
+    assert observability.registry.get_sample_value("queue_creation_queue_depth") == 0
+    assert (
+        observability.registry.get_sample_value("queue_sessions_created_per_second") or 0
+    ) > 0
+    await repository.close()
+
+
+async def test_near_target_schedules_only_the_remaining_deficit(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "near-target.sqlite3")
+    await seed_successful_sessions(repository, 99)
+    handler = ScriptedCreationHandler(
+        repository,
+        [ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id="queue-100")],
+    )
     controller = SessionCreationController(
         repository=repository,
         handler=handler,
@@ -243,12 +299,40 @@ async def test_target_one_hundred_uses_fixed_worker_concurrency(tmp_path: Path) 
 
     metrics = await controller.run()
 
+    assert metrics.initial_successful_unique_ids == 99
     assert metrics.successful_unique_ids == 100
-    assert metrics.attempts == 100
-    assert metrics.currently_creating == 0
-    assert handler.calls == 100
-    assert 1 < handler.maximum_active <= 10
+    assert metrics.unique_ids_acquired == 1
+    assert metrics.maximum_concurrent_creating == 1
+    assert handler.calls == 1
     assert await repository.count_successful_queue_ids() == 100
+    await repository.close()
+
+
+async def test_restart_continues_from_partially_completed_target(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "partial-target.sqlite3")
+    await seed_successful_sessions(repository, 90)
+    handler = ScriptedCreationHandler(
+        repository,
+        [
+            ScriptedStep(CreationOutcomeKind.SUCCESS, queue_id=f"new-queue-{index}")
+            for index in range(10)
+        ],
+    )
+    controller = SessionCreationController(
+        repository=repository,
+        handler=handler,
+        target_queue_ids=100,
+        worker_count=5,
+        queue_capacity=5,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.initial_successful_unique_ids == 90
+    assert metrics.successful_unique_ids == 100
+    assert metrics.unique_ids_acquired == 10
+    assert handler.calls == 10
+    assert handler.maximum_active == 5
     await repository.close()
 
 
@@ -368,12 +452,58 @@ async def test_hybrid_creator_retries_saves_state_persists_and_closes(
     await repository.close()
 
 
+async def test_creator_reports_duplicate_without_replacing_existing_session(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "duplicate.sqlite3")
+    await repository.create(
+        QueueSession(
+            session_id="existing",
+            queue_id="queue-created",
+            transfer_url="https://queue.staging.test/journey?q=queue-created",
+            mode=SessionMode.HYBRID,
+            status=QueueStatus.PARKED,
+            state_path=tmp_path / "state" / "existing.json",
+        )
+    )
+    state_store = FileSystemStateStore(tmp_path / "state")
+    browser_manager = FakeBrowserManager([200])
+    observability = PrometheusMetrics()
+    creator = QueueSessionCreator(
+        browser_manager=cast(BrowserManager, browser_manager),
+        repository=repository,
+        state_store=state_store,
+        staging_url="https://staging.test",
+        state_directory=state_store.directory,
+        mode=SessionMode.HYBRID,
+        live_extractor=cast(Any, LiveExtractor()),
+        transfer_extractor_factory=lambda _: SuccessfulTransferExtractor(),
+        retry_policy=CreationRetryPolicy(max_attempts=1),
+        observability=observability,
+    )
+
+    outcome = await creator.create(CreationWorkItem(sequence=1, session_id="duplicate"))
+
+    assert outcome.kind is CreationOutcomeKind.DUPLICATE
+    assert await repository.count_successful_queue_ids() == 1
+    existing = await repository.get("existing")
+    duplicate = await repository.get("duplicate")
+    assert existing is not None and existing.queue_id == "queue-created"
+    assert duplicate is not None and duplicate.status is QueueStatus.FAILED
+    assert duplicate.queue_id is None
+    assert duplicate.last_error == "duplicate_queue_id"
+    assert await state_store.load("duplicate") is None
+    assert observability.registry.get_sample_value("queue_creation_duplicates_total") == 1
+    await repository.close()
+
+
 async def test_permanent_navigation_failure_is_recorded_and_context_closed(
     tmp_path: Path,
 ) -> None:
     repository = SQLiteSessionRepository(tmp_path / "failed.sqlite3")
     state_store = FileSystemStateStore(tmp_path / "state")
     browser_manager = FakeBrowserManager([404])
+    observability = PrometheusMetrics()
     creator = QueueSessionCreator(
         browser_manager=cast(BrowserManager, browser_manager),
         repository=repository,
@@ -382,6 +512,7 @@ async def test_permanent_navigation_failure_is_recorded_and_context_closed(
         state_directory=state_store.directory,
         mode=SessionMode.HYBRID,
         retry_policy=CreationRetryPolicy(max_attempts=1),
+        observability=observability,
     )
 
     outcome = await creator.create(CreationWorkItem(sequence=1, session_id="failed"))
@@ -394,6 +525,7 @@ async def test_permanent_navigation_failure_is_recorded_and_context_closed(
     assert persisted.queue_id is None
     assert persisted.last_error == "permanent_http_response"
     assert await repository.count_successful_queue_ids() == 0
+    assert observability.registry.get_sample_value("queue_creation_permanent_failures_total") == 1
     await repository.close()
 
 
@@ -403,6 +535,7 @@ async def test_temporary_server_failure_retries_without_transfer_only_state(
     repository = SQLiteSessionRepository(tmp_path / "transfer-only.sqlite3")
     state_store = FileSystemStateStore(tmp_path / "state")
     browser_manager = FakeBrowserManager([503, 200])
+    observability = PrometheusMetrics()
     creator = QueueSessionCreator(
         browser_manager=cast(BrowserManager, browser_manager),
         repository=repository,
@@ -419,6 +552,7 @@ async def test_temporary_server_failure_retries_without_transfer_only_state(
             jitter_seconds=0,
         ),
         sleep=no_wait,
+        observability=observability,
     )
 
     outcome = await creator.create(CreationWorkItem(sequence=1, session_id="transfer-only"))
@@ -431,4 +565,6 @@ async def test_temporary_server_failure_retries_without_transfer_only_state(
     persisted = await repository.get("transfer-only")
     assert persisted is not None
     assert persisted.mode is SessionMode.TRANSFER_ONLY
+    assert observability.registry.get_sample_value("queue_creation_transient_failures_total") == 1
+    assert observability.registry.get_sample_value("queue_ids_acquired_total") == 1
     await repository.close()

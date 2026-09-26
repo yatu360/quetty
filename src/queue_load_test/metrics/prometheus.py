@@ -49,6 +49,36 @@ class PrometheusMetrics:
             "Session creation attempts ending in failure.",
             registry=self.registry,
         )
+        self.queue_creation_duplicates_total = Counter(
+            "queue_creation_duplicates_total",
+            "Creation results rejected because the Queue ID already exists.",
+            registry=self.registry,
+        )
+        self.queue_creation_transient_failures_total = Counter(
+            "queue_creation_transient_failures_total",
+            "Transient creation failures, including failures recovered by retry.",
+            registry=self.registry,
+        )
+        self.queue_creation_permanent_failures_total = Counter(
+            "queue_creation_permanent_failures_total",
+            "Permanent creation failures that are not retried.",
+            registry=self.registry,
+        )
+        self.queue_creation_in_flight = Gauge(
+            "queue_creation_in_flight",
+            "Creation workers currently processing a session.",
+            registry=self.registry,
+        )
+        self.queue_creation_queue_depth = Gauge(
+            "queue_creation_queue_depth",
+            "Creation work items waiting in the bounded queue.",
+            registry=self.registry,
+        )
+        self.queue_sessions_created_per_second = Gauge(
+            "queue_sessions_created_per_second",
+            "Unique Queue IDs acquired per second during the current creation run.",
+            registry=self.registry,
+        )
         self.active_browser_contexts = Gauge(
             "active_browser_contexts",
             "Currently allocated browser contexts.",
@@ -160,6 +190,22 @@ class PrometheusMetrics:
     def record_creation_failure(self, duration_seconds: float) -> None:
         self.queue_creation_failures_total.inc()
         self.session_creation_duration_seconds.observe(duration_seconds)
+
+    def record_creation_duplicate(self) -> None:
+        self.queue_creation_duplicates_total.inc()
+
+    def record_creation_transient_failure(self) -> None:
+        self.queue_creation_transient_failures_total.inc()
+
+    def record_creation_permanent_failure(self) -> None:
+        self.queue_creation_permanent_failures_total.inc()
+
+    def set_creation_activity(self, *, in_flight: int, queue_depth: int) -> None:
+        self.queue_creation_in_flight.set(in_flight)
+        self.queue_creation_queue_depth.set(queue_depth)
+
+    def set_creation_rate(self, sessions_per_second: float) -> None:
+        self.queue_sessions_created_per_second.set(sessions_per_second)
 
     def record_restore(
         self,
