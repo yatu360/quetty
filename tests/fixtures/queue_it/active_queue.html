@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="live-root"></div>
+    <script>
+      document.querySelector('#live-root').innerHTML = `
+        <div id="MainPart_divProgressbar" role="progressbar" aria-valuenow="42" style="width: 42%; height: 10px"></div>
+        <span id="MainPart_lbQueueNumber">Your queue number: Q-123</span>
+        <span id="MainPart_lbUsersInLineAheadOfYou">1,234 users ahead</span>
+        <span id="MainPart_lbExpectedServiceTime">Expected service time: 2999-09-26 14:30</span>
+        <span id="MainPart_lbWhichIsIn">About 12 minutes</span>
+        <span id="MainPart_lbLastUpdateTimeText">Last updated: 2999-09-26 14:18</span>
+      `;
+    </script>
+  </body>
+</html>

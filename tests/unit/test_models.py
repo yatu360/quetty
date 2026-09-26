@@ -80,6 +80,10 @@ def test_progress_values_are_optional() -> None:
     assert progress.serviced_soon is None
     assert progress.turn_started is None
     assert progress.connection_lost is None
+    assert progress.pre_queue is None
+    assert progress.active_queue is None
+    assert progress.manual_update_warning is None
+    assert progress.diagnostics is None
 
 
 def test_progress_percentage_validation() -> None:

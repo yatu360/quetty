@@ -1,7 +1,16 @@
 """Queue-it progress observed from browser-rendered pages."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+
+
+@dataclass(frozen=True, slots=True)
+class QueueExtractionDiagnostics:
+    """Compact extraction evidence without retaining page HTML."""
+
+    matched_selectors: dict[str, str] = field(default_factory=dict)
+    field_errors: dict[str, str] = field(default_factory=dict)
+    signals: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -24,6 +33,10 @@ class QueueProgress:
     serviced_soon: bool | None = None
     turn_started: bool | None = None
     connection_lost: bool | None = None
+    pre_queue: bool | None = None
+    active_queue: bool | None = None
+    manual_update_warning: str | None = None
+    diagnostics: QueueExtractionDiagnostics | None = None
 
     def __post_init__(self) -> None:
         if self.progress_percentage is not None and not 0 <= self.progress_percentage <= 100:

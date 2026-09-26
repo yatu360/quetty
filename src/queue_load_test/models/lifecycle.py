@@ -110,17 +110,20 @@ def evaluate_queue_status(
         return QueueStatus.SERVICED_SOON
     if progress.queue_paused is True:
         return QueueStatus.PAUSED
-    if page.pre_queue is True:
+    if page.pre_queue is True or progress.pre_queue is True:
         return QueueStatus.PRE_QUEUE
-    if page.active_queue is True:
+    if page.active_queue is True or progress.active_queue is True:
         return QueueStatus.ACTIVE_QUEUE
 
-    active_progress = (
-        progress.queue_number is not None
-        or progress.users_ahead is not None
-        or progress.estimated_wait_text is not None
-        or progress.expected_service_time is not None
+    active_evidence = sum(
+        value is not None
+        for value in (
+            progress.queue_number,
+            progress.users_ahead,
+            progress.estimated_wait_text,
+            progress.expected_service_time,
+        )
     )
-    if active_progress:
+    if active_evidence >= 2:
         return QueueStatus.ACTIVE_QUEUE
     return QueueStatus.CHECKING

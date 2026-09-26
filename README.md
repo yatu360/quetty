@@ -10,11 +10,12 @@ This phase intentionally implements only:
 - SQLite session persistence with lightweight work leases
 - atomic local JSON browser-state persistence
 - shared Google Chrome process and isolated BrowserContext resource management
+- live, defensive Queue-it DOM state extraction after JavaScript execution
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement Queue-it navigation or extraction, queue polling,
-scheduling, transfer logic, PostgreSQL, or metrics.
+It does not implement Queue-it navigation, queue polling, scheduling, transfer
+logic, PostgreSQL, or metrics.
 
 ## Install
 
@@ -54,4 +55,4 @@ python -m pytest
 - `MAX_ACTIVE_CONTEXTS=5`
 - SQLite via `DATABASE_URL`
 - local browser state files in `STATE_DIRECTORY`
-- browser-based Queue-it monitoring will be added in a later phase
+- browser-based Queue-it extraction is available; polling orchestration remains a later phase

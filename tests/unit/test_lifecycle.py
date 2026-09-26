@@ -88,10 +88,16 @@ def test_active_queue_marker_does_not_require_progress() -> None:
     )
 
 
-def test_active_queue_can_be_inferred_from_stable_progress_fields() -> None:
-    progress = QueueProgress(session_id="session-1", users_ahead=42)
+def test_active_queue_requires_multiple_stable_progress_fields() -> None:
+    progress = QueueProgress(session_id="session-1", queue_number="Q-1", users_ahead=42)
 
     assert evaluate_queue_status(progress) is QueueStatus.ACTIVE_QUEUE
+
+
+def test_one_non_percentage_progress_field_is_not_lifecycle_truth() -> None:
+    progress = QueueProgress(session_id="session-1", users_ahead=42)
+
+    assert evaluate_queue_status(progress) is QueueStatus.CHECKING
 
 
 def test_percentage_alone_is_not_lifecycle_truth() -> None:
