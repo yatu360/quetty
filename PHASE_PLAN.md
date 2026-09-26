@@ -34,9 +34,9 @@ proceed without it.
 
 ## Phase 2 — 100 Sessions
 
-**Status: in progress. Prompts 1–4 are complete for local configuration, multi-browser,
-acquisition, and bounded monitoring correctness. Prompt 5 is next. No 100-session
-staging run or performance tuning has started.**
+**Status: in progress. Prompts 1–5 are complete for local configuration, multi-browser,
+acquisition, bounded monitoring, and restore-benchmark tooling. Prompt 6 is next. No
+100-session staging run or performance tuning has started.**
 
 Target profile:
 
@@ -167,6 +167,9 @@ is claimed.
 
 ### Prompt 5 — HYBRID Restore Reliability Benchmark
 
+**Status: benchmark implementation completed on 2026-09-26; authorised staging run is
+NOT RUN and all real reliability results remain UNKNOWN.**
+
 Objective: quantify official transfer restoration and storage-state fallback behavior for
 the 100-session population.
 
@@ -183,6 +186,13 @@ Exit criteria:
   blocked with evidence.
 - Zero silent identity replacements or identity corruption.
 - Permanent failures terminate; transient failures stay bounded.
+
+Implemented evidence: the opt-in runner supports transfer-only, storage-state-only,
+and production HYBRID modes over a configurable sample up to the full 100-session
+population. JSON and aggregate text reports cover identities, sanitized failures,
+fallbacks, duration percentiles, and per-mechanism reliability without transfer URLs or
+browser state. Unit tests validate the reporting math and safety gates. No real restore
+rate or latency result is claimed.
 
 ### Prompt 6 — Resource and Stability Benchmarking
 

@@ -10,12 +10,12 @@ live monitoring.
 ## Current Status
 
 - Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 4 — Monitoring Throughput.
+- Last completed work: Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark.
 - Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
   configuration profile and bounded-population tests are now ready.
 - Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
   authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark.
+- Next planned work: Phase 2 Prompt 6 — Resource and Stability Benchmarking.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -90,7 +90,8 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/runtime.py`.
 - Structured logging, Prometheus metrics, and text/HTTP status:
   `src/queue_load_test/metrics/`.
-- Sensitive-data-safe acceptance report and explicitly gated staging runner:
+- Sensitive-data-safe Phase 1 acceptance reporting plus explicitly gated Phase 1 and
+  Phase 2 HYBRID restore benchmark runners:
   `src/queue_load_test/harness/`.
 - Local controlled Chrome run and opt-in staging test:
   `tests/integration/test_phase1_controlled_run.py` and
@@ -231,6 +232,10 @@ releases active/queued leases without deleting persisted identities.
 - HYBRID restoration tries transfer first, then storage state for recoverable transfer
   failure. Missing/corrupt state, context failure, refresh failure, and transfer failure
   are explicit structured results.
+- Controlled benchmark probes can force exactly one transfer or storage-state method
+  without refreshing the stored browser state. Storage-only probes load a context with
+  `storage_state` and navigate to the configured staging destination; normal HYBRID
+  restoration retains transfer-first/fallback and state-refresh behavior.
 - Identity mismatch is observable, increments metrics, preserves the expected Queue ID,
   and can become `FAILED`.
 - Browser disconnect recovery replaces only the failed process while the persisted
@@ -258,6 +263,11 @@ releases active/queued leases without deleting persisted identities.
   transfer and storage restore success rates, controller CPU/RAM when available,
   browser crashes, navigation failures, and identity mismatches. Generated reports omit
   Queue IDs and transfer URLs.
+- The Phase 2 restore benchmark records per-invocation expected/observed Queue IDs,
+  method, timestamp, duration, identity outcome, lifecycle status, sanitized error, and
+  browser/context failure, then aggregates success/mismatch rates, p50/p95, mechanism
+  reliability, fallback use, and errors. It never records transfer URLs or browser
+  state. Its JSON is sensitive because Queue IDs are retained for identity auditing.
 
 ## Tests
 
@@ -270,7 +280,8 @@ releases active/queued leases without deleting persisted identities.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
 - Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **200 passed, 1 deselected**. The deselected test was the opt-in staging test.
+  **206 passed, 2 deselected**. The deselected tests were the opt-in Phase 1 and Phase 2
+  staging tests.
 
 ## Phase 1 Acceptance Results
 
@@ -299,6 +310,9 @@ PASS for the corresponding mechanisms.
   vendor-, theme-, event-timing-, and destination-specific acceptance remains unknown.
 - Real transfer and storage-state restore rates, `lastUpdated` cadence, lifecycle timing,
   CPU/RAM headroom, browser crash rate, and monitoring sweep time have not been measured.
+- The Phase 2 HYBRID restore benchmark is implemented but **NOT RUN**. Both staging
+  environment gates were absent, so transfer/storage success rates, fallback frequency,
+  latency percentiles, error distribution, and identity mismatches remain UNKNOWN.
 - The normal `queue-load-test` CLI validates settings and exits unless code injects an
   assembled `ApplicationRuntime`. The Phase 1 acceptance CLI is fully assembled for its
   narrower controlled purpose.
@@ -335,6 +349,7 @@ PASS for the corresponding mechanisms.
 - `src/queue_load_test/metrics/` — structured logging, metrics, status server.
 - `src/queue_load_test/harness/` — acceptance recorder and staging runner.
 - `docs/phase1-acceptance-report.md` — controlled Phase 1 report and assumptions.
+- `docs/phase2-restore-benchmark.md` — Phase 2 benchmark scope and current NOT RUN result.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
 - `PHASE_PLAN.md` and `CHANGELOG_AI.md` — roadmap and AI-session history.
@@ -388,6 +403,14 @@ $env:MAX_ACTIVE_CONTEXTS = "5"
 queue-load-test-phase1 --confirm-authorized-staging --observe-seconds 600 --report phase1-acceptance.json
 ```
 
+Phase 2 restore benchmark using an existing authorised 100-session HYBRID database:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_RESTORE_BENCHMARK = "1"
+queue-load-test-phase2-restore --confirm-authorized-staging --sample-size 100 --mode all --report phase2-restore-benchmark.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -399,7 +422,7 @@ python -m mypy src
 
 The next task is:
 
-**Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark**
+**Phase 2 Prompt 6 — Resource and Stability Benchmarking**
 
 Do not implement it as part of this handoff.
 

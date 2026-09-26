@@ -123,6 +123,7 @@ class QueueSessionRestorer:
         repository: SessionRepository,
         state_store: StateStore,
         expected_journey_url: str | None = None,
+        storage_navigation_url: str | None = None,
         live_extractor: QueueItLiveStateExtractor | None = None,
         admission_detector: AdmissionDetector | None = None,
         terminal_state_detector: QueueItTerminalStateDetector | None = None,
@@ -146,6 +147,7 @@ class QueueSessionRestorer:
         self._repository = repository
         self._state_store = state_store
         self._expected_journey_url = expected_journey_url
+        self._storage_navigation_url = storage_navigation_url
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
         self._admission_detector = admission_detector
         self._terminal_state_detector = terminal_state_detector or QueueItTerminalStateDetector()
@@ -174,6 +176,7 @@ class QueueSessionRestorer:
             repository=repository,
             state_store=state_store,
             admission_detector=AdmissionDetector.from_urls(str(settings.staging_url)),
+            storage_navigation_url=str(settings.staging_url),
             admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
             observability=observability,
         )
@@ -181,7 +184,28 @@ class QueueSessionRestorer:
     async def restore(self, session: QueueSession) -> SessionRestoreResult:
         started = time.perf_counter()
         result = await self._restore(session)
-        duration = time.perf_counter() - started
+        self._observe_restore_result(session, result, time.perf_counter() - started)
+        return result
+
+    async def restore_with_method(
+        self,
+        session: QueueSession,
+        method: RestoreMethod,
+    ) -> SessionRestoreResult:
+        """Run exactly one supported restore mechanism for controlled measurement."""
+
+        method = RestoreMethod(method)
+        started = time.perf_counter()
+        result = await self._restore_with_method(session, method)
+        self._observe_restore_result(session, result, time.perf_counter() - started)
+        return result
+
+    def _observe_restore_result(
+        self,
+        session: QueueSession,
+        result: SessionRestoreResult,
+        duration: float,
+    ) -> None:
         if self._observability is not None:
             self._observability.record_restore(
                 duration,
@@ -212,6 +236,42 @@ class QueueSessionRestorer:
             duration=duration,
             error_type=result.failure.value if result.failure is not None else None,
         )
+
+    async def _restore_with_method(
+        self,
+        session: QueueSession,
+        method: RestoreMethod,
+    ) -> SessionRestoreResult:
+        expected_queue_id = session.queue_id
+        if expected_queue_id is None:
+            attempt = RestoreAttempt(
+                method=method,
+                success=False,
+                failure=RestoreFailure.EXPECTED_IDENTITY_MISSING,
+            )
+        elif method is RestoreMethod.TRANSFER:
+            if not session.transfer_url.strip():
+                attempt = RestoreAttempt(
+                    method=method,
+                    success=False,
+                    failure=RestoreFailure.TRANSFER_URL_MISSING,
+                )
+            elif not self._valid_transfer_url(session.transfer_url):
+                attempt = RestoreAttempt(
+                    method=method,
+                    success=False,
+                    failure=RestoreFailure.INVALID_TRANSFER_URL,
+                )
+            else:
+                attempt = await self._browser_attempt(
+                    session,
+                    method=method,
+                    refresh_state=False,
+                )
+        else:
+            attempt = await self._storage_state_attempt(session, refresh_state=False)
+        result = self._result(attempt, expected_queue_id)
+        await self._record(session, result)
         return result
 
     async def _restore(self, session: QueueSession) -> SessionRestoreResult:
@@ -269,7 +329,12 @@ class QueueSessionRestorer:
         await self._record(session, result)
         return result
 
-    async def _storage_state_attempt(self, session: QueueSession) -> RestoreAttempt:
+    async def _storage_state_attempt(
+        self,
+        session: QueueSession,
+        *,
+        refresh_state: bool = True,
+    ) -> RestoreAttempt:
         try:
             state = await self._state_store.load(session.session_id)
         except StateStoreError:
@@ -288,6 +353,7 @@ class QueueSessionRestorer:
             session,
             method=RestoreMethod.STORAGE_STATE,
             storage_state=cast(ContextStorageState, state),
+            refresh_state=refresh_state,
         )
 
     async def _browser_attempt(
@@ -296,12 +362,18 @@ class QueueSessionRestorer:
         *,
         method: RestoreMethod,
         storage_state: ContextStorageState | None = None,
+        refresh_state: bool = True,
     ) -> RestoreAttempt:
         try:
             async with self._browser_manager.context(storage_state=storage_state) as context:
                 page = await context.new_page()
+                navigation_url = (
+                    self._storage_navigation_url or session.transfer_url
+                    if method is RestoreMethod.STORAGE_STATE
+                    else session.transfer_url
+                )
                 response = await page.goto(
-                    session.transfer_url,
+                    navigation_url,
                     wait_until="domcontentloaded",
                     timeout=self._navigation_timeout_ms,
                 )
@@ -333,7 +405,7 @@ class QueueSessionRestorer:
                         admitted=True,
                     )
                 attempt = await self._observe(page, session, method)
-                if attempt.success and session.mode is SessionMode.HYBRID:
+                if attempt.success and session.mode is SessionMode.HYBRID and refresh_state:
                     try:
                         state = cast(BrowserState, await context.storage_state())
                         session.state_path = await self._state_store.save(

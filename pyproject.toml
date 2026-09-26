@@ -24,6 +24,7 @@ test = [
 [project.scripts]
 queue-load-test = "queue_load_test.main:main"
 queue-load-test-phase1 = "queue_load_test.harness.staging:main"
+queue-load-test-phase2-restore = "queue_load_test.harness.phase2_restore:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

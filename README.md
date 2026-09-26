@@ -135,3 +135,25 @@ The Phase 2 profile can use two Chrome processes by setting
 least `MAX_ACTIVE_CONTEXTS` (for example, 13 contexts per browser for a global limit of
 25). Creation and monitoring worker counts are independently configurable, but each
 count and their combined maximum demand must fit within the global context limit.
+
+## Phase 2 HYBRID Restore Benchmark
+
+The restore benchmark operates on existing HYBRID sessions in the configured SQLite
+database. It can probe the official transfer URL, storage state, or the production
+transfer-first/storage-fallback path. It is sequential and reuses `BrowserManager`, so
+the sample population does not become a matching number of tasks or live contexts.
+
+The benchmark requires both explicit staging gates and confirmation:
+
+```powershell
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE2_RESTORE_BENCHMARK = "1"
+queue-load-test-phase2-restore --confirm-authorized-staging --sample-size 100 --mode all --report phase2-restore-benchmark.json
+```
+
+`--mode` also accepts `transfer_only`, `storage_state_only`, or `hybrid`. The JSON report
+contains per-invocation identity and sanitized failure evidence plus aggregate success,
+mismatch, fallback, duration, percentile, and mechanism reliability statistics. It
+never contains transfer URLs or browser state. Because the report does contain Queue
+IDs as requested for identity auditing, treat it as sensitive local test evidence; the
+default report filename is git-ignored. The terminal summary contains aggregates only.

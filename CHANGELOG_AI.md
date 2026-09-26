@@ -600,3 +600,99 @@ Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 4 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 5 — HYBRID Restore Reliability Benchmark
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Create a repeatable, explicitly gated benchmark for official transfer,
+`storage_state`, and transfer-first/fallback reliability across up to 100 HYBRID
+sessions without exposing transfer URLs or changing expected identities.
+
+### Changes Made
+
+- Added a benchmark domain/reporting module with per-invocation identity, mode,
+  timestamp, duration, result status, sanitized failure, browser failure, fallback, and
+  nested mechanism-attempt records.
+- Added aggregate success/failure and mismatch rates, average/p50/p95 duration,
+  transfer/storage reliability, fallback usage, and error-category counts.
+- Added atomic JSON report replacement and an aggregate-only terminal summary.
+- Added an explicit single-method restorer API for transfer-only and storage-only
+  probes. Probe runs do not refresh the stored HYBRID state; normal restoration still
+  refreshes state after success.
+- Configured storage-only probes to create a context from Playwright `storage_state`
+  and navigate to the configured staging destination.
+- Added a Phase 2 CLI and staging test protected by both `RUN_STAGING_TESTS=1` and
+  `RUN_PHASE2_RESTORE_BENCHMARK=1`, plus the existing confirmation flag.
+- Added tests for aggregation, mismatch/failure/fallback accounting, percentiles, mode
+  selection, URL omission, gate enforcement, and storage-only behavior.
+- Added a NOT RUN/UNKNOWN benchmark document and updated handoff/roadmap documentation.
+
+### Files Added
+
+- `src/queue_load_test/harness/restore_benchmark.py`
+- `src/queue_load_test/harness/phase2_restore.py`
+- `tests/unit/test_restore_benchmark.py`
+- `tests/staging/test_phase2_restore_benchmark.py`
+- `docs/phase2-restore-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `pyproject.toml`
+- `src/queue_load_test/harness/__init__.py`
+- `src/queue_load_test/transfer/restoration.py`
+- `tests/unit/test_restoration.py`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_restore_benchmark.py tests/unit/test_restoration.py tests/unit/test_acceptance_report.py -q` — 19 passed.
+- `python -m pytest -o addopts="" --collect-only -q -m staging tests/staging` — 2 staging tests collected.
+- `python -m pytest -q` — 206 passed, 2 deselected.
+- `python -m ruff check .` — passed.
+- `python -m mypy src` — passed with no issues in 37 source files.
+
+### Staging Tests
+
+- Phase 2 restore benchmark — **NOT RUN**.
+- Reason: `RUN_STAGING_TESTS` and `RUN_PHASE2_RESTORE_BENCHMARK` were both unset and no
+  `.env` staging configuration was present. No browser traffic was sent.
+
+### Important Decisions
+
+- Benchmark runs are sequential and reuse `BrowserManager`; sample size never becomes a
+  matching number of tasks or contexts.
+- Raw Queue IDs are retained in the machine report because the prompt requires explicit
+  expected/observed identity auditing. Transfer URLs and browser state are excluded;
+  the report is git-ignored and documented as sensitive local evidence.
+- Transfer-only/storage-only probes avoid state refresh so one mechanism measurement
+  does not alter the next. Production HYBRID behavior remains unchanged.
+- A HYBRID invocation that encounters any identity mismatch is counted as a mismatch
+  even if a later storage fallback restores the expected identity.
+
+### Known Issues
+
+- No real transfer or storage-state reliability, fallback frequency, duration
+  percentile, failure distribution, or identity mismatch result exists yet.
+- The benchmark requires an existing authorised HYBRID population; it does not create
+  100 sessions itself.
+- Sequential probing favors repeatability over throughput measurement; resource and
+  concurrency benchmarking belongs to the next prompts.
+
+### Follow-Up
+
+Phase 2 Prompt 6 — Resource and Stability Benchmarking
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 2 Prompt 5 changes present; clean before this prompt

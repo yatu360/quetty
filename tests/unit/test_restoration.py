@@ -129,6 +129,8 @@ async def setup_restorer(
     tmp_path: Path,
     mode: SessionMode,
     results: list[TransferExtractionResult],
+    *,
+    storage_navigation_url: str | None = None,
 ) -> tuple[
     QueueSessionRestorer,
     QueueSession,
@@ -148,6 +150,7 @@ async def setup_restorer(
         repository=repository,
         state_store=state_store,
         expected_journey_url="https://queue.staging.test/journey",
+        storage_navigation_url=storage_navigation_url,
         live_extractor=cast(Any, LiveExtractor()),
         terminal_state_detector=cast(Any, NoTerminalStateDetector()),
         transfer_extractor_factory=lambda _: transfer_extractor,
@@ -306,6 +309,28 @@ async def test_hybrid_falls_back_to_storage_state(tmp_path: Path) -> None:
         "cookies": [{"name": "refreshed"}],
         "origins": [],
     }
+    await repository.close()
+
+
+async def test_explicit_storage_only_restore_skips_transfer_attempt(tmp_path: Path) -> None:
+    restorer, expected, repository, state_store, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+        storage_navigation_url="https://staging.test/protected",
+    )
+    state = {"cookies": [], "origins": []}
+    await state_store.save(expected.session_id, state)
+
+    result = await restorer.restore_with_method(expected, RestoreMethod.STORAGE_STATE)
+
+    assert result.success
+    assert result.method is RestoreMethod.STORAGE_STATE
+    assert [attempt.method for attempt in result.attempts] == [RestoreMethod.STORAGE_STATE]
+    assert manager.storage_states == [state]
+    assert manager.contexts[0].page.visited_urls == ["https://staging.test/protected"]
+    assert manager.contexts[0].closed
+    assert await state_store.load(expected.session_id) == state
     await repository.close()
 
 
