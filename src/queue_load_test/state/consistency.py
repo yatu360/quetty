@@ -252,6 +252,8 @@ def _inspect_state_file(path: Path, session_id: str) -> tuple[str | None, str | 
         return "mismatched_state_file", "document belongs to another session", False
     except StateCorruptError as exc:
         return "corrupt_state_file", str(exc), False
+    if os.name == "nt":
+        return None, None, document.legacy
     try:
         mode = path.stat().st_mode
     except OSError as exc:

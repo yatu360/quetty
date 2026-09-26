@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–3 completed on 2026-09-26; 10,000-session staging run not started.**
+**Status: Prompts 1–4 completed on 2026-09-26; 10,000-session staging run not started.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -415,12 +415,18 @@ Planned prompt breakdown:
    session ID and a digest, and the audit reports unreadable, mismatched, and
    insecure-permission files. Shared-store prerequisites are recorded in
    `docs/phase4_state_storage_readiness.md`.
-4. **Phase 4 Prompt 4 — Distributed Worker Gate and Implementation (next)** — decide
-   from measured evidence whether distribution is required; add creation/monitor
-   workers and ownership/heartbeat behavior only after backend prerequisites and failure
-   semantics are proven.
-5. **10,000-session acquisition benchmark** — run bounded acquisition with throughput,
-   reliability, and resource evidence.
+4. **Phase 4 Prompt 4 — Distributed Worker Gate and Implementation** — **completed on
+   2026-09-26 with distribution deferred.** No authorised browser-backed evidence shows
+   that one host misses a required creation or monitoring cadence, so the project keeps
+   its single-machine SQLite/local-state deployment. One-host sufficiency is still
+   UNKNOWN, not accepted: real creation/check rates, sustained resources, Chrome
+   stability, and page/network latency were not measured. Repository ownership,
+   bounded claims, lease expiry, and stale-worker fencing remain useful future
+   boundaries, but PostgreSQL claims, shared state, cross-node state fencing, and
+   multi-controller target reservations are not implemented. See
+   `docs/phase4_distributed_worker_decision.md`.
+5. **Phase 4 Prompt 5 — Acquire 10,000 Queue IDs (next)** — run bounded acquisition
+   with throughput, reliability, and resource evidence.
 6. **10,000-session monitoring/backlog benchmark** — validate adaptive cadence,
    prioritization, sweep time, queue depth, fairness, and degraded-mode behavior.
 7. **Worker/node loss and disaster recovery** — exercise lease expiry, process/node

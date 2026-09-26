@@ -89,7 +89,8 @@ async def test_saved_document_embeds_session_identity_digest_and_private_mode(
     assert document["session_id"] == "session-1"
     assert len(document["sha256"]) == 64
     assert document["state"] == state
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 async def test_legacy_plain_storage_state_remains_loadable(tmp_path: Path) -> None:
@@ -134,7 +135,10 @@ async def test_load_detects_corrupt_documents(
         await store.load("session-a")
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="permission mode is not enforced on Windows or when running as root",
+)
 async def test_load_reports_unreadable_state_without_leaking_contents(tmp_path: Path) -> None:
     store = FileSystemStateStore(tmp_path / "browser-state")
     path = await store.save("session-a", {"cookies": [{"value": "secret-token"}]})

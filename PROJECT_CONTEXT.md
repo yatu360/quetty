@@ -9,10 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4 readiness; Prompts 1–3 complete. The 10,000-session target run
+- Current phase: Phase 4 readiness; Prompts 1–4 complete. The 10,000-session target run
   has not begun.
-- Last completed work: Phase 4 shared state storage readiness,
-  `docs/phase4_state_storage_readiness.md`.
+- Last completed work: the evidence-based distributed-worker decision,
+  `docs/phase4_distributed_worker_decision.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -39,8 +39,19 @@ live monitoring.
 - State files now embed `session_id` and a SHA-256 digest. Loads reject another
   session's document and detect tampering; older plain files still load and are
   counted as legacy by the audit.
-- Next planned work: **Phase 4 Prompt 4 — Distributed Worker Gate and Implementation**.
-  No real acquisition or monitoring throughput should be inferred from synthetic tests.
+- Distribution decision: **deferred; Phase 4 remains single-machine**. There is no
+  measurement showing that one host misses a required creation or monitoring cadence,
+  so the project rule forbids adding distributed execution. This is not proof that one
+  host is sufficient: real Queue-it creation/check cadence, sustained CPU/RAM, Chrome
+  stability, and network/page latency remain UNKNOWN.
+- The design retains distribution-ready boundaries—repository protocol, unique
+  scheduler ownership, bounded claims/queues, persisted leases, lease-expiry recovery,
+  and owner fencing—but has no PostgreSQL backend, shared state store, cross-node state
+  write fencing, or multi-controller target reservation. Distributed correctness is
+  therefore not claimed.
+- Next planned work: **Phase 4 Prompt 5 — Acquire 10,000 Queue IDs** using the bounded
+  single-machine architecture. No real acquisition or monitoring throughput should be
+  inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -575,6 +586,9 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase4_state_storage_readiness.md` — 10,000-file local state results, state
   envelope and audit finding kinds, shared-storage deferral, and distribution
   prerequisites.
+- `docs/phase4_distributed_worker_decision.md` — evidence-based single-machine decision,
+  limiting-resource unknowns, distribution-readiness audit, and the gate for revisiting
+  multi-node execution.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -721,9 +735,10 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 4 — Distributed Worker Gate and Implementation.** Decide from measured
-evidence whether one machine is insufficient before adding distributed workers. Shared
-state storage and PostgreSQL remain prerequisites only if distribution is selected.
+**Phase 4 Prompt 5 — Acquire 10,000 Queue IDs.** Proceed with the bounded single-machine
+architecture and record real acquisition cadence, reliability, resource, and identity
+evidence. Distribution remains deferred unless measured results establish a one-host
+shortfall.
 
 ## Instructions for Future AI Sessions
 

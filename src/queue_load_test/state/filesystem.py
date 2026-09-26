@@ -105,6 +105,7 @@ class FileSystemStateStore:
 
     def __init__(self, directory: Path | str) -> None:
         self.directory = Path(directory)
+        self._save_locks: dict[str, asyncio.Lock] = {}
 
     def path_for(self, session_id: str) -> Path:
         if not _SAFE_SESSION_ID.fullmatch(session_id) or session_id in {".", ".."}:
@@ -114,7 +115,12 @@ class FileSystemStateStore:
     async def save(self, session_id: str, state: BrowserState) -> Path:
         path = self.path_for(session_id)
         document = encode_state_document(session_id, state)
-        await asyncio.to_thread(self._save, path, document)
+        # Windows cannot atomically replace a destination while another thread is
+        # replacing the same path. Serialize only same-session writes; independent
+        # sessions retain full concurrency.
+        lock = self._save_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            await asyncio.to_thread(self._save, path, document)
         return path
 
     @staticmethod
@@ -163,7 +169,13 @@ class FileSystemStateStore:
 
 
 def _fsync_directory(directory: Path) -> None:
-    """Persist the directory entry created by ``os.replace`` across power loss."""
+    """Persist the replaced directory entry where directory handles support fsync."""
+
+    # Windows does not permit opening directory paths with ``os.open``. The replaced
+    # file itself has already been flushed before this best-effort POSIX durability
+    # step.
+    if os.name == "nt":
+        return
 
     descriptor = os.open(directory, os.O_RDONLY)
     try:

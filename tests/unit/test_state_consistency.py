@@ -145,7 +145,10 @@ def _snapshot(directory: Path) -> dict[str, tuple[int, int, bytes]]:
     return snapshot
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="permission mode is not enforced on Windows or when running as root",
+)
 async def test_consistency_checker_reports_mismatched_unreadable_insecure_and_legacy_state(
     tmp_path: Path,
 ) -> None:

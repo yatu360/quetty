@@ -2143,3 +2143,96 @@ Phase 4 Prompt 4 — Distributed Worker Gate and Implementation
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: state envelope, audit improvements, benchmark fields, tests, and docs
+
+## 2026-09-26 — Phase 4 Prompt 4 — Distributed Worker Decision
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Decide from measured evidence whether Phase 4 requires distributed worker nodes, and
+implement them only if one machine is shown to miss the required acquisition or
+monitoring cadence.
+
+### Changes Made
+
+- Reviewed the Phase 3 acceptance, Phase 4 capacity, PostgreSQL/lease, and state-storage
+  evidence together with the current scheduler, repository, BrowserManager, workers,
+  and configuration.
+- Kept Phase 4 single-machine. There is neither a real browser-backed one-host capacity
+  PASS nor a measured one-host shortfall; distribution is therefore deferred under the
+  project evidence gate.
+- Added `docs/phase4_distributed_worker_decision.md` with the decision, seven limiting-
+  resource findings, retained architecture, distribution-readiness audit, failure and
+  recovery evidence, and the gate for reopening the decision.
+- Updated `PROJECT_CONTEXT.md` and `PHASE_PLAN.md` to record Prompt 4 as complete and
+  Phase 4 Prompt 5 as next.
+- Fixed Windows portability defects exposed by validation: directory fsync is now a
+  POSIX durability step, state permission checks remain POSIX-only, same-session state
+  saves are serialized while independent saves remain concurrent, and allocated-byte
+  reporting falls back to logical size when `st_blocks` is unavailable.
+
+### Files Added
+
+- `docs/phase4_distributed_worker_decision.md`
+
+### Files Modified
+
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `src/queue_load_test/state/filesystem.py`
+- `src/queue_load_test/state/consistency.py`
+- `src/queue_load_test/harness/phase3_storage.py`
+- `tests/unit/test_state_store.py`
+- `tests/unit/test_state_consistency.py`
+
+### Tests Run
+
+- Focused repository, monitoring, runtime, and state-store suite — 61 passed, 1 skipped.
+- State/storage portability regression suite — 32 passed, 2 skipped.
+- Full `python -m pytest -q` — 313 passed, 2 platform-specific permission tests
+  skipped, 4 gated staging tests deselected in 255.39 seconds.
+- `python -m ruff check src tests` — passed.
+- `python -m mypy src` — passed with no issues in 50 source files.
+
+### Staging / Distributed Integration Tests
+
+- NOT RUN. No authorised Queue-it run, PostgreSQL backend, or shared-state backend is
+  configured. No real creation/check cadence or distributed correctness result is
+  claimed.
+
+### Important Decisions
+
+- Phase 4 proceeds single-machine because distribution requires an observed host-
+  capacity shortfall; UNKNOWN capacity is not evidence for adding infrastructure.
+- The fast 10,000-row SQLite and 10,000-file local-state measurements show no local
+  bottleneck in their synthetic workloads, but do not prove real Queue-it cadence.
+- Existing worker IDs, bounded claims, persisted leases, expiry recovery, and owner
+  fencing are retained as distribution-ready boundaries. They are not described as a
+  multi-node implementation.
+- PostgreSQL, shared state, cross-node state-write fencing, and transactional creation
+  reservations remain prerequisites if later measurements require distribution.
+
+### Known Issues
+
+- Required acquisition completion time and monitoring cadence/backlog SLO are not yet
+  established from staging evidence.
+- Real creation and monitoring throughput, sustained CPU/RAM, Chrome stability,
+  network/page latency, and restore reliability remain UNKNOWN.
+- Multi-process/node claiming, shared-state visibility, and worker/node recovery are
+  NOT RUN and UNKNOWN.
+- Current creation target accounting is single-controller; multiple controllers could
+  overshoot without a future shared reservation mechanism.
+
+### Follow-Up
+
+Phase 4 Prompt 5 — Acquire 10,000 Queue IDs
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: distribution decision, Windows portability fixes, and project records

@@ -362,7 +362,13 @@ def _state_file_stats(directory: Path) -> list[tuple[int, int]]:
         for entry in entries:
             if entry.is_file() and entry.name.endswith(".json"):
                 details = entry.stat()
-                stats.append((details.st_size, details.st_blocks * 512))
+                allocated_blocks = getattr(details, "st_blocks", None)
+                stats.append(
+                    (
+                        details.st_size,
+                        details.st_size if allocated_blocks is None else allocated_blocks * 512,
+                    )
+                )
     return stats
 
 
