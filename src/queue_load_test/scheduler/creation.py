@@ -1,6 +1,7 @@
 """Bounded Queue-it session creation and target acquisition."""
 
 import asyncio
+import logging
 import random
 import time
 from collections.abc import Awaitable, Callable
@@ -16,6 +17,8 @@ from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager, BrowserManagerError
+from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import QueueIdConflictError, SessionRepository
@@ -28,6 +31,8 @@ from queue_load_test.transfer import (
 
 type Sleep = Callable[[float], Awaitable[None]]
 type Jitter = Callable[[float, float], float]
+
+logger = logging.getLogger(__name__)
 
 
 class CreationOutcomeKind(StrEnum):
@@ -143,6 +148,7 @@ class QueueSessionCreator:
         observation_interval_seconds: float = 0.25,
         sleep: Sleep = asyncio.sleep,
         jitter: Jitter = random.uniform,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         self._browser_manager = browser_manager
         self._repository = repository
@@ -158,12 +164,42 @@ class QueueSessionCreator:
         self._observation_interval_seconds = observation_interval_seconds
         self._sleep = sleep
         self._jitter = jitter
+        self._observability = observability
 
     async def create(self, work_item: CreationWorkItem) -> CreationOutcome:
+        outcome = await self._create(work_item)
+        if self._observability is not None:
+            if outcome.kind is CreationOutcomeKind.SUCCESS:
+                self._observability.record_creation_success(outcome.duration_seconds)
+            else:
+                self._observability.record_creation_failure(outcome.duration_seconds)
+        log_event(
+            logger,
+            logging.INFO if outcome.kind is CreationOutcomeKind.SUCCESS else logging.WARNING,
+            "session_creation_completed",
+            session_id=work_item.session_id,
+            queue_id=outcome.session.queue_id if outcome.session is not None else None,
+            status=outcome.session.status.value if outcome.session is not None else None,
+            attempt=outcome.attempts,
+            duration=outcome.duration_seconds,
+            error_type=outcome.failure_code,
+        )
+        return outcome
+
+    async def _create(self, work_item: CreationWorkItem) -> CreationOutcome:
         started = time.perf_counter()
         temporary_failures = 0
         last_failure = "creation_failed"
         for attempt in range(1, self._retry_policy.max_attempts + 1):
+            if self._observability is not None:
+                self._observability.record_creation_attempt()
+            log_event(
+                logger,
+                logging.INFO,
+                "session_creation_attempt",
+                session_id=work_item.session_id,
+                attempt=attempt,
+            )
             try:
                 return await self._attempt(work_item, attempt, started, temporary_failures)
             except PermanentCreationError as exc:
@@ -331,6 +367,7 @@ class SessionCreationController:
         target_queue_ids: int,
         worker_count: int,
         queue_capacity: int | None = None,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         if target_queue_ids < 1:
             raise ValueError("target_queue_ids must be at least 1")
@@ -344,6 +381,9 @@ class SessionCreationController:
         self._worker_count = worker_count
         self._queue_capacity = queue_capacity or worker_count
         self.metrics = CreationMetrics()
+        self._observability = observability
+        if observability is not None:
+            observability.set_target(target_queue_ids)
 
     async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
         started = time.perf_counter()

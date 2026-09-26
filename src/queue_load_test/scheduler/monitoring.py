@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,8 @@ from typing import Protocol, Self
 from uuid import uuid4
 
 from queue_load_test.config import Settings
+from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, evaluate_queue_status
 from queue_load_test.repository import SessionRepository
 from queue_load_test.transfer import RestoreFailure, SessionRestoreResult
@@ -205,6 +208,7 @@ class QueueSessionMonitor:
         clock: Clock | None = None,
         jitter: Jitter = random.uniform,
         sleep: Sleep = asyncio.sleep,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         self._repository = repository
         self._restorer = restorer
@@ -213,8 +217,49 @@ class QueueSessionMonitor:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._jitter = jitter
         self._sleep = sleep
+        self._observability = observability
 
     async def check(self, session: QueueSession) -> MonitoringOutcome:
+        started = time.perf_counter()
+        try:
+            outcome, progress = await self._check(session)
+        except Exception as exc:
+            duration = time.perf_counter() - started
+            if self._observability is not None:
+                self._observability.record_check(duration, None)
+            log_event(
+                logger,
+                logging.ERROR,
+                "queue_check_failed",
+                session_id=session.session_id,
+                queue_id=session.queue_id,
+                status=session.status.value,
+                worker_id=session.worker_id,
+                duration=duration,
+                error_type=type(exc).__name__,
+            )
+            raise
+        duration = time.perf_counter() - started
+        if self._observability is not None:
+            self._observability.record_check(duration, progress)
+        log_event(
+            logger,
+            logging.INFO if outcome.success else logging.WARNING,
+            "queue_check_completed",
+            session_id=session.session_id,
+            queue_id=session.queue_id,
+            status=outcome.observed_status.value,
+            worker_id=session.worker_id,
+            duration=duration,
+            error_type=session.last_error,
+        )
+        return outcome
+
+    async def _check(
+        self,
+        session: QueueSession,
+    ) -> tuple[MonitoringOutcome, QueueProgress | None]:
+        previous_status = session.status
         previous_progress = await self._repository.get_progress(session.session_id)
         result = await self._restore_with_retries(session)
         observed_at = self._clock()
@@ -256,18 +301,23 @@ class QueueSessionMonitor:
             )
             session.next_check_at = observed_at + timedelta(seconds=interval)
         await self._repository.update(session, result.progress)
+        if self._observability is not None:
+            self._observability.record_session_transition(previous_status, observed_status)
         stale = is_queue_update_stale(
             session.last_queue_update,
             now=observed_at,
             stale_after_seconds=self._polling_policy.stale_update_seconds,
         )
-        return MonitoringOutcome(
-            session_id=session.session_id,
-            success=result.success,
-            observed_status=observed_status,
-            next_check_at=session.next_check_at,
-            queue_update_stale=stale,
-            progress_changed=progress_changed,
+        return (
+            MonitoringOutcome(
+                session_id=session.session_id,
+                success=result.success,
+                observed_status=observed_status,
+                next_check_at=session.next_check_at,
+                queue_update_stale=stale,
+                progress_changed=progress_changed,
+            ),
+            result.progress,
         )
 
     async def _restore_with_retries(self, session: QueueSession) -> SessionRestoreResult:
@@ -513,10 +563,29 @@ class ParkedSessionScheduler:
                         self.metrics.failed += 1
                 except Exception:  # noqa: BLE001
                     self.metrics.failed += 1
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "monitoring_worker_failed",
+                        session_id=item.session_id,
+                        queue_id=item.queue_id,
+                        status=item.status.value,
+                        worker_id=self._scheduler_id,
+                        error_type="UnexpectedWorkerError",
+                    )
                     try:
                         await self._repark_after_failure(item)
-                    except Exception:
-                        logger.exception("Could not re-park failed monitoring work")
+                    except Exception as exc:  # noqa: BLE001
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "monitoring_repark_failed",
+                            session_id=item.session_id,
+                            queue_id=item.queue_id,
+                            status=item.status.value,
+                            worker_id=self._scheduler_id,
+                            error_type=type(exc).__name__,
+                        )
                 finally:
                     self.metrics.currently_checking -= 1
                     try:
@@ -524,8 +593,17 @@ class ParkedSessionScheduler:
                             item.session_id,
                             worker_id=self._scheduler_id,
                         )
-                    except Exception:
-                        logger.exception("Could not release monitoring lease")
+                    except Exception as exc:  # noqa: BLE001
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "monitoring_lease_release_failed",
+                            session_id=item.session_id,
+                            queue_id=item.queue_id,
+                            status=item.status.value,
+                            worker_id=self._scheduler_id,
+                            error_type=type(exc).__name__,
+                        )
             finally:
                 self._queue.task_done()
 

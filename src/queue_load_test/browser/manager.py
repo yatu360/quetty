@@ -13,6 +13,8 @@ from typing import Self
 from playwright.async_api import Browser, BrowserContext, Playwright, StorageState, async_playwright
 
 from queue_load_test.config import Settings
+from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.prometheus import PrometheusMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,7 @@ class BrowserManager:
         max_active_contexts: int = 5,
         headless: bool = True,
         playwright_starter: PlaywrightStarter = _start_playwright,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         if chrome_process_count < 1:
             raise ValueError("chrome_process_count must be at least 1")
@@ -129,6 +132,7 @@ class BrowserManager:
         self._max_active_contexts = max_active_contexts
         self._headless = headless
         self._playwright_starter = playwright_starter
+        self._observability = observability
         self._playwright: Playwright | None = None
         self._slots: list[_BrowserSlot] = []
         self._lock = asyncio.Lock()
@@ -140,6 +144,7 @@ class BrowserManager:
         settings: Settings,
         *,
         playwright_starter: PlaywrightStarter = _start_playwright,
+        observability: PrometheusMetrics | None = None,
     ) -> Self:
         return cls(
             chrome_process_count=settings.chrome_process_count,
@@ -147,6 +152,7 @@ class BrowserManager:
             max_active_contexts=settings.max_active_contexts,
             headless=settings.headless,
             playwright_starter=playwright_starter,
+            observability=observability,
         )
 
     @property
@@ -169,6 +175,8 @@ class BrowserManager:
                 await self._close_started_resources()
                 raise
             self._running = True
+            self._update_capacity_metrics()
+            log_event(logger, logging.INFO, "browser_manager_started")
 
     async def _launch_browser(self) -> Browser:
         if self._playwright is None:
@@ -218,6 +226,13 @@ class BrowserManager:
 
             owned_context = OwnedBrowserContext(self, slot, context)
             slot.contexts.add(owned_context)
+            self._update_capacity_metrics()
+            log_event(
+                logger,
+                logging.INFO,
+                "browser_context_created",
+                browser_id=slot.index,
+            )
             return owned_context
 
     @staticmethod
@@ -253,8 +268,15 @@ class BrowserManager:
             owned_context._mark_closed()
             try:
                 await owned_context.context.close()
-            except Exception:
-                logger.warning("Browser context close failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "browser_context_close_failed",
+                    browser_id=owned_context._slot.index,
+                    error_type=type(exc).__name__,
+                )
+            self._update_capacity_metrics()
 
     async def restart_failed_browsers(self) -> int:
         """Detect disconnected processes and replace them."""
@@ -272,6 +294,15 @@ class BrowserManager:
         return restarted
 
     async def _restart_slot(self, slot: _BrowserSlot) -> None:
+        if self._observability is not None:
+            self._observability.record_browser_crash()
+        log_event(
+            logger,
+            logging.WARNING,
+            "browser_process_restarting",
+            browser_id=slot.index,
+            error_type="BrowserDisconnected",
+        )
         old_browser = slot.browser
         lost_contexts = tuple(slot.contexts)
         slot.contexts.clear()
@@ -279,13 +310,26 @@ class BrowserManager:
             owned_context._mark_closed()
             try:
                 await owned_context.context.close()
-            except Exception:
-                logger.warning("Lost browser context cleanup failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "lost_browser_context_cleanup_failed",
+                    browser_id=slot.index,
+                    error_type=type(exc).__name__,
+                )
         try:
             await old_browser.close()
-        except Exception:
-            logger.warning("Failed Chrome process cleanup failed", exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                logger,
+                logging.WARNING,
+                "failed_browser_process_cleanup_failed",
+                browser_id=slot.index,
+                error_type=type(exc).__name__,
+            )
         slot.browser = await self._launch_browser()
+        self._update_capacity_metrics()
 
     async def capacity(self) -> BrowserCapacity:
         """Return current active and available capacity, repairing dead processes first."""
@@ -327,6 +371,8 @@ class BrowserManager:
         async with self._lock:
             await self._close_started_resources()
             self._running = False
+            self._update_capacity_metrics()
+            log_event(logger, logging.INFO, "browser_manager_stopped")
 
     async def _close_started_resources(self) -> None:
         for slot in self._slots:
@@ -336,20 +382,44 @@ class BrowserManager:
                 owned_context._mark_closed()
                 try:
                     await owned_context.context.close()
-                except Exception:
-                    logger.warning("Browser context shutdown failed", exc_info=True)
+                except Exception as exc:  # noqa: BLE001
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "browser_context_shutdown_failed",
+                        browser_id=slot.index,
+                        error_type=type(exc).__name__,
+                    )
         for slot in self._slots:
             try:
                 await slot.browser.close()
-            except Exception:
-                logger.warning("Chrome shutdown failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "browser_shutdown_failed",
+                    browser_id=slot.index,
+                    error_type=type(exc).__name__,
+                )
         self._slots.clear()
         if self._playwright is not None:
             try:
                 await self._playwright.stop()
-            except Exception:
-                logger.warning("Playwright shutdown failed", exc_info=True)
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "playwright_shutdown_failed",
+                    error_type=type(exc).__name__,
+                )
             self._playwright = None
+
+    def _update_capacity_metrics(self) -> None:
+        if self._observability is not None:
+            self._observability.set_browser_capacity(
+                active_contexts=self._active_context_count(),
+                processes=len(self._slots),
+            )
 
     async def __aenter__(self) -> Self:
         await self.start()

@@ -17,11 +17,12 @@ This phase intentionally implements only:
 - bounded parked-session monitoring with SQLite leases and adaptive polling
 - browser-verified admission, terminal failure classification, and bounded recovery
 - signal-aware graceful shutdown that preserves persisted journeys
-- project structure for future scheduler, transfer, and metrics code
+- structured JSON logging with sensitive transfer URLs excluded
+- low-cardinality Prometheus metrics and a lightweight status endpoint
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement PostgreSQL, Prometheus export, or later post-admission
-workflows.
+It does not implement PostgreSQL, a full frontend dashboard, or later
+post-admission workflows.
 
 ## Install
 
@@ -57,6 +58,19 @@ service-worker state.
 is only marked `ADMITTED` after normal browser navigation reaches the configured
 staging destination. The application does not extract or manipulate Queue-it
 admission tokens.
+
+## Observability
+
+Application logs can be configured as structured JSON with
+`configure_structured_logging()`. Operational events include stable context
+such as session, worker, browser, attempt, status, duration, restore method, and
+error type when available. Transfer URLs are intentionally excluded from normal
+event logs.
+
+`ObservabilityHttpServer` exposes a compact text summary at `/status` and
+Prometheus exposition at `/metrics` on `PROMETHEUS_PORT` (default `9090`). The
+metrics use only aggregate values and bounded histogram buckets; Queue IDs and
+session IDs are never labels.
 
 ## Test
 

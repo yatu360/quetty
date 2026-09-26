@@ -1,6 +1,8 @@
 """Restore persisted Queue-it sessions without changing their expected identity."""
 
 import asyncio
+import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -9,10 +11,13 @@ from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.config import Settings
+from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, SessionMode
 from queue_load_test.queue_monitor import (
     AdmissionDetector,
@@ -29,6 +34,8 @@ from queue_load_test.transfer.extractor import (
 )
 
 type Sleep = Callable[[float], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 class RestoreMethod(StrEnum):
@@ -125,6 +132,7 @@ class QueueSessionRestorer:
         observation_timeout_seconds: float = 10.0,
         observation_interval_seconds: float = 0.25,
         sleep: Sleep = asyncio.sleep,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         if navigation_timeout_ms <= 0:
             raise ValueError("navigation_timeout_ms must be positive")
@@ -147,6 +155,7 @@ class QueueSessionRestorer:
         self._observation_timeout_seconds = observation_timeout_seconds
         self._observation_interval_seconds = observation_interval_seconds
         self._sleep = sleep
+        self._observability = observability
 
     @classmethod
     def from_settings(
@@ -156,6 +165,7 @@ class QueueSessionRestorer:
         browser_manager: BrowserManager,
         repository: SessionRepository,
         state_store: StateStore,
+        observability: PrometheusMetrics | None = None,
     ) -> "QueueSessionRestorer":
         """Use the configured staging URL solely as the admission destination."""
 
@@ -165,9 +175,46 @@ class QueueSessionRestorer:
             state_store=state_store,
             admission_detector=AdmissionDetector.from_urls(str(settings.staging_url)),
             admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
+            observability=observability,
         )
 
     async def restore(self, session: QueueSession) -> SessionRestoreResult:
+        started = time.perf_counter()
+        result = await self._restore(session)
+        duration = time.perf_counter() - started
+        if self._observability is not None:
+            self._observability.record_restore(
+                duration,
+                success=result.success,
+                used_storage_state=result.method is RestoreMethod.STORAGE_STATE,
+                identity_mismatch=any(
+                    attempt.identity_match is False for attempt in result.attempts
+                ),
+                transfer_failures=sum(
+                    not attempt.success and attempt.method is RestoreMethod.TRANSFER
+                    for attempt in result.attempts
+                ),
+                state_failures=sum(
+                    not attempt.success and attempt.method is RestoreMethod.STORAGE_STATE
+                    for attempt in result.attempts
+                ),
+            )
+        log_event(
+            logger,
+            logging.INFO if result.success else logging.WARNING,
+            "session_restore_completed",
+            session_id=session.session_id,
+            queue_id=session.queue_id,
+            status=session.status.value,
+            worker_id=session.worker_id,
+            attempt=session.attempt_count,
+            restore_method=result.method.value,
+            duration=duration,
+            error_type=result.failure.value if result.failure is not None else None,
+        )
+        return result
+
+    async def _restore(self, session: QueueSession) -> SessionRestoreResult:
         """Restore one session, preserving its persisted Queue-it identity."""
 
         expected_queue_id = session.queue_id
@@ -303,6 +350,15 @@ class QueueSessionRestorer:
                 return attempt
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
+        except PlaywrightTimeoutError:
+            if self._observability is not None:
+                self._observability.record_navigation_timeout()
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
         except Exception:  # noqa: BLE001
             failure = (
                 RestoreFailure.STATE_CONTEXT_FAILED

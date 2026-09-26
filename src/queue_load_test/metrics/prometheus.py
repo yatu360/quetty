@@ -1,0 +1,240 @@
+"""Low-cardinality Prometheus instrumentation for the Phase 1 runtime."""
+
+import threading
+import time
+from collections.abc import Iterable
+from dataclasses import dataclass
+
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
+
+from queue_load_test.models import QueueProgress, QueueSession, QueueStatus
+
+_DURATION_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
+
+
+@dataclass(frozen=True, slots=True)
+class CheckStatistics:
+    checks_total: int
+    checks_per_second: float
+    average_check_duration_seconds: float
+
+
+class PrometheusMetrics:
+    """Own application metrics without per-session or per-Queue-ID labels."""
+
+    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        self.registry = registry or CollectorRegistry()
+        self.queue_sessions_requested = Gauge(
+            "queue_sessions_requested",
+            "Configured unique Queue ID target.",
+            registry=self.registry,
+        )
+        self.queue_sessions_created_total = Counter(
+            "queue_sessions_created_total",
+            "Successfully persisted Queue-it sessions.",
+            registry=self.registry,
+        )
+        self.queue_ids_acquired_total = Counter(
+            "queue_ids_acquired_total",
+            "Unique Queue IDs acquired by this process.",
+            registry=self.registry,
+        )
+        self.queue_creation_attempts_total = Counter(
+            "queue_creation_attempts_total",
+            "Browser session creation attempts.",
+            registry=self.registry,
+        )
+        self.queue_creation_failures_total = Counter(
+            "queue_creation_failures_total",
+            "Session creation attempts ending in failure.",
+            registry=self.registry,
+        )
+        self.active_browser_contexts = Gauge(
+            "active_browser_contexts",
+            "Currently allocated browser contexts.",
+            registry=self.registry,
+        )
+        self.browser_processes = Gauge(
+            "browser_processes",
+            "Managed Google Chrome processes.",
+            registry=self.registry,
+        )
+        self.browser_crashes_total = Counter(
+            "browser_crashes_total",
+            "Detected Chrome process failures.",
+            registry=self.registry,
+        )
+        self.session_creation_duration_seconds = Histogram(
+            "session_creation_duration_seconds",
+            "Queue-it session creation duration.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.session_restore_duration_seconds = Histogram(
+            "session_restore_duration_seconds",
+            "Queue-it session restoration duration.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.queue_check_duration_seconds = Histogram(
+            "queue_check_duration_seconds",
+            "End-to-end parked-session check duration.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.state_restore_failures_total = Counter(
+            "state_restore_failures_total",
+            "Storage-state restoration failures.",
+            registry=self.registry,
+        )
+        self.transfer_restore_failures_total = Counter(
+            "transfer_restore_failures_total",
+            "Official transfer restoration failures.",
+            registry=self.registry,
+        )
+        self.identity_mismatches_total = Counter(
+            "identity_mismatches_total",
+            "Observed Queue IDs that did not match expected identities.",
+            registry=self.registry,
+        )
+        self.navigation_timeouts_total = Counter(
+            "navigation_timeouts_total",
+            "Browser navigation timeouts.",
+            registry=self.registry,
+        )
+        self.checks_total = Counter(
+            "checks_total",
+            "Completed parked-session checks.",
+            registry=self.registry,
+        )
+        self.queue_progress_percentage = Histogram(
+            "queue_progress_percentage",
+            "Aggregate observed Queue-it progress percentage without session labels.",
+            buckets=(0, 10, 25, 50, 75, 90, 100),
+            registry=self.registry,
+        )
+        self.queue_users_ahead = Histogram(
+            "queue_users_ahead",
+            "Aggregate observed users-ahead values without session labels.",
+            buckets=(0, 1, 10, 100, 1_000, 10_000, 100_000),
+            registry=self.registry,
+        )
+        self._session_gauges = self._create_session_gauges()
+        self._started_at = time.monotonic()
+        self._check_count = 0
+        self._check_duration = 0.0
+        self._lock = threading.Lock()
+
+    def _create_session_gauges(self) -> dict[QueueStatus, Gauge]:
+        names = {
+            QueueStatus.CREATING: "queue_sessions_creating",
+            QueueStatus.PRE_QUEUE: "queue_sessions_prequeue",
+            QueueStatus.ACTIVE_QUEUE: "queue_sessions_active",
+            QueueStatus.PARKED: "queue_sessions_parked",
+            QueueStatus.SERVICED_SOON: "queue_sessions_serviced_soon",
+            QueueStatus.TURN_STARTED: "queue_sessions_turn_started",
+            QueueStatus.READY: "queue_sessions_ready",
+            QueueStatus.ADMITTED: "queue_sessions_admitted",
+            QueueStatus.EXPIRED: "queue_sessions_expired",
+            QueueStatus.FAILED: "queue_sessions_failed",
+        }
+        return {
+            status: Gauge(
+                name, f"Persisted sessions currently in {status.value}.", registry=self.registry
+            )
+            for status, name in names.items()
+        }
+
+    def set_target(self, requested: int) -> None:
+        self.queue_sessions_requested.set(requested)
+
+    def record_creation_attempt(self) -> None:
+        self.queue_creation_attempts_total.inc()
+
+    def record_creation_success(self, duration_seconds: float) -> None:
+        self.queue_sessions_created_total.inc()
+        self.queue_ids_acquired_total.inc()
+        self.session_creation_duration_seconds.observe(duration_seconds)
+        self._session_gauges[QueueStatus.PARKED].inc()
+
+    def record_creation_failure(self, duration_seconds: float) -> None:
+        self.queue_creation_failures_total.inc()
+        self.session_creation_duration_seconds.observe(duration_seconds)
+
+    def record_restore(
+        self,
+        duration_seconds: float,
+        *,
+        success: bool,
+        used_storage_state: bool,
+        identity_mismatch: bool,
+        transfer_failures: int | None = None,
+        state_failures: int | None = None,
+    ) -> None:
+        self.session_restore_duration_seconds.observe(duration_seconds)
+        if transfer_failures is not None or state_failures is not None:
+            self.transfer_restore_failures_total.inc(transfer_failures or 0)
+            self.state_restore_failures_total.inc(state_failures or 0)
+        elif not success:
+            if used_storage_state:
+                self.state_restore_failures_total.inc()
+            else:
+                self.transfer_restore_failures_total.inc()
+        if identity_mismatch:
+            self.identity_mismatches_total.inc()
+
+    def record_navigation_timeout(self) -> None:
+        self.navigation_timeouts_total.inc()
+
+    def record_check(self, duration_seconds: float, progress: QueueProgress | None) -> None:
+        self.checks_total.inc()
+        self.queue_check_duration_seconds.observe(duration_seconds)
+        if progress is not None:
+            if progress.progress_percentage is not None:
+                self.queue_progress_percentage.observe(progress.progress_percentage)
+            if progress.users_ahead is not None:
+                self.queue_users_ahead.observe(progress.users_ahead)
+        with self._lock:
+            self._check_count += 1
+            self._check_duration += duration_seconds
+
+    def set_browser_capacity(self, *, active_contexts: int, processes: int) -> None:
+        self.active_browser_contexts.set(active_contexts)
+        self.browser_processes.set(processes)
+
+    def record_browser_crash(self) -> None:
+        self.browser_crashes_total.inc()
+
+    def sync_session_counts(self, sessions: Iterable[QueueSession]) -> None:
+        counts = dict.fromkeys(self._session_gauges, 0)
+        for session in sessions:
+            if session.status in counts:
+                counts[session.status] += 1
+        for status, gauge in self._session_gauges.items():
+            gauge.set(counts[status])
+
+    def record_session_transition(
+        self,
+        previous: QueueStatus,
+        current: QueueStatus,
+    ) -> None:
+        if previous is current:
+            return
+        if previous in self._session_gauges:
+            self._session_gauges[previous].dec()
+        if current in self._session_gauges:
+            self._session_gauges[current].inc()
+
+    def check_statistics(self) -> CheckStatistics:
+        with self._lock:
+            count = self._check_count
+            duration = self._check_duration
+        elapsed = max(time.monotonic() - self._started_at, 1e-9)
+        return CheckStatistics(
+            checks_total=count,
+            checks_per_second=count / elapsed,
+            average_check_duration_seconds=duration / count if count else 0.0,
+        )
+
+    def render(self) -> bytes:
+        return generate_latest(self.registry)

@@ -6,6 +6,8 @@ import signal
 from typing import Protocol
 
 from queue_load_test.browser import BrowserManager
+from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.repository import SessionRepository
 from queue_load_test.scheduler import ParkedSessionScheduler
 
@@ -27,6 +29,7 @@ class ApplicationRuntime:
         monitoring_scheduler: ParkedSessionScheduler,
         creation_runner: CreationRunner | None = None,
         shutdown_timeout_seconds: float = 30.0,
+        observability: PrometheusMetrics | None = None,
     ) -> None:
         if shutdown_timeout_seconds <= 0:
             raise ValueError("shutdown_timeout_seconds must be positive")
@@ -35,6 +38,7 @@ class ApplicationRuntime:
         self._monitoring_scheduler = monitoring_scheduler
         self._creation_runner = creation_runner
         self._shutdown_timeout_seconds = shutdown_timeout_seconds
+        self._observability = observability
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[object]] = []
 
@@ -47,12 +51,16 @@ class ApplicationRuntime:
 
         self._monitoring_scheduler.stop_scheduling()
         self._stop_event.set()
+        log_event(logger, logging.INFO, "shutdown_requested")
 
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
         installed_signals = self._install_signal_handlers(loop)
         try:
             await self._browser_manager.start()
+            log_event(logger, logging.INFO, "application_runtime_started")
+            if self._observability is not None:
+                self._observability.sync_session_counts(await self._repository.list())
             self._tasks.append(
                 asyncio.create_task(
                     self._monitoring_scheduler.run(self._stop_event),
@@ -75,6 +83,7 @@ class ApplicationRuntime:
             )
             await self._browser_manager.shutdown()
             await self._repository.close()
+            log_event(logger, logging.INFO, "application_runtime_stopped")
             self._remove_signal_handlers(loop, installed_signals)
 
     async def _finish_tasks(self) -> None:
