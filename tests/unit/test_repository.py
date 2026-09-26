@@ -8,7 +8,9 @@ import pytest
 from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import (
+    LeaseOwnershipError,
     QueueIdConflictError,
+    SessionRepository,
     SQLiteSessionRepository,
 )
 
@@ -32,6 +34,16 @@ def make_session(
         created_at=NOW,
         next_check_at=next_check_at,
     )
+
+
+def accepts_repository_contract(repository: SessionRepository) -> SessionRepository:
+    return repository
+
+
+def test_sqlite_repository_satisfies_backend_contract(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "contract.sqlite3")
+
+    assert accepts_repository_contract(repository) is repository
 
 
 async def test_create_and_get_session(tmp_path: Path) -> None:
@@ -224,6 +236,66 @@ async def test_release_lease_checks_owner_when_provided(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.worker_id is None
     assert loaded.lease_until is None
+    await repository.close()
+
+
+async def test_reclaimed_lease_fences_stale_worker_update(tmp_path: Path) -> None:
+    database = tmp_path / "lease-fencing.sqlite3"
+    first_repository = SQLiteSessionRepository(database)
+    await first_repository.create(
+        make_session("session-1", status=QueueStatus.PARKED, next_check_at=NOW)
+    )
+    stale_claim = await first_repository.claim_due_sessions(
+        worker_id="crashed-worker",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=1),
+        limit=1,
+    )
+    second_repository = SQLiteSessionRepository(database)
+    await second_repository.initialize()
+    replacement_claim = await second_repository.claim_due_sessions(
+        worker_id="replacement-worker",
+        now=NOW + timedelta(seconds=2),
+        lease_until=NOW + timedelta(seconds=32),
+        limit=1,
+    )
+
+    assert len(stale_claim) == len(replacement_claim) == 1
+    stale_claim[0].last_error = "stale-result"
+    with pytest.raises(LeaseOwnershipError):
+        await first_repository.update(stale_claim[0])
+
+    persisted = await second_repository.get("session-1")
+    assert persisted is not None
+    assert persisted.worker_id == "replacement-worker"
+    assert persisted.lease_until == NOW + timedelta(seconds=32)
+    assert persisted.last_error is None
+
+    await second_repository.close()
+    await first_repository.close()
+
+
+async def test_unleased_snapshot_cannot_clear_another_workers_lease(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "unleased-fencing.sqlite3")
+    await repository.create(make_session("session-1", status=QueueStatus.PARKED, next_check_at=NOW))
+    stale_snapshot = await repository.get("session-1")
+    assert stale_snapshot is not None
+    claimed = await repository.claim_due_sessions(
+        worker_id="worker-1",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        limit=1,
+    )
+
+    assert len(claimed) == 1
+    stale_snapshot.last_error = "stale-unleased-result"
+    with pytest.raises(LeaseOwnershipError):
+        await repository.update(stale_snapshot)
+
+    persisted = await repository.get("session-1")
+    assert persisted is not None
+    assert persisted.worker_id == "worker-1"
+    assert persisted.last_error is None
     await repository.close()
 
 

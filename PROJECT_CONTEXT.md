@@ -9,10 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4 readiness; Prompt 1 complete. The 10,000-session target run
+- Current phase: Phase 4 readiness; Prompts 1–2 complete. The 10,000-session target run
   has not begun.
-- Last completed work: Phase 4 capacity model and 10,000-target configuration
-  validation, `docs/phase4_readiness.md`.
+- Last completed work: Phase 4 PostgreSQL and leasing readiness,
+  `docs/phase4_postgresql_readiness.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -25,7 +25,13 @@ live monitoring.
   the measured Phase 3 synthetic rate, or 21.11–21.16 seconds with an assumed 50%
   planning utilization. Neither is a real Queue-it sweep estimate. SQLite and
   distribution decisions for the larger target remain UNKNOWN.
-- Next planned work: **Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness**. No real
+- Persistence decision: a 10,000-row local SQLite benchmark retained the ordered index
+  and measured 0.940/0.999 ms due-count p50/p95, 0.538/0.691 ms claim-50, and
+  1.550/1.667 ms scheduler-iteration latency. PostgreSQL remains optional and deferred;
+  sustained SQLite writes and distributed PostgreSQL leasing remain UNKNOWN.
+- Lease updates are now owner-fenced. A stale worker cannot overwrite a row after an
+  expired lease is reclaimed, and an unleased stale snapshot cannot clear a new lease.
+- Next planned work: **Phase 4 Prompt 3 — Shared State Storage Readiness**. No real
   acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
@@ -136,10 +142,10 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
 
 - `SQLiteSessionRepository` uses the path from `DATABASE_URL`; the default is
   `sqlite:///queue_load_test.sqlite3`.
-- The repository protocol exposes create, update, get, list, successful-ID count,
-  progress operations, aggregate recovery summary, eligible due-session count, bounded
-  due-session claims, lease release, and close. This is the boundary intended to permit
-  a future PostgreSQL implementation.
+- The repository protocol exposes initialization, create, update, get, list,
+  successful-ID count, progress operations, aggregate recovery summary, eligible
+  due-session count, bounded due-session claims, lease release, and close. This is the
+  boundary intended to permit a future PostgreSQL implementation.
 - SQLite has separate `queue_sessions` and `queue_progress` tables, a unique nullable
   `queue_id`, and lightweight `worker_id`/`lease_until` fields. The due-session query
   uses a partial ordered expression index on
@@ -147,6 +153,9 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   Existing Phase 2 indexes are migrated in place during initialization.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
   `QueueIdConflictError`.
+- Updates from leased snapshots are conditional on the persisted `worker_id`. A stale
+  owner raises `LeaseOwnershipError` after another worker reclaims an expired lease,
+  preventing late browser work from overwriting newer ownership or session data.
 - `FileSystemStateStore` defaults to `.browser-state/<session_id>.json`, validates safe
   session IDs, writes a temporary file, flushes/fsyncs it, applies restrictive file
   permissions, and atomically replaces the destination. Save, load, and delete work is
@@ -372,8 +381,8 @@ generated intervals.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **293 passed, 4 deselected
-  in 19.55 seconds**. The deselected tests were explicitly gated staging harnesses.
+- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **296 passed, 4 deselected
+  in 19.81 seconds**. The deselected tests were explicitly gated staging harnesses.
   Ruff and strict mypy passed (50 source files).
 
 ## Phase 1 Acceptance Results
@@ -541,6 +550,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase3-acceptance.md` — Phase 3 acceptance matrix and evidence limits.
 - `docs/phase4_readiness.md` — Phase 4 capacity model, measured baselines, conditional
   persistence/distribution gates, and remaining unknowns.
+- `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
+  lease-fencing audit, PostgreSQL deferral, and future `SKIP LOCKED` design.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -681,9 +692,8 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness.** Investigate persistence and
-leasing requirements using the Phase 4 capacity model and measured evidence; do not
-assume a database migration or multi-node design is needed.
+**Phase 4 Prompt 3 — Shared State Storage Readiness.** Assess local state-file behavior
+and the evidence gate for shared/object storage without assuming distribution is needed.
 
 ## Instructions for Future AI Sessions
 

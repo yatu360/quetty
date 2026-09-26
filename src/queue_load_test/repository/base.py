@@ -20,6 +20,10 @@ class QueueIdConflictError(RepositoryError):
     """Raised when a non-null Queue ID is already persisted."""
 
 
+class LeaseOwnershipError(RepositoryError):
+    """Raised when stale leased work attempts to overwrite a newer owner."""
+
+
 @dataclass(frozen=True, slots=True)
 class RecoverySummary:
     """Low-cost aggregate view of persisted recovery state."""
@@ -43,6 +47,8 @@ class RecoverySummary:
 
 class SessionRepository(Protocol):
     """Async session operations shared by current and future database backends."""
+
+    async def initialize(self) -> None: ...
 
     async def create(
         self,

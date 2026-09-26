@@ -16,6 +16,7 @@ from queue_load_test.models import (
     validate_transition,
 )
 from queue_load_test.repository.base import (
+    LeaseOwnershipError,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
@@ -334,6 +335,11 @@ class SQLiteSessionRepository:
                 raise SessionNotFoundError(f"Session {session.session_id!r} does not exist")
             validate_transition(QueueStatus.parse(existing["status"]), session.status)
             try:
+                ownership_sql = " AND worker_id IS NULL"
+                ownership_parameters: tuple[object, ...] = ()
+                if session.worker_id is not None:
+                    ownership_sql = " AND worker_id = ?"
+                    ownership_parameters = (session.worker_id,)
                 cursor = connection.execute(
                     """
                     UPDATE queue_sessions SET
@@ -342,9 +348,15 @@ class SQLiteSessionRepository:
                         last_progress_change_at = ?, next_check_at = ?, attempt_count = ?,
                         last_error = ?, worker_id = ?, lease_until = ?
                     WHERE session_id = ?
-                    """,
-                    _session_values(session)[1:] + (session.session_id,),
+                    """
+                    + ownership_sql,
+                    _session_values(session)[1:] + (session.session_id,) + ownership_parameters,
                 )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    raise LeaseOwnershipError(
+                        f"Session {session.session_id!r} lease ownership changed"
+                    )
                 if progress is not None:
                     _save_progress(connection, progress)
                 connection.commit()
@@ -353,8 +365,6 @@ class SQLiteSessionRepository:
                 if "queue_sessions.queue_id" in str(exc):
                     raise QueueIdConflictError("Queue ID already exists") from exc
                 raise
-            if cursor.rowcount != 1:
-                raise SessionNotFoundError(f"Session {session.session_id!r} does not exist")
             return session
 
         return await self._run(operation)

@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompt 1 completed on 2026-09-26; 10,000-session staging run not started.**
+**Status: Prompts 1–2 completed on 2026-09-26; 10,000-session staging run not started.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -400,13 +400,17 @@ Planned prompt breakdown:
    settings validated a 10,000 target with bounded Chrome, worker, queue, claim, and
    lease values; the default remains 1,000. SQLite, shared storage, and distributed
    worker needs remain conditional on later measurements.
-2. **Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness (next).** Examine measured
-   database and lease limits before deciding whether migration is justified. Keep
-   implementation conditional; any later PostgreSQL backend behind `SessionRepository`
-   would need schema, migration, locking, and recovery tests.
-3. **Shared state storage implementation (conditional)** — introduce an object/shared
-   `StateStore` only when multiple nodes require it, retaining atomic/version-safe writes
-   and sensitive-data controls.
+2. **Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness** — **completed on
+   2026-09-26 with PostgreSQL deferred.** A 10,000-row SQLite benchmark measured due
+   count p95 0.999 ms, claim-50 p95 0.691 ms, update p95 0.390 ms, release p95
+   0.317 ms, and scheduler iteration p95 1.667 ms while retaining the ordered partial
+   index. The repository protocol now includes initialization, and leased/unleased
+   updates are owner-fenced against stale snapshots. No measurement justifies a second
+   backend yet; PostgreSQL and distributed `SKIP LOCKED` behavior remain UNKNOWN.
+3. **Phase 4 Prompt 3 — Shared State Storage Readiness (next)** — measure local state
+   behavior and introduce an object/shared `StateStore` only if multiple nodes or
+   storage evidence requires it, retaining atomic/version-safe writes and sensitive-data
+   controls.
 4. **Distributed worker leasing (conditional)** — add creation/monitor workers and
    ownership/heartbeat behavior only after backend prerequisites and failure semantics
    are proven.

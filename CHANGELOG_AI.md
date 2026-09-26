@@ -1969,3 +1969,88 @@ Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: readiness model, calculation helpers/tests, and project records
+
+## 2026-09-26 — Phase 4 Prompt 2 — PostgreSQL and Leasing Readiness
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Measure the current persistence path at 10,000 rows, decide whether PostgreSQL is
+justified, and harden backend-neutral lease ownership for future concurrency.
+
+### Changes Made
+
+- Ran the existing synthetic SQLite repository benchmark with 10,000 rows, 6,000
+  eligible due sessions, 50-row claims, and 20 latency samples.
+- Added `initialize()` to the `SessionRepository` protocol and a compile-checked SQLite
+  contract test so a future backend has an explicit lifecycle contract.
+- Added `LeaseOwnershipError` and conditional update fencing. Leased updates require
+  the persisted worker owner to match; unleased snapshots cannot overwrite a row after
+  another worker leases it.
+- Added crash/reclaim and stale-unleased-snapshot tests proving late work cannot replace
+  a newer lease or session data.
+- Added `docs/phase4_postgresql_readiness.md` with the measured comparison, current
+  schema/index rationale, PostgreSQL `FOR UPDATE SKIP LOCKED` design, future parity-test
+  requirements, migration approach, and decision gates.
+- Updated `PROJECT_CONTEXT.md` and `PHASE_PLAN.md`. PostgreSQL remains optional and
+  deferred; Phase 4 Prompt 3 is next.
+
+### Synthetic 10,000-Row Result
+
+- Seed duration 3,031.017 ms; SQLite database 4,386,816 bytes.
+- Due count p50/p95 0.940/0.999 ms.
+- Transactional claim-50 p50/p95 0.538/0.691 ms.
+- Update p50/p95 0.336/0.390 ms.
+- Owner-checked release p50/p95 0.198/0.317 ms.
+- Scheduler iteration p50/p95 1.550/1.667 ms.
+- Query plan retained `idx_queue_sessions_due` with no temporary ordering tree.
+
+### Tests and Checks Run
+
+- Focused repository/monitoring/creation/benchmark tests — 59 passed.
+- `.venv/bin/ruff check src tests` — passed during focused validation.
+- `.venv/bin/mypy src` — passed with no issues in 50 source files during focused
+  validation.
+- Full `.venv/bin/pytest -q` — 296 passed, 4 gated staging tests deselected in 19.81 s.
+- Final `.venv/bin/ruff check src tests` — passed.
+- Final `.venv/bin/mypy src` — passed with no issues in 50 source files.
+- `git diff --check` — passed.
+
+### PostgreSQL Tests
+
+- NOT RUN. PostgreSQL was not implemented, and no configured PostgreSQL integration
+  database exists. No PostgreSQL performance or `SKIP LOCKED` result is claimed.
+
+### Important Decisions
+
+- The measured 10,000-row local query/claim path does not justify PostgreSQL migration.
+  SQLite remains the only configured backend and stays suitable for local development.
+- PostgreSQL becomes a candidate if sustained write contention, cadence, recovery, or
+  multi-node ownership measurements exceed SQLite's single-writer model.
+- Future PostgreSQL claims must commit before browser work, use bounded row locking with
+  `SKIP LOCKED`, and fence update/release by owner.
+- No additional status, lease, or Queue ID index was added: the ordered partial due
+  index is used, the unique constraint already indexes Queue ID, and measurements do
+  not support another index.
+
+### Known Issues
+
+- Sustained multi-process SQLite write contention and real browser-driven cadence are
+  unmeasured.
+- PostgreSQL schema, migrations, pooling, failover, integration parity, and performance
+  remain UNKNOWN.
+- Lease adequacy depends on real end-to-end restore/check duration, which remains
+  UNKNOWN.
+
+### Follow-Up
+
+Phase 4 Prompt 3 — Shared State Storage Readiness
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: lease fencing, repository contract, readiness report, and project records
