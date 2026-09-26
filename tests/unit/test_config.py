@@ -17,8 +17,8 @@ def settings_kwargs(**overrides: object) -> dict[str, object]:
         "MAX_ACTIVE_CONTEXTS": 5,
         "CREATION_WORKERS": 1,
         "MONITOR_WORKERS": 1,
-        "QUEUE_POLL_SECONDS": 5.0,
-        "POLL_JITTER_SECONDS": 1.0,
+        "QUEUE_POLL_SECONDS": 30.0,
+        "POLL_JITTER_SECONDS": 5.0,
         "HEADLESS": True,
         "DATABASE_URL": "sqlite:///queue_load_test.sqlite3",
         "STATE_DIRECTORY": ".browser-state",
@@ -35,6 +35,7 @@ def test_valid_initial_configuration() -> None:
     assert settings.session_mode is SessionMode.HYBRID
     assert settings.chrome_process_count == 1
     assert settings.max_active_contexts == 5
+    assert settings.queue_poll_seconds == 30
     assert settings.state_directory == Path(".browser-state")
 
 
@@ -56,6 +57,16 @@ def test_rejects_non_http_staging_url() -> None:
 def test_rejects_jitter_equal_to_poll_interval() -> None:
     with pytest.raises(ValidationError, match="POLL_JITTER_SECONDS"):
         Settings(**settings_kwargs(QUEUE_POLL_SECONDS=5.0, POLL_JITTER_SECONDS=5.0))
+
+
+def test_rejects_inverted_adaptive_poll_range() -> None:
+    with pytest.raises(ValidationError, match="PRE_QUEUE_POLL_MIN_SECONDS"):
+        Settings(
+            **settings_kwargs(
+                PRE_QUEUE_POLL_MIN_SECONDS=301,
+                PRE_QUEUE_POLL_MAX_SECONDS=300,
+            )
+        )
 
 
 def test_hybrid_and_transfer_only_mode_parsing() -> None:

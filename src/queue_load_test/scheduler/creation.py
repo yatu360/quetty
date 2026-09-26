@@ -242,6 +242,8 @@ class QueueSessionCreator:
                 state_path=state_path,
                 created_at=observed_at,
                 last_checked_at=observed_at,
+                last_queue_update=progress.last_updated_at,
+                last_progress_change_at=observed_at,
                 next_check_at=observed_at,
                 attempt_count=attempt,
             )

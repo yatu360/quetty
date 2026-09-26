@@ -12,6 +12,14 @@ from queue_load_test.scheduler.creation import (
     SessionCreationHandler,
     TransientCreationError,
 )
+from queue_load_test.scheduler.monitoring import (
+    MonitoringMetrics,
+    MonitoringOutcome,
+    ParkedSessionScheduler,
+    PollingPolicy,
+    QueueSessionMonitor,
+    is_queue_update_stale,
+)
 
 __all__ = [
     "CreationMetrics",
@@ -19,9 +27,15 @@ __all__ = [
     "CreationOutcomeKind",
     "CreationRetryPolicy",
     "CreationWorkItem",
+    "MonitoringMetrics",
+    "MonitoringOutcome",
+    "ParkedSessionScheduler",
     "PermanentCreationError",
+    "PollingPolicy",
     "QueueSessionCreator",
+    "QueueSessionMonitor",
     "SessionCreationController",
     "SessionCreationHandler",
     "TransientCreationError",
+    "is_queue_update_stale",
 ]

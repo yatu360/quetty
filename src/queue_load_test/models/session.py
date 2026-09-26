@@ -68,6 +68,8 @@ class QueueSession:
     status: QueueStatus = QueueStatus.NEW
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_checked_at: datetime | None = None
+    last_queue_update: datetime | None = None
+    last_progress_change_at: datetime | None = None
     next_check_at: datetime | None = None
     attempt_count: int = 0
     last_error: str | None = None

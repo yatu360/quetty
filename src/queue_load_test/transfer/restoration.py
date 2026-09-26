@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, cast
@@ -14,7 +14,7 @@ from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.models import QueueProgress, QueueSession, SessionMode
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import SessionRepository
-from queue_load_test.state import StateStore, StateStoreError
+from queue_load_test.state import BrowserState, StateStore, StateStoreError
 from queue_load_test.transfer.extractor import (
     QueueItTransferExtractor,
     TransferExtractionResult,
@@ -44,6 +44,7 @@ class RestoreFailure(StrEnum):
     STATE_MISSING = "STATE_MISSING"
     STATE_CORRUPT = "STATE_CORRUPT"
     STATE_CONTEXT_FAILED = "STATE_CONTEXT_FAILED"
+    STATE_REFRESH_FAILED = "STATE_REFRESH_FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,7 @@ class RestoreAttempt:
     identity_match: bool | None = None
     progress: QueueProgress | None = None
     failure: RestoreFailure | None = None
+    state_refreshed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,7 @@ class SessionRestoreResult:
     identity_match: bool | None = None
     progress: QueueProgress | None = None
     failure: RestoreFailure | None = None
+    state_refreshed: bool = False
     attempts: tuple[RestoreAttempt, ...] = ()
 
 
@@ -209,7 +212,22 @@ class QueueSessionRestorer:
                         success=False,
                         failure=RestoreFailure.HTTP_FAILURE,
                     )
-                return await self._observe(page, session, method)
+                attempt = await self._observe(page, session, method)
+                if attempt.success and session.mode is SessionMode.HYBRID:
+                    try:
+                        state = cast(BrowserState, await context.storage_state())
+                        session.state_path = await self._state_store.save(
+                            session.session_id,
+                            state,
+                        )
+                    except Exception:  # noqa: BLE001
+                        return replace(
+                            attempt,
+                            success=False,
+                            failure=RestoreFailure.STATE_REFRESH_FAILED,
+                        )
+                    return replace(attempt, state_refreshed=True)
+                return attempt
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
         except Exception:  # noqa: BLE001
@@ -311,5 +329,6 @@ class QueueSessionRestorer:
             identity_match=final_attempt.identity_match,
             progress=final_attempt.progress,
             failure=final_attempt.failure,
+            state_refreshed=final_attempt.state_refreshed,
             attempts=tuple(attempts or (final_attempt,)),
         )

@@ -52,6 +52,8 @@ async def test_update_lifecycle_and_scheduling_fields(tmp_path: Path) -> None:
     session.status = QueueStatus.CREATING
     session.queue_id = "queue-1"
     session.last_checked_at = NOW
+    session.last_queue_update = NOW - timedelta(seconds=2)
+    session.last_progress_change_at = NOW - timedelta(seconds=5)
     session.next_check_at = NOW + timedelta(seconds=10)
     session.attempt_count = 1
     await repository.update(session)
@@ -61,6 +63,8 @@ async def test_update_lifecycle_and_scheduling_fields(tmp_path: Path) -> None:
     assert loaded.status is QueueStatus.CREATING
     assert loaded.queue_id == "queue-1"
     assert loaded.last_checked_at == NOW
+    assert loaded.last_queue_update == NOW - timedelta(seconds=2)
+    assert loaded.last_progress_change_at == NOW - timedelta(seconds=5)
     assert loaded.next_check_at == NOW + timedelta(seconds=10)
     assert loaded.attempt_count == 1
     await repository.close()
@@ -113,9 +117,7 @@ async def test_failed_attempts_do_not_count_as_successful_queue_ids(tmp_path: Pa
 
 async def test_claim_selects_only_due_non_terminal_sessions(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
-    await repository.create(
-        make_session("due", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW)
-    )
+    await repository.create(make_session("due", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW))
     await repository.create(
         make_session(
             "future",
@@ -172,7 +174,7 @@ async def test_active_lease_prevents_claim_until_expiry(tmp_path: Path) -> None:
 
 async def test_release_lease_checks_owner_when_provided(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
-    await repository.create(make_session("session-1", next_check_at=NOW))
+    await repository.create(make_session("session-1", status=QueueStatus.PARKED, next_check_at=NOW))
     await repository.claim_due_sessions(
         worker_id="worker-1",
         now=NOW,

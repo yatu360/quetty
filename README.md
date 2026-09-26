@@ -14,11 +14,12 @@ This phase intentionally implements only:
 - supported Queue-it transfer-link capture with explicit identity-mismatch handling
 - bounded session creation until the configured unique Queue ID target is reached
 - identity-safe TRANSFER_ONLY restoration with HYBRID storage-state fallback
+- bounded parked-session monitoring with SQLite leases and adaptive polling
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement queue monitoring orchestration, admission handling,
-PostgreSQL, Prometheus export, or later transfer workflows.
+It does not implement admission handling, PostgreSQL, Prometheus export, or
+later transfer workflows.
 
 ## Install
 
@@ -63,6 +64,8 @@ python -m pytest
 - `CHROME_PROCESS_COUNT=1`
 - `MAX_CONTEXTS_PER_BROWSER=5`
 - `MAX_ACTIVE_CONTEXTS=5`
+- `QUEUE_POLL_SECONDS=30`
+- adaptive pre-queue, active-queue, serviced-soon, and turn-started intervals
 - SQLite via `DATABASE_URL`
 - local browser state files in `STATE_DIRECTORY`
-- browser-based Queue-it extraction is available; polling orchestration remains a later phase
+- browser-based Queue-it extraction and bounded polling orchestration

@@ -37,6 +37,9 @@ class FakeContext:
     async def new_page(self) -> FakePage:
         return self.page
 
+    async def storage_state(self) -> dict[str, object]:
+        return {"cookies": [{"name": "refreshed"}], "origins": []}
+
 
 class FakeBrowserManager:
     def __init__(self) -> None:
@@ -236,12 +239,17 @@ async def test_hybrid_falls_back_to_storage_state(tmp_path: Path) -> None:
 
     assert result.success
     assert result.method is RestoreMethod.STORAGE_STATE
+    assert result.state_refreshed
     assert [attempt.method for attempt in result.attempts] == [
         RestoreMethod.TRANSFER,
         RestoreMethod.STORAGE_STATE,
     ]
     assert manager.storage_states == [None, state]
     assert all(context.closed for context in manager.contexts)
+    assert await state_store.load(expected.session_id) == {
+        "cookies": [{"name": "refreshed"}],
+        "origins": [],
+    }
     await repository.close()
 
 

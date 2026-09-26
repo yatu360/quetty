@@ -1,0 +1,284 @@
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.repository import SQLiteSessionRepository
+from queue_load_test.scheduler import (
+    MonitoringOutcome,
+    ParkedSessionScheduler,
+    PollingPolicy,
+    QueueSessionMonitor,
+    is_queue_update_stale,
+)
+from queue_load_test.transfer import RestoreMethod, SessionRestoreResult
+
+NOW = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
+
+
+def make_session(
+    session_id: str,
+    *,
+    next_check_at: datetime | None = NOW,
+) -> QueueSession:
+    return QueueSession(
+        session_id=session_id,
+        queue_id=f"queue-{session_id}",
+        transfer_url=f"https://queue.test/journey?q=queue-{session_id}",
+        mode=SessionMode.TRANSFER_ONLY,
+        status=QueueStatus.PARKED,
+        state_path=Path(f".browser-state/{session_id}.json"),
+        next_check_at=next_check_at,
+    )
+
+
+@dataclass
+class ReparkingHandler:
+    repository: SQLiteSessionRepository
+    delay_seconds: float = 30
+
+    async def check(self, session: QueueSession) -> MonitoringOutcome:
+        session.next_check_at = NOW + timedelta(seconds=self.delay_seconds)
+        await self.repository.update(session)
+        return MonitoringOutcome(
+            session_id=session.session_id,
+            success=True,
+            observed_status=session.status,
+            next_check_at=session.next_check_at,
+            queue_update_stale=False,
+            progress_changed=False,
+        )
+
+
+class BlockingHandler:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.active_ids: set[str] = set()
+        self.duplicate_check = False
+
+    async def check(self, session: QueueSession) -> MonitoringOutcome:
+        if session.session_id in self.active_ids:
+            self.duplicate_check = True
+        self.active_ids.add(session.session_id)
+        self.started.set()
+        await self.release.wait()
+        self.active_ids.remove(session.session_id)
+        next_check = NOW + timedelta(seconds=30)
+        return MonitoringOutcome(
+            session_id=session.session_id,
+            success=True,
+            observed_status=session.status,
+            next_check_at=next_check,
+            queue_update_stale=False,
+            progress_changed=False,
+        )
+
+
+class StaticRestorer:
+    def __init__(self, progress: QueueProgress) -> None:
+        self.progress = progress
+
+    async def restore(self, session: QueueSession) -> SessionRestoreResult:
+        return SessionRestoreResult(
+            method=RestoreMethod.TRANSFER,
+            success=True,
+            expected_queue_id=session.queue_id,
+            observed_queue_id=session.queue_id,
+            identity_match=True,
+            progress=self.progress,
+        )
+
+
+async def test_due_sessions_are_claimed_and_future_sessions_are_not(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    await repository.create(make_session("due-1"))
+    await repository.create(make_session("due-2", next_check_at=NOW - timedelta(seconds=1)))
+    await repository.create(make_session("future", next_check_at=NOW + timedelta(minutes=1)))
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=ReparkingHandler(repository),
+        worker_count=1,
+        queue_capacity=5,
+        claim_batch_size=5,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    claimed = await scheduler.schedule_due()
+
+    assert claimed == 2
+    assert scheduler.queue_size == 2
+    future = await repository.get("future")
+    assert future is not None
+    assert future.worker_id is None
+    await repository.close()
+
+
+async def test_bounded_queue_applies_backpressure_before_claiming_more(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    for index in range(5):
+        await repository.create(make_session(f"session-{index}"))
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=ReparkingHandler(repository),
+        worker_count=1,
+        queue_capacity=2,
+        claim_batch_size=2,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    assert await scheduler.schedule_due() == 2
+    assert scheduler.queue_size == scheduler.queue_capacity == 2
+    assert await scheduler.schedule_due() == 0
+    sessions = await repository.list()
+    assert sum(item.worker_id == "scheduler-1" for item in sessions) == 2
+    assert scheduler.metrics.maximum_queue_depth == 2
+    await repository.close()
+
+
+async def test_fixed_worker_reparks_and_releases_lease(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    await repository.create(make_session("due"))
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=ReparkingHandler(repository),
+        worker_count=1,
+        queue_capacity=1,
+        claim_batch_size=1,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    await scheduler.start()
+    assert scheduler.worker_task_count == 1
+    assert await scheduler.schedule_due() == 1
+    await scheduler.wait_until_idle()
+    await scheduler.shutdown()
+
+    persisted = await repository.get("due")
+    assert persisted is not None
+    assert persisted.next_check_at == NOW + timedelta(seconds=30)
+    assert persisted.worker_id is None
+    assert persisted.lease_until is None
+    assert scheduler.metrics.completed == 1
+    await repository.close()
+
+
+async def test_active_lease_prevents_simultaneous_check_of_same_session(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    await repository.create(make_session("due"))
+    handler = BlockingHandler()
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=2,
+        queue_capacity=2,
+        claim_batch_size=2,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+
+    await scheduler.start()
+    assert await scheduler.schedule_due() == 1
+    await handler.started.wait()
+    assert await scheduler.schedule_due() == 0
+    handler.release.set()
+    await scheduler.wait_until_idle()
+    await scheduler.shutdown()
+
+    assert not handler.duplicate_check
+    assert scheduler.metrics.completed == 1
+    await repository.close()
+
+
+def test_adaptive_intervals_follow_lifecycle_ranges() -> None:
+    policy = PollingPolicy(jitter_seconds=5)
+    early = QueueProgress(session_id="s", active_queue=True, progress_percentage=10)
+    mid = QueueProgress(session_id="s", active_queue=True, progress_percentage=70)
+
+    assert 60 <= policy.interval_seconds(QueueStatus.PRE_QUEUE, None, jitter=lambda *_: 0) <= 300
+    assert (
+        60 <= policy.interval_seconds(QueueStatus.ACTIVE_QUEUE, early, jitter=lambda *_: 0) <= 120
+    )
+    assert 30 <= policy.interval_seconds(QueueStatus.ACTIVE_QUEUE, mid, jitter=lambda *_: 0) <= 60
+    assert 10 <= policy.interval_seconds(QueueStatus.SERVICED_SOON, None, jitter=lambda *_: 0) <= 30
+    assert policy.interval_seconds(QueueStatus.TURN_STARTED, None) == 0
+
+
+def test_poll_jitter_spreads_sessions_without_leaving_configured_range() -> None:
+    policy = PollingPolicy(jitter_seconds=5)
+
+    low = policy.interval_seconds(QueueStatus.SERVICED_SOON, None, jitter=lambda *_: -5)
+    high = policy.interval_seconds(QueueStatus.SERVICED_SOON, None, jitter=lambda *_: 5)
+
+    assert low == 15
+    assert high == 25
+
+
+async def test_monitor_tracks_updates_changes_staleness_and_next_check(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    parked = make_session("session-1")
+    parked.last_progress_change_at = NOW - timedelta(minutes=5)
+    previous = QueueProgress(
+        session_id=parked.session_id,
+        queue_number="100",
+        users_ahead=50,
+        progress_percentage=25,
+        last_updated_at=NOW - timedelta(minutes=4),
+        active_queue=True,
+    )
+    await repository.create(parked, previous)
+    current = QueueProgress(
+        session_id=parked.session_id,
+        queue_number="100",
+        users_ahead=50,
+        progress_percentage=25,
+        last_updated_at=NOW - timedelta(seconds=10),
+        active_queue=True,
+    )
+    monitor = QueueSessionMonitor(
+        repository=repository,
+        restorer=StaticRestorer(current),
+        polling_policy=PollingPolicy(jitter_seconds=0, stale_update_seconds=60),
+        clock=lambda: NOW,
+    )
+
+    outcome = await monitor.check(parked)
+
+    assert outcome.success
+    assert not outcome.progress_changed
+    assert not outcome.queue_update_stale
+    assert outcome.observed_status is QueueStatus.ACTIVE_QUEUE
+    persisted = await repository.get(parked.session_id)
+    assert persisted is not None
+    assert persisted.last_queue_update == NOW - timedelta(seconds=10)
+    assert persisted.last_progress_change_at == NOW - timedelta(minutes=5)
+    assert persisted.next_check_at == NOW + timedelta(seconds=90)
+    await repository.close()
+
+
+def test_stale_update_detection_does_not_treat_missing_timestamp_as_failure() -> None:
+    assert not is_queue_update_stale(None, now=NOW, stale_after_seconds=60)
+    assert not is_queue_update_stale(
+        NOW - timedelta(seconds=30),
+        now=NOW,
+        stale_after_seconds=60,
+    )
+    assert is_queue_update_stale(
+        NOW - timedelta(seconds=61),
+        now=NOW,
+        stale_after_seconds=60,
+    )

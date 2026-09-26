@@ -24,8 +24,8 @@ _T = TypeVar("_T")
 
 _SESSION_COLUMNS = """
     session_id, queue_id, transfer_url, mode, status, state_path,
-    created_at, last_checked_at, next_check_at, attempt_count, last_error,
-    worker_id, lease_until
+    created_at, last_checked_at, last_queue_update, last_progress_change_at,
+    next_check_at, attempt_count, last_error, worker_id, lease_until
 """
 
 _SCHEMA = """
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     state_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_checked_at TEXT,
+    last_queue_update TEXT,
+    last_progress_change_at TEXT,
     next_check_at TEXT,
     attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
     last_error TEXT,
@@ -97,6 +99,8 @@ def _session_values(session: QueueSession) -> tuple[object, ...]:
         str(session.state_path),
         _to_storage(session.created_at),
         _to_storage(session.last_checked_at),
+        _to_storage(session.last_queue_update),
+        _to_storage(session.last_progress_change_at),
         _to_storage(session.next_check_at),
         session.attempt_count,
         session.last_error,
@@ -118,6 +122,8 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
         state_path=Path(row["state_path"]),
         created_at=created_at,
         last_checked_at=_from_storage(row["last_checked_at"]),
+        last_queue_update=_from_storage(row["last_queue_update"]),
+        last_progress_change_at=_from_storage(row["last_progress_change_at"]),
         next_check_at=_from_storage(row["next_check_at"]),
         attempt_count=row["attempt_count"],
         last_error=row["last_error"],
@@ -230,11 +236,22 @@ class SQLiteSessionRepository:
             connection.execute("PRAGMA busy_timeout = 5000")
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(_SCHEMA)
+            self._migrate_session_columns(connection)
             connection.commit()
             if self._database != ":memory:":
                 Path(self._database).chmod(0o600)
             self._connection = connection
         return self._connection
+
+    @staticmethod
+    def _migrate_session_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(queue_sessions)").fetchall()
+        }
+        for name in ("last_queue_update", "last_progress_change_at"):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE queue_sessions ADD COLUMN {name} TEXT")
 
     def _initialize(self) -> None:
         self._connect()
@@ -256,7 +273,7 @@ class SQLiteSessionRepository:
             try:
                 connection.execute(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _session_values(session),
                 )
                 if progress is not None:
@@ -293,8 +310,9 @@ class SQLiteSessionRepository:
                     """
                     UPDATE queue_sessions SET
                         queue_id = ?, transfer_url = ?, mode = ?, status = ?, state_path = ?,
-                        created_at = ?, last_checked_at = ?, next_check_at = ?,
-                        attempt_count = ?, last_error = ?, worker_id = ?, lease_until = ?
+                        created_at = ?, last_checked_at = ?, last_queue_update = ?,
+                        last_progress_change_at = ?, next_check_at = ?, attempt_count = ?,
+                        last_error = ?, worker_id = ?, lease_until = ?
                     WHERE session_id = ?
                     """,
                     _session_values(session)[1:] + (session.session_id,),
@@ -411,7 +429,7 @@ class SQLiteSessionRepository:
                     FROM queue_sessions
                     WHERE (next_check_at IS NULL OR next_check_at <= ?)
                       AND (lease_until IS NULL OR lease_until <= ?)
-                      AND status NOT IN (?, ?, ?)
+                      AND status NOT IN (?, ?, ?, ?, ?)
                     ORDER BY COALESCE(next_check_at, created_at), created_at, session_id
                     LIMIT ?
                     """,
@@ -421,6 +439,8 @@ class SQLiteSessionRepository:
                         QueueStatus.ADMITTED.value,
                         QueueStatus.EXPIRED.value,
                         QueueStatus.FAILED.value,
+                        QueueStatus.NEW.value,
+                        QueueStatus.CREATING.value,
                         limit,
                     ),
                 ).fetchall()
