@@ -288,8 +288,9 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: Prompts 1–5 completed locally; Queue-it staging scalability remains
-unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
+**Status: PARTIAL acceptance on 2026-09-26 (20 PASS, 1 FAIL, 11 UNKNOWN). Local
+1,000-row persistence, scheduling, storage, and recovery are accepted; Queue-it staging
+scalability remains unverified. See `docs/phase3-acceptance.md`.**
 
 Target profile:
 
@@ -364,11 +365,13 @@ Planned prompt breakdown:
    failure, transfer/state failure, missing/corrupt state, identity mismatch, and
    613-to-1,000 continuation without replacement. Real Chrome/Queue-it restart behavior
    remains UNKNOWN.
-8. **SQLite versus PostgreSQL decision** — use measured latency, locking, recovery, and
-   operational requirements to decide whether migration is justified; do not migrate by
-   default.
-9. **Phase 3 acceptance report** — record PASS/FAIL/UNKNOWN gates and the evidence-based
-   Phase 4 architecture recommendation.
+8. **SQLite versus PostgreSQL decision and Phase 3 acceptance report** — **completed on
+   2026-09-26 with PARTIAL acceptance.** SQLite remains adequate for the measured
+   single-host 1,000-row workload, and there is no current measurement that justifies
+   PostgreSQL. Distribution remains UNKNOWN because browser-backed acquisition and
+   monitoring cadence were not measured. The final report records 20 PASS, 1 FAIL, and
+   11 UNKNOWN. Phase 4 Prompt 1 is next, but the 10,000-session target run remains blocked
+   pending a real capacity model and resolution of the report's evidence gaps.
 
 ## Phase 4 — 10,000 Sessions
 

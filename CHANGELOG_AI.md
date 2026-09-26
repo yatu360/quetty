@@ -1838,3 +1838,68 @@ Phase 3 Prompt 8 — Phase 3 Acceptance Report
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 7 implementation, tests, benchmark, and documentation
+
+## 2026-09-26 — Phase 3 Acceptance Report
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Consolidate all Phase 3 measured evidence, decide what is actually proven at
+1,000-session scale, and record readiness constraints without beginning Phase 4.
+
+### Changes Made
+
+- Added `docs/phase3-acceptance.md` with the exact repository, browser-capacity,
+  acquisition-correctness, monitoring, storage, and recovery configurations tested.
+- Classified all 32 requested questions using only PASS, FAIL, and UNKNOWN. The result
+  is 20 PASS, 1 FAIL, and 11 UNKNOWN; Phase 3 closes as PARTIAL.
+- Kept synthetic scheduler throughput separate from real Queue-it throughput and left
+  all unobserved staging-dependent acquisition/restore/monitoring behavior UNKNOWN.
+- Left reliability at 50, 75, and 100 contexts UNKNOWN because the runs lasted two
+  seconds against an in-memory page. The 75- and 100-context candidates additionally
+  crossed the conservative summed-RSS pressure indicator, despite completing without
+  recorded browser failures.
+- Retained SQLite for the measured single-host 1,000-row scale. Distribution remains
+  undecided because real browser-backed cadence is unavailable.
+- Updated `PROJECT_CONTEXT.md` and `PHASE_PLAN.md`; Phase 4 Prompt 1 is next, but no
+  Phase 4 implementation or 10,000-session run was started.
+
+### Evidence Summary
+
+- Synthetic monitoring: 944.98/947.26 checks/s and 1.0582/1.0557-second full sweeps,
+  with both 1,000-row backlogs draining to zero.
+- Browser capacity: 50/75/100 local contexts all completed, but summed peak RSS crossed
+  the configured pressure indicator at 75 and 100.
+- Storage: 1,000 rows, 1,000 files, 417,792-byte SQLite database, and 1,249,000 bytes of
+  deterministic state JSON; restart scan found zero inconsistencies.
+- Recovery: five restarts preserved 1,000 rows and 960 valid Queue IDs; exactly 50
+  expired leases recovered while 50 active leases were left untouched.
+- Authorised Queue-it Phase 3 acquisition, restore, browser monitoring, and restart:
+  NOT RUN.
+
+### Follow-Up
+
+Phase 4 Prompt 1 — readiness and capacity model. Address the acceptance blockers before
+attempting `TARGET_QUEUE_IDS=10000`; do not treat the scale increase as a configuration
+change.
+
+### Tests and Checks Run
+
+- `.venv/bin/pytest -q` — 281 passed, 4 gated staging tests deselected in 19.54 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 49 source files.
+- `git diff --check` — passed.
+
+### Staging Tests
+
+- NOT RUN. The existing Phase 3 evidence records no authorised Queue-it staging
+  configuration or execution gates; this documentation task sent no staging traffic.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 acceptance report and project-status documentation

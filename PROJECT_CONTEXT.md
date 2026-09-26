@@ -9,16 +9,18 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–7 complete locally.
-- Last completed work: Phase 3 Prompt 7 — synthetic recovery, repeated restart, and
-  expired-lease resumption across 1,000 persisted sessions.
-- Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
-  and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
-  benchmark has run, and Phase 2 measurement gaps remain.
+- Current phase: Phase 3 — 1,000 Sessions, closed with PARTIAL acceptance.
+- Last completed work: Phase 3 acceptance report, `docs/phase3-acceptance.md`.
+- Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
+  bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
+  and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
+  Queue-it staging benchmark ran, so real acquisition, restore, monitoring, and identity
+  reliability remain unproven.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 8 — Phase 3 Acceptance Report**.
-  No real acquisition or monitoring throughput should be inferred from synthetic tests.
+- Next planned work: **Phase 4 Prompt 1 — readiness and capacity model**. This is a
+  planning/evidence task, not authorization to begin the 10,000-session run. No real
+  acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
