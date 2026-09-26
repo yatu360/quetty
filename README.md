@@ -13,6 +13,7 @@ This phase intentionally implements only:
 - live, defensive Queue-it DOM state extraction after JavaScript execution
 - supported Queue-it transfer-link capture with explicit identity-mismatch handling
 - bounded session creation until the configured unique Queue ID target is reached
+- identity-safe TRANSFER_ONLY restoration with HYBRID storage-state fallback
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
@@ -42,6 +43,12 @@ The SQLite database, transfer URLs, and browser-state files contain sensitive
 session data. The default local files are git-ignored and should not be logged
 or shared. Queue IDs and transfer URLs are also excluded from model result
 representations.
+
+HYBRID restoration prefers the official Queue-it transfer URL and supplies saved
+Playwright storage state only as a fallback. Storage state is not a complete
+browser snapshot: it does not preserve JavaScript memory, timers, WebSockets,
+the execution stack, every form of session storage, every browser store, or live
+service-worker state.
 
 ## Test
 

@@ -8,10 +8,22 @@ from queue_load_test.transfer.extractor import (
     TransferFailure,
     TransferSelector,
 )
+from queue_load_test.transfer.restoration import (
+    QueueSessionRestorer,
+    RestoreAttempt,
+    RestoreFailure,
+    RestoreMethod,
+    SessionRestoreResult,
+)
 
 __all__ = [
     "QueueItTransferExtractor",
     "QueueItTransferSelectors",
+    "QueueSessionRestorer",
+    "RestoreAttempt",
+    "RestoreFailure",
+    "RestoreMethod",
+    "SessionRestoreResult",
     "TransferExtractionDiagnostics",
     "TransferExtractionResult",
     "TransferFailure",

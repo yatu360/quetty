@@ -8,7 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
-from queue_load_test.models import QueueSession, QueueStatus, SessionMode, validate_transition
+from queue_load_test.models import (
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+    validate_transition,
+)
 from queue_load_test.repository.base import (
     QueueIdConflictError,
     SessionNotFoundError,
@@ -40,6 +46,23 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_queue_sessions_due
     ON queue_sessions (next_check_at, lease_until, status);
+CREATE TABLE IF NOT EXISTS queue_progress (
+    session_id TEXT PRIMARY KEY REFERENCES queue_sessions(session_id) ON DELETE CASCADE,
+    queue_number TEXT,
+    users_ahead INTEGER,
+    progress_percentage REAL,
+    estimated_wait_text TEXT,
+    expected_service_time TEXT,
+    last_updated_at TEXT,
+    queue_paused INTEGER,
+    first_in_line INTEGER,
+    serviced_soon INTEGER,
+    turn_started INTEGER,
+    connection_lost INTEGER,
+    pre_queue INTEGER,
+    active_queue INTEGER,
+    manual_update_warning TEXT
+);
 """
 
 
@@ -103,6 +126,83 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
     )
 
 
+def _to_boolean_storage(value: bool | None) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _from_boolean_storage(value: int | None) -> bool | None:
+    return bool(value) if value is not None else None
+
+
+def _progress_values(progress: QueueProgress) -> tuple[object, ...]:
+    return (
+        progress.session_id,
+        progress.queue_number,
+        progress.users_ahead,
+        progress.progress_percentage,
+        progress.estimated_wait_text,
+        _to_storage(progress.expected_service_time),
+        _to_storage(progress.last_updated_at),
+        _to_boolean_storage(progress.queue_paused),
+        _to_boolean_storage(progress.first_in_line),
+        _to_boolean_storage(progress.serviced_soon),
+        _to_boolean_storage(progress.turn_started),
+        _to_boolean_storage(progress.connection_lost),
+        _to_boolean_storage(progress.pre_queue),
+        _to_boolean_storage(progress.active_queue),
+        progress.manual_update_warning,
+    )
+
+
+def _row_to_progress(row: sqlite3.Row) -> QueueProgress:
+    return QueueProgress(
+        session_id=row["session_id"],
+        queue_number=row["queue_number"],
+        users_ahead=row["users_ahead"],
+        progress_percentage=row["progress_percentage"],
+        estimated_wait_text=row["estimated_wait_text"],
+        expected_service_time=_from_storage(row["expected_service_time"]),
+        last_updated_at=_from_storage(row["last_updated_at"]),
+        queue_paused=_from_boolean_storage(row["queue_paused"]),
+        first_in_line=_from_boolean_storage(row["first_in_line"]),
+        serviced_soon=_from_boolean_storage(row["serviced_soon"]),
+        turn_started=_from_boolean_storage(row["turn_started"]),
+        connection_lost=_from_boolean_storage(row["connection_lost"]),
+        pre_queue=_from_boolean_storage(row["pre_queue"]),
+        active_queue=_from_boolean_storage(row["active_queue"]),
+        manual_update_warning=row["manual_update_warning"],
+    )
+
+
+def _save_progress(connection: sqlite3.Connection, progress: QueueProgress) -> None:
+    connection.execute(
+        """
+        INSERT INTO queue_progress (
+            session_id, queue_number, users_ahead, progress_percentage,
+            estimated_wait_text, expected_service_time, last_updated_at,
+            queue_paused, first_in_line, serviced_soon, turn_started,
+            connection_lost, pre_queue, active_queue, manual_update_warning
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            queue_number = excluded.queue_number,
+            users_ahead = excluded.users_ahead,
+            progress_percentage = excluded.progress_percentage,
+            estimated_wait_text = excluded.estimated_wait_text,
+            expected_service_time = excluded.expected_service_time,
+            last_updated_at = excluded.last_updated_at,
+            queue_paused = excluded.queue_paused,
+            first_in_line = excluded.first_in_line,
+            serviced_soon = excluded.serviced_soon,
+            turn_started = excluded.turn_started,
+            connection_lost = excluded.connection_lost,
+            pre_queue = excluded.pre_queue,
+            active_queue = excluded.active_queue,
+            manual_update_warning = excluded.manual_update_warning
+        """,
+        _progress_values(progress),
+    )
+
+
 class SQLiteSessionRepository:
     """Serialized async access to one SQLite connection.
 
@@ -143,7 +243,14 @@ class SQLiteSessionRepository:
         async with self._lock:
             return await asyncio.to_thread(operation)
 
-    async def create(self, session: QueueSession) -> QueueSession:
+    async def create(
+        self,
+        session: QueueSession,
+        progress: QueueProgress | None = None,
+    ) -> QueueSession:
+        if progress is not None and progress.session_id != session.session_id:
+            raise ValueError("Progress session_id must match the session")
+
         def operation() -> QueueSession:
             connection = self._connect()
             try:
@@ -152,6 +259,8 @@ class SQLiteSessionRepository:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _session_values(session),
                 )
+                if progress is not None:
+                    _save_progress(connection, progress)
                 connection.commit()
             except sqlite3.IntegrityError as exc:
                 connection.rollback()
@@ -162,7 +271,14 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
-    async def update(self, session: QueueSession) -> QueueSession:
+    async def update(
+        self,
+        session: QueueSession,
+        progress: QueueProgress | None = None,
+    ) -> QueueSession:
+        if progress is not None and progress.session_id != session.session_id:
+            raise ValueError("Progress session_id must match the session")
+
         def operation() -> QueueSession:
             connection = self._connect()
             existing = connection.execute(
@@ -183,6 +299,8 @@ class SQLiteSessionRepository:
                     """,
                     _session_values(session)[1:] + (session.session_id,),
                 )
+                if progress is not None:
+                    _save_progress(connection, progress)
                 connection.commit()
             except sqlite3.IntegrityError as exc:
                 connection.rollback()
@@ -236,6 +354,31 @@ class SQLiteSessionRepository:
                 (QueueStatus.FAILED.value,),
             ).fetchone()
             return int(row["total"])
+
+        return await self._run(operation)
+
+    async def save_progress(self, progress: QueueProgress) -> QueueProgress:
+        def operation() -> QueueProgress:
+            connection = self._connect()
+            try:
+                _save_progress(connection, progress)
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise SessionNotFoundError(
+                    f"Session {progress.session_id!r} does not exist"
+                ) from exc
+            return progress
+
+        return await self._run(operation)
+
+    async def get_progress(self, session_id: str) -> QueueProgress | None:
+        def operation() -> QueueProgress | None:
+            row = self._connect().execute(
+                "SELECT * FROM queue_progress WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return _row_to_progress(row) if row is not None else None
 
         return await self._run(operation)
 

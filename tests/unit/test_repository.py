@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from queue_load_test.models import QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import (
     QueueIdConflictError,
     SQLiteSessionRepository,
@@ -200,4 +200,26 @@ async def test_sessions_survive_repository_restart(tmp_path: Path) -> None:
     loaded = await restarted_repository.get("session-1")
 
     assert loaded == expected
+    await restarted_repository.close()
+
+
+async def test_progress_survives_repository_restart(tmp_path: Path) -> None:
+    database = tmp_path / "sessions.sqlite3"
+    first_repository = SQLiteSessionRepository(database)
+    expected_session = make_session("session-1", queue_id="queue-1")
+    expected_progress = QueueProgress(
+        session_id="session-1",
+        queue_number="123",
+        users_ahead=12,
+        progress_percentage=42,
+        queue_paused=False,
+        active_queue=True,
+    )
+    await first_repository.create(expected_session, expected_progress)
+    await first_repository.close()
+
+    restarted_repository = SQLiteSessionRepository(database)
+    loaded = await restarted_repository.get_progress("session-1")
+
+    assert loaded == expected_progress
     await restarted_repository.close()

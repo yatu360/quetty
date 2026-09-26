@@ -246,7 +246,7 @@ class QueueSessionCreator:
                 attempt_count=attempt,
             )
             try:
-                await self._repository.create(session)
+                await self._repository.create(session, progress)
             except QueueIdConflictError:
                 if state_saved:
                     await self._state_store.delete(work_item.session_id)

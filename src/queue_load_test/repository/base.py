@@ -4,7 +4,7 @@ import builtins
 from datetime import datetime
 from typing import Protocol
 
-from queue_load_test.models import QueueSession, QueueStatus
+from queue_load_test.models import QueueProgress, QueueSession, QueueStatus
 
 
 class RepositoryError(RuntimeError):
@@ -22,9 +22,17 @@ class QueueIdConflictError(RepositoryError):
 class SessionRepository(Protocol):
     """Async session operations shared by current and future database backends."""
 
-    async def create(self, session: QueueSession) -> QueueSession: ...
+    async def create(
+        self,
+        session: QueueSession,
+        progress: QueueProgress | None = None,
+    ) -> QueueSession: ...
 
-    async def update(self, session: QueueSession) -> QueueSession: ...
+    async def update(
+        self,
+        session: QueueSession,
+        progress: QueueProgress | None = None,
+    ) -> QueueSession: ...
 
     async def get(self, session_id: str) -> QueueSession | None: ...
 
@@ -33,6 +41,10 @@ class SessionRepository(Protocol):
     ) -> builtins.list[QueueSession]: ...
 
     async def count_successful_queue_ids(self) -> int: ...
+
+    async def save_progress(self, progress: QueueProgress) -> QueueProgress: ...
+
+    async def get_progress(self, session_id: str) -> QueueProgress | None: ...
 
     async def claim_due_sessions(
         self,

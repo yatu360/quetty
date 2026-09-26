@@ -1,0 +1,315 @@
+"""Restore persisted Queue-it sessions without changing their expected identity."""
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Protocol, cast
+
+from playwright.async_api import Page
+
+from queue_load_test.browser import BrowserManager
+from queue_load_test.browser.manager import ContextStorageState
+from queue_load_test.models import QueueProgress, QueueSession, SessionMode
+from queue_load_test.queue_monitor import QueueItLiveStateExtractor
+from queue_load_test.repository import SessionRepository
+from queue_load_test.state import StateStore, StateStoreError
+from queue_load_test.transfer.extractor import (
+    QueueItTransferExtractor,
+    TransferExtractionResult,
+    TransferFailure,
+)
+
+type Sleep = Callable[[float], Awaitable[None]]
+
+
+class RestoreMethod(StrEnum):
+    """Supported ways to resume a persisted Queue-it journey."""
+
+    TRANSFER = "TRANSFER"
+    STORAGE_STATE = "STORAGE_STATE"
+
+
+class RestoreFailure(StrEnum):
+    """Sanitized, observable restoration failure reasons."""
+
+    EXPECTED_IDENTITY_MISSING = "EXPECTED_IDENTITY_MISSING"
+    TRANSFER_URL_MISSING = "TRANSFER_URL_MISSING"
+    NAVIGATION_FAILED = "NAVIGATION_FAILED"
+    HTTP_FAILURE = "HTTP_FAILURE"
+    TRANSFER_UNAVAILABLE = "TRANSFER_UNAVAILABLE"
+    IDENTITY_UNVERIFIED = "IDENTITY_UNVERIFIED"
+    IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+    STATE_MISSING = "STATE_MISSING"
+    STATE_CORRUPT = "STATE_CORRUPT"
+    STATE_CONTEXT_FAILED = "STATE_CONTEXT_FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreAttempt:
+    """One transfer or storage-state attempt, without exposing sensitive values."""
+
+    method: RestoreMethod
+    success: bool
+    observed_queue_id: str | None = field(default=None, repr=False)
+    identity_match: bool | None = None
+    progress: QueueProgress | None = None
+    failure: RestoreFailure | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRestoreResult:
+    """Final restoration outcome and the attempts that led to it."""
+
+    method: RestoreMethod
+    success: bool
+    expected_queue_id: str | None = field(default=None, repr=False)
+    observed_queue_id: str | None = field(default=None, repr=False)
+    identity_match: bool | None = None
+    progress: QueueProgress | None = None
+    failure: RestoreFailure | None = None
+    attempts: tuple[RestoreAttempt, ...] = ()
+
+
+class TransferExtractor(Protocol):
+    async def extract(
+        self,
+        page: Page,
+        *,
+        expected_queue_id: str | None = None,
+    ) -> TransferExtractionResult: ...
+
+
+type TransferExtractorFactory = Callable[[str], TransferExtractor]
+
+
+class QueueSessionRestorer:
+    """Restore a session through supported Queue-it browser mechanisms.
+
+    Storage state is only a fallback for HYBRID sessions. It restores the
+    cookies and browser storage represented by Playwright's storage-state
+    document; it is deliberately not treated as a complete browser snapshot.
+    """
+
+    def __init__(
+        self,
+        *,
+        browser_manager: BrowserManager,
+        repository: SessionRepository,
+        state_store: StateStore,
+        expected_journey_url: str,
+        live_extractor: QueueItLiveStateExtractor | None = None,
+        transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
+        navigation_timeout_ms: float = 30_000,
+        observation_timeout_seconds: float = 10.0,
+        observation_interval_seconds: float = 0.25,
+        sleep: Sleep = asyncio.sleep,
+    ) -> None:
+        if navigation_timeout_ms <= 0:
+            raise ValueError("navigation_timeout_ms must be positive")
+        if observation_timeout_seconds < 0:
+            raise ValueError("observation_timeout_seconds cannot be negative")
+        if observation_interval_seconds < 0:
+            raise ValueError("observation_interval_seconds cannot be negative")
+        self._browser_manager = browser_manager
+        self._repository = repository
+        self._state_store = state_store
+        self._expected_journey_url = expected_journey_url
+        self._live_extractor = live_extractor or QueueItLiveStateExtractor()
+        self._transfer_extractor_factory = transfer_extractor_factory
+        self._navigation_timeout_ms = navigation_timeout_ms
+        self._observation_timeout_seconds = observation_timeout_seconds
+        self._observation_interval_seconds = observation_interval_seconds
+        self._sleep = sleep
+
+    async def restore(self, session: QueueSession) -> SessionRestoreResult:
+        """Restore one session, preserving its persisted Queue-it identity."""
+
+        expected_queue_id = session.queue_id
+        if expected_queue_id is None:
+            result = self._result(
+                RestoreAttempt(
+                    method=RestoreMethod.TRANSFER,
+                    success=False,
+                    failure=RestoreFailure.EXPECTED_IDENTITY_MISSING,
+                ),
+                expected_queue_id,
+            )
+            await self._record(session, result)
+            return result
+        if not session.transfer_url.strip():
+            result = self._result(
+                RestoreAttempt(
+                    method=RestoreMethod.TRANSFER,
+                    success=False,
+                    failure=RestoreFailure.TRANSFER_URL_MISSING,
+                ),
+                expected_queue_id,
+            )
+            await self._record(session, result)
+            return result
+
+        attempts: list[RestoreAttempt] = []
+        transfer_attempt = await self._browser_attempt(
+            session,
+            method=RestoreMethod.TRANSFER,
+        )
+        attempts.append(transfer_attempt)
+        if transfer_attempt.success or session.mode is SessionMode.TRANSFER_ONLY:
+            result = self._result(transfer_attempt, expected_queue_id, attempts)
+            await self._record(session, result)
+            return result
+
+        state_attempt = await self._storage_state_attempt(session)
+        attempts.append(state_attempt)
+        result = self._result(state_attempt, expected_queue_id, attempts)
+        await self._record(session, result)
+        return result
+
+    async def _storage_state_attempt(self, session: QueueSession) -> RestoreAttempt:
+        try:
+            state = await self._state_store.load(session.session_id)
+        except StateStoreError:
+            return RestoreAttempt(
+                method=RestoreMethod.STORAGE_STATE,
+                success=False,
+                failure=RestoreFailure.STATE_CORRUPT,
+            )
+        if state is None:
+            return RestoreAttempt(
+                method=RestoreMethod.STORAGE_STATE,
+                success=False,
+                failure=RestoreFailure.STATE_MISSING,
+            )
+        return await self._browser_attempt(
+            session,
+            method=RestoreMethod.STORAGE_STATE,
+            storage_state=cast(ContextStorageState, state),
+        )
+
+    async def _browser_attempt(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod,
+        storage_state: ContextStorageState | None = None,
+    ) -> RestoreAttempt:
+        try:
+            async with self._browser_manager.context(storage_state=storage_state) as context:
+                page = await context.new_page()
+                response = await page.goto(
+                    session.transfer_url,
+                    wait_until="domcontentloaded",
+                    timeout=self._navigation_timeout_ms,
+                )
+                if response is not None and response.status >= 400:
+                    return RestoreAttempt(
+                        method=method,
+                        success=False,
+                        failure=RestoreFailure.HTTP_FAILURE,
+                    )
+                return await self._observe(page, session, method)
+        # This is the browser adapter boundary: third-party context/page
+        # implementations can surface more than Playwright's public errors.
+        except Exception:  # noqa: BLE001
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
+
+    async def _observe(
+        self,
+        page: Page,
+        session: QueueSession,
+        method: RestoreMethod,
+    ) -> RestoreAttempt:
+        deadline = asyncio.get_running_loop().time() + self._observation_timeout_seconds
+        latest_progress: QueueProgress | None = None
+        latest_transfer: TransferExtractionResult | None = None
+        extractor = self._transfer_extractor_factory(self._expected_journey_url)
+        while True:
+            latest_progress = await self._live_extractor.extract(
+                page,
+                session_id=session.session_id,
+            )
+            latest_transfer = await extractor.extract(
+                page,
+                expected_queue_id=session.queue_id,
+            )
+            if latest_transfer.identity_mismatch:
+                return RestoreAttempt(
+                    method=method,
+                    success=False,
+                    observed_queue_id=latest_transfer.observed_queue_id,
+                    identity_match=False,
+                    progress=latest_progress,
+                    failure=RestoreFailure.IDENTITY_MISMATCH,
+                )
+            if latest_transfer.successful and latest_transfer.observed_queue_id is not None:
+                identity_match = latest_transfer.observed_queue_id == session.queue_id
+                return RestoreAttempt(
+                    method=method,
+                    success=identity_match,
+                    observed_queue_id=latest_transfer.observed_queue_id,
+                    identity_match=identity_match,
+                    progress=latest_progress,
+                    failure=None if identity_match else RestoreFailure.IDENTITY_MISMATCH,
+                )
+            if latest_transfer.failure in {
+                TransferFailure.MALFORMED_URL,
+                TransferFailure.UNEXPECTED_HOST,
+                TransferFailure.UNEXPECTED_JOURNEY,
+                TransferFailure.AMBIGUOUS_QUEUE_ID,
+            }:
+                return RestoreAttempt(
+                    method=method,
+                    success=False,
+                    observed_queue_id=latest_transfer.observed_queue_id,
+                    progress=latest_progress,
+                    failure=RestoreFailure.TRANSFER_UNAVAILABLE,
+                )
+            if asyncio.get_running_loop().time() >= deadline:
+                failure = (
+                    RestoreFailure.IDENTITY_UNVERIFIED
+                    if latest_transfer.successful
+                    else RestoreFailure.TRANSFER_UNAVAILABLE
+                )
+                return RestoreAttempt(
+                    method=method,
+                    success=False,
+                    observed_queue_id=latest_transfer.observed_queue_id,
+                    progress=latest_progress,
+                    failure=failure,
+                )
+            await self._sleep(self._observation_interval_seconds)
+
+    async def _record(
+        self,
+        session: QueueSession,
+        result: SessionRestoreResult,
+    ) -> None:
+        session.last_checked_at = datetime.now(UTC)
+        session.attempt_count += 1
+        failure_code = result.failure.value if result.failure is not None else "UNKNOWN"
+        session.last_error = None if result.success else f"restore:{failure_code}"
+        await self._repository.update(session, result.progress)
+
+    @staticmethod
+    def _result(
+        final_attempt: RestoreAttempt,
+        expected_queue_id: str | None,
+        attempts: list[RestoreAttempt] | None = None,
+    ) -> SessionRestoreResult:
+        return SessionRestoreResult(
+            method=final_attempt.method,
+            success=final_attempt.success,
+            expected_queue_id=expected_queue_id,
+            observed_queue_id=final_attempt.observed_queue_id,
+            identity_match=final_attempt.identity_match,
+            progress=final_attempt.progress,
+            failure=final_attempt.failure,
+            attempts=tuple(attempts or (final_attempt,)),
+        )
