@@ -298,9 +298,11 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest locally verified result on 2026-09-26: `python -m pytest -q` reported
-  **216 passed, 4 deselected**. The deselected tests were the four explicitly gated
-  staging harnesses.
+- Latest locally verified result on 2026-09-26: `.venv/bin/python -m pytest -q`
+  reported **216 passed, 4 deselected in 8.49 seconds** on Python 3.14.7/macOS arm64
+  with installed Google Chrome 153.0.8010.54. The deselected tests were the four
+  explicitly gated staging harnesses. Ruff and strict mypy also passed; this is local
+  correctness evidence, not a Phase 2 staging benchmark.
 
 ## Phase 1 Acceptance Results
 

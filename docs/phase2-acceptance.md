@@ -4,10 +4,11 @@
 **Decision:** **PARTIAL — Phase 3 is blocked pending authorised Phase 2 evidence.**  
 **Status totals:** 3 PASS, 2 FAIL, 15 UNKNOWN.
 
-This report uses checked-in reports, tests, metrics definitions, Git history, and the
-complete workspace artifact inventory as evidence. No Phase 2 benchmark output,
-staging result, metrics snapshot, SQLite population, or browser-state work directory is
-present. Harness implementation and unit tests are not treated as staging results.
+This report uses checked-in reports, current test results, metrics definitions, Git
+history, and the complete workspace artifact inventory as evidence. No Phase 2
+benchmark output, staging result, metrics snapshot, SQLite population, or browser-state
+work directory is present. Harness implementation and unit tests are not treated as
+staging results.
 
 ## Configuration
 
@@ -28,11 +29,14 @@ a measured operating point.
 
 ## Test Environment
 
-Known facts only: the project targets Python 3.12, Playwright's asynchronous API,
-installed Google Chrome, SQLite, and local JSON storage state. The normal suite includes
-local controlled-browser integration tests and excludes four explicitly gated staging
-harnesses by default. No intended deployment-host specification or staging event result
-is recorded.
+The final local validation ran on macOS 26.5.1 arm64 with Python 3.14.7, Playwright
+1.63.0, pytest 9.1.1, psutil 7.2.2, and Google Chrome 153.0.8010.54. The project requires
+Python 3.12 or newer and uses Playwright's asynchronous API, SQLite, and local JSON
+storage state. `python -m pytest -q` completed with **216 passed, 4 deselected in
+8.49 seconds**; the four deselected tests are the explicitly gated staging harnesses.
+Ruff passed, and strict mypy checking passed for 41 source files. No intended
+deployment-host specification or staging event result is recorded. This local suite is
+correctness evidence, not a Phase 2 performance benchmark.
 
 ## Functional Results
 

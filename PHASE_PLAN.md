@@ -283,6 +283,8 @@ storage-state restore rates, fallback behavior, identity mismatch incidence, CPU
 real browser/context/navigation stability, one-versus-two-browser differences, and the
 concurrency saturation point remain UNKNOWN. Phase 3 is blocked because no measured
 operating point or resource headroom supports selecting 50–100 active contexts.
+Final local validation reported 216 passed and 4 gated staging tests deselected; Ruff
+and strict mypy passed. These results do not replace the missing staging benchmarks.
 
 ## Phase 3 — 1,000 Sessions
 

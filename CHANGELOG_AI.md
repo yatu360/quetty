@@ -987,3 +987,78 @@ Phase 2 acceptance blockers are resolved or explicitly treated as blocking evide
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: documentation-only Phase 2 acceptance changes
+
+## 2026-09-26 — Phase 2 Prompt 8 — Acceptance Report Verification
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Redo the Phase 2 acceptance review from current repository evidence, rerun local
+validation after installing dependencies, and leave all changes uncommitted.
+
+### Changes Made
+
+- Re-read the project context, phase plan, complete AI changelog, repository status,
+  history, Phase 2 benchmark documents, test evidence, and metric definitions.
+- Re-inventoried tracked and ignored workspace artifacts. No Phase 2 staging or
+  benchmark output, metrics snapshot, SQLite population, or browser-state work
+  directory was found.
+- Revalidated all 20 acceptance answers. The result remains 3 PASS, 2 FAIL, and
+  15 UNKNOWN; no staging-dependent UNKNOWN was promoted from local test evidence.
+- Added the exact local validation environment and current suite/static-check results
+  to the acceptance report, project context, and phase plan.
+- Made no application behavior changes and did not begin Phase 3.
+
+### Files Added
+
+- None; the existing report remains `docs/phase2-acceptance.md`.
+
+### Files Modified
+
+- `docs/phase2-acceptance.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `.venv/bin/python -m pytest -q` — 216 passed, 4 deselected in 8.49 seconds. The
+  deselected tests were the explicitly gated staging harnesses.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 41 source files.
+- Local validation environment: Python 3.14.7, macOS 26.5.1 arm64, Playwright 1.63.0,
+  pytest 9.1.1, psutil 7.2.2, and Google Chrome 153.0.8010.54.
+
+### Staging Tests
+
+- Phase 2 acquisition/resource, restore, and concurrency harnesses — **NOT RUN**.
+- No authorised staging configuration or result artifacts were available. No staging
+  traffic was sent.
+
+### Important Decisions
+
+- Current local tests strengthen the three local architecture PASS results but do not
+  establish staging acquisition reliability, performance, restoration, resources, or
+  browser stability.
+- The configured 25-context limit remains a cap, not a measured active-context peak.
+- Phase 3 remains blocked without a measured Phase 2 operating point and host headroom.
+
+### Known Issues
+
+- All real Phase 2 throughput, latency, restore, identity-incidence, resource,
+  stability, backlog-drain, browser-comparison, and saturation results remain UNKNOWN.
+- The general `queue-load-test` CLI still does not assemble the full runtime by default.
+
+### Follow-Up
+
+Phase 3 Prompt 1 — Phase 3 readiness and 1,000-session profile. Do not begin while the
+Phase 2 acceptance blockers remain unresolved.
+
+### Git State
+
+- Commit: intentionally not created for this verification prompt
+- Branch: `main`
+- Working tree: documentation-only verification changes
