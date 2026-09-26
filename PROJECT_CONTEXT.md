@@ -9,15 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–5 complete locally.
-- Last completed work: Phase 3 Prompt 5 — repeated synthetic 1,000-session monitoring
-  sweeps and staggered scheduling; authorised Queue-it monitoring was NOT RUN.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–6 complete locally.
+- Last completed work: Phase 3 Prompt 6 — synthetic SQLite/local-state storage
+  benchmark, consistency checking, and restart reconstruction at 1,000 sessions.
 - Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
   and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
   benchmark has run, and Phase 2 measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 6 — Persistence and State Storage Scalability**.
+- Next planned work: **Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000
+  Sessions**.
   No real acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
@@ -141,7 +142,12 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   `QueueIdConflictError`.
 - `FileSystemStateStore` defaults to `.browser-state/<session_id>.json`, validates safe
   session IDs, writes a temporary file, flushes/fsyncs it, applies restrictive file
-  permissions, and atomically replaces the destination.
+  permissions, and atomically replaces the destination. Save, load, and delete work is
+  dispatched with `asyncio.to_thread`, so filesystem operations do not execute directly
+  on the event loop.
+- `StateConsistencyChecker` performs an explicitly non-mutating database/filesystem
+  audit in a worker thread. It reports missing, orphaned, corrupt, duplicate/conflicting,
+  and stale temporary state paths; cleanup is never automatic.
 - SQLite files, `.browser-state/`, and generated Phase 1 JSON reports are git-ignored.
 
 ## Browser Model
@@ -440,6 +446,16 @@ mechanics only; they are not Queue-it staging or performance measurements.
   backlogs and every staggered cohort without dropping work. Real Queue-it sweep time,
   context wait/peak, restore failures, identity mismatches, browser crashes, navigation
   failures, and Chrome resources remain UNKNOWN because staging monitoring was NOT RUN.
+- A dedicated local synthetic run stored 1,000 HYBRID rows in a 417,792-byte SQLite
+  database and 1,000 equal-size 1,249-byte state files (1,249,000 bytes total). p95
+  save/load/replace latency was 0.263/0.063/0.291 ms; 100 deletes had 0.075 ms p95.
+  Baseline and restart scans (63.554/61.355 ms) each reconstructed all 1,000 sessions
+  with zero findings or temporary files. The event-loop lag probe observed 0.149 ms p95
+  and 3.302 ms maximum while database and file operations ran.
+- Synthetic fixed-size JSON is filesystem/mechanics evidence, not observed Queue-it
+  `storage_state` sizing. Local-disk behavior under concurrent browser refreshes,
+  sustained churn, disk exhaustion, power loss, network filesystems, and 10,000 files
+  remains unmeasured.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
@@ -496,6 +512,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   report fields, restart behavior, and staging NOT RUN status for Phase 3 Prompt 4.
 - `docs/phase3-monitoring-benchmark.md` — full-sweep definition, repeated/staggered
   synthetic results, resource observations, and Queue-it UNKNOWN fields for Prompt 5.
+- `docs/phase3-storage-benchmark.md` — 1,000-file footprint and latency, consistency
+  findings, restart evidence, and local-storage decision for Prompt 6.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -607,6 +625,18 @@ Local synthetic Phase 3 monitoring sweep:
 queue-load-test-phase3-monitoring --database phase3-monitoring-synthetic.sqlite3 --report phase3-monitoring-benchmark.json --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2
 ```
 
+Local synthetic Phase 3 persistence benchmark:
+
+```powershell
+queue-load-test-phase3-storage --database phase3-storage-synthetic/sessions.sqlite3 --state-directory phase3-storage-synthetic/state --sessions 1000 --report phase3-storage-benchmark.json
+```
+
+Read-only state consistency report for an existing database:
+
+```powershell
+queue-load-test-state-check --database queue_load_test.sqlite3 --state-directory .browser-state --report state-consistency-report.json
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -616,9 +646,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 6 — Persistence and State Storage Scalability.** Measure SQLite and
-HYBRID state-file footprint, write/read behavior, filesystem scaling, failure isolation,
-and restart recovery across 1,000 persisted sessions.
+**Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000 Sessions.** Exercise
+interrupted creation/monitoring, expired leases, missing or corrupt state, browser loss,
+partial progress, and bounded restart/resume behavior without identity replacement.
 
 ## Instructions for Future AI Sessions
 

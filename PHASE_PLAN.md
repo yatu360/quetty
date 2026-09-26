@@ -348,10 +348,15 @@ Planned prompt breakdown:
    128, and zero backlog after every checkpoint. This proves bounded local scheduler/
    SQLite behavior only; real restoration, browser, identity, and navigation results
    remain UNKNOWN.
-6. **Monitoring sweep benchmark** — measure full and priority-state sweep times under
-   adaptive polling and bounded contexts.
-7. **State-file and restart scale test** — measure filesystem footprint, atomic writes,
-   corrupt/missing-state isolation, and recovery after restart.
+6. **State-file and restart scale test** — **completed locally on 2026-09-26.** A
+   dedicated synthetic run persisted 1,000 SQLite sessions and 1,000 atomic local JSON
+   state files (1,249,000 bytes total). Save/load p95 was 0.263/0.063 ms and replacement
+   p95 was 0.291 ms on the test host. Baseline and restart consistency scans found zero
+   issues; tests prove detection of missing, orphaned, corrupt, duplicate/conflicting,
+   and stale temporary files without deleting them. These synthetic files are not a
+   claim about real Queue-it state size or 10,000-session suitability.
+7. **Failure recovery and restart at 1,000 sessions** — exercise interruption, expired
+   ownership, partial work, corrupt/missing state isolation, and bounded resume paths.
 8. **SQLite versus PostgreSQL decision** — use measured latency, locking, recovery, and
    operational requirements to decide whether migration is justified; do not migrate by
    default.

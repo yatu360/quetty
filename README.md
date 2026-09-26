@@ -211,6 +211,28 @@ retains backlog and queue observations, and marks all browser/restore fields UNK
 See [the Phase 3 monitoring benchmark](docs/phase3-monitoring-benchmark.md) for the
 verified local results and their limits.
 
+## Phase 3 Synthetic Persistence Benchmark
+
+The local storage benchmark creates an empty 1,000-session SQLite database and 1,000
+synthetic HYBRID browser-state files, then measures save, load, atomic replacement,
+delete, consistency scanning, and restart reconstruction:
+
+```powershell
+queue-load-test-phase3-storage --database phase3-storage-synthetic/sessions.sqlite3 --state-directory phase3-storage-synthetic/state --sessions 1000 --report phase3-storage-benchmark.json
+```
+
+Both paths must be dedicated and empty. To audit an existing database without deleting
+or repairing anything, run:
+
+```powershell
+queue-load-test-state-check --database queue_load_test.sqlite3 --state-directory .browser-state
+```
+
+The checker reports missing, orphaned, corrupt, duplicate/conflicting, and stale
+temporary files. See
+[the Phase 3 storage benchmark](docs/phase3-storage-benchmark.md) for measured results
+and the explicit cleanup policy.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

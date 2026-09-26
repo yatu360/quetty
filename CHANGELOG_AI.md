@@ -1611,3 +1611,112 @@ Phase 3 Prompt 6 — Persistence and State Storage Scalability
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 5 implementation, tests, benchmark, and documentation
+
+## 2026-09-26 — Phase 3 Prompt 6 — Persistence and State Storage Scalability
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Measure SQLite and local HYBRID browser-state storage at approximately 1,000 sessions,
+verify atomic replacement and restart reconstruction, and add non-destructive detection
+of database/filesystem inconsistencies without prematurely changing storage backends.
+
+### Changes Made
+
+- Added a synthetic benchmark that seeds 1,000 SQLite sessions and representative
+  browser-state documents, measures save/load/replace/delete latency and throughput,
+  records database and state-directory footprint, performs baseline/restart consistency
+  scans, and samples event-loop scheduling lag.
+- Added a read-only `StateConsistencyChecker` for missing state, orphaned JSON, corrupt
+  JSON/non-object data, duplicate paths, HYBRID path conflicts, and stale atomic-write
+  temporary files. It loads database rows once for this explicit audit and runs all
+  directory traversal and JSON parsing in a worker thread.
+- Added the `queue-load-test-state-check` operator command. It reports findings and can
+  write JSON, but deliberately has no delete or repair option.
+- Retained the existing `FileSystemStateStore` design: temp file in the destination
+  directory, flush/fsync, mode `0600`, atomic `os.replace`, and worker-thread dispatch
+  for save/load/delete. Existing and new tests verify a failed replacement preserves
+  the prior complete file and leaves no temporary file.
+- Added tests for a complete 1,000-file benchmark, restart reconstruction, report
+  serialization, invalid/dedicated paths, all required inconsistency classes,
+  no false missing-state result for TRANSFER_ONLY/FAILED sessions, and event-loop
+  schedulability during a forced slow write.
+- Documented benchmark limitations, the explicit manual cleanup policy, and the
+  evidence-based decision to retain SQLite plus local state for Phase 3 only.
+
+### Files Added
+
+- `src/queue_load_test/state/consistency.py`
+- `src/queue_load_test/harness/phase3_storage.py`
+- `src/queue_load_test/harness/state_consistency.py`
+- `tests/unit/test_state_consistency.py`
+- `tests/unit/test_phase3_storage_benchmark.py`
+- `docs/phase3-storage-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/state/__init__.py`
+
+### Tests and Checks Run
+
+- Focused state-store/consistency/storage-benchmark/repository tests — 33 passed in
+  1.71 seconds.
+- Full non-staging suite — 277 passed, 4 deselected in 18.40 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 48 source files.
+- `git diff --check` — passed.
+- The consistency CLI was run against the generated 1,000-session dataset and reported
+  1,000 database sessions, 1,000 required/reference paths, 1,000 files, zero temporary
+  files, and zero findings.
+
+### Synthetic Benchmark
+
+- Host: local macOS 26.5.1 ARM64 filesystem, Python 3.12 environment, SQLite 3.50.4.
+- Population: 1,000 HYBRID sessions and 1,000 deterministic 1,249-byte state files.
+- Footprint: 417,792-byte SQLite database; 1,249,000 bytes of state JSON.
+- Initial save: 4,719.6 files/s; 0.207 ms p50, 0.263 ms p95, 1.156 ms maximum.
+- Load: 18,799.2 files/s; 0.052 ms p50, 0.063 ms p95, 0.089 ms maximum.
+- Atomic replacement: 4,325.7 files/s; 0.227 ms p50, 0.291 ms p95, 0.418 ms maximum.
+- Delete probe: 100 files at 17,827.6 files/s; 0.053 ms p50, 0.075 ms p95,
+  0.082 ms maximum.
+- Baseline/restart scans took 63.554/61.355 ms and found zero inconsistencies. Restart
+  reconstructed all 1,000 database sessions and state references.
+- Event-loop scheduling lag during benchmark work was 0.149 ms p95 and 3.302 ms maximum.
+
+### Important Decisions
+
+- SQLite plus local state remains acceptable for the single-host Phase 3 population.
+  The observed footprint and latency do not justify PostgreSQL, object storage, or a
+  more complex storage abstraction.
+- Cleanup stays explicit and manual. The checker reports paths but never removes files,
+  avoiding accidental identity loss from a bad path configuration or audit mistake.
+- The benchmark intentionally uses sequential state operations to isolate filesystem
+  mechanics. It does not establish throughput under concurrent real-browser refreshes.
+
+### Known Issues / Unknowns
+
+- Synthetic fixed-size JSON does not measure actual Queue-it/Chrome `storage_state`
+  size distribution. Real state contents remain sensitive and were not inspected.
+- Disk-full behavior, abrupt power loss, sustained churn, concurrent thread-pool/disk
+  contention, network filesystems, and 10,000-file directory behavior remain UNKNOWN.
+- SQLite still serializes writes per repository instance and commits per session. This
+  run supplies no evidence requiring PostgreSQL, but it does not settle Phase 4 design.
+
+### Follow-Up
+
+Phase 3 Prompt 7 — Failure Recovery and Restart at 1,000 Sessions
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 6 implementation, tests, benchmark, and documentation

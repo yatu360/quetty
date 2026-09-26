@@ -163,6 +163,9 @@ phase3-browser-capacity-benchmark*.json
 phase3-acquisition-benchmark*.json
 phase3-monitoring-benchmark*.json
 phase3-monitoring-synthetic*.sqlite3
+phase3-storage-benchmark*.json
+phase3-storage-synthetic*/
+state-consistency-report*.json
 .phase2-concurrency-runs/
 .venv
 env/
