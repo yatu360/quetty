@@ -1,4 +1,5 @@
 import asyncio
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -8,12 +9,13 @@ from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, Ses
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.scheduler import (
     MonitoringOutcome,
+    MonitoringRetryPolicy,
     ParkedSessionScheduler,
     PollingPolicy,
     QueueSessionMonitor,
     is_queue_update_stale,
 )
-from queue_load_test.transfer import RestoreMethod, SessionRestoreResult
+from queue_load_test.transfer import RestoreFailure, RestoreMethod, SessionRestoreResult
 
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
 
@@ -136,6 +138,33 @@ class StaticRestorer:
             identity_match=True,
             progress=self.progress,
         )
+
+
+class RetryThenSuccessRestorer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def restore(self, session: QueueSession) -> SessionRestoreResult:
+        self.calls += 1
+        if self.calls == 1:
+            return SessionRestoreResult(
+                method=RestoreMethod.TRANSFER,
+                success=False,
+                expected_queue_id=session.queue_id,
+                failure=RestoreFailure.NAVIGATION_FAILED,
+            )
+        return SessionRestoreResult(
+            method=RestoreMethod.TRANSFER,
+            success=True,
+            expected_queue_id=session.queue_id,
+            observed_queue_id=session.queue_id,
+            identity_match=True,
+            progress=QueueProgress(session_id=session.session_id, active_queue=True),
+        )
+
+
+async def no_wait(_: float) -> None:
+    return None
 
 
 async def test_due_sessions_are_claimed_and_future_sessions_are_not(tmp_path: Path) -> None:
@@ -507,6 +536,7 @@ async def test_worker_exception_reparks_and_releases_lease(tmp_path: Path) -> No
     assert persisted.worker_id is None
     assert persisted.lease_until is None
     assert scheduler.metrics.failed == 1
+    assert scheduler.metrics.checked == 1
     assert scheduler.metrics.lease_conflicts == 0
     await repository.close()
 
@@ -562,6 +592,61 @@ def test_poll_jitter_spreads_sessions_without_leaving_configured_range() -> None
 
     assert low == 15
     assert high == 25
+
+
+def test_poll_jitter_distributes_one_thousand_next_check_intervals() -> None:
+    policy = PollingPolicy(default_seconds=30, jitter_seconds=5)
+    generator = random.Random(20260926)
+
+    intervals = [
+        policy.interval_seconds(
+            QueueStatus.PARKED,
+            None,
+            jitter=generator.uniform,
+        )
+        for _ in range(1000)
+    ]
+    buckets: dict[int, int] = {}
+    for interval in intervals:
+        bucket = int(interval)
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+
+    assert min(intervals) >= 25
+    assert max(intervals) <= 35
+    assert len(set(intervals)) > 900
+    assert max(buckets.values()) < 150
+
+
+async def test_monitor_retries_transient_restore_failure_then_succeeds(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "retry-monitor.sqlite3")
+    parked = make_session("retry")
+    await repository.create(parked)
+    restorer = RetryThenSuccessRestorer()
+    monitor = QueueSessionMonitor(
+        repository=repository,
+        restorer=restorer,
+        polling_policy=PollingPolicy(jitter_seconds=0),
+        retry_policy=MonitoringRetryPolicy(
+            max_attempts=2,
+            initial_backoff_seconds=0,
+            maximum_backoff_seconds=0,
+            jitter_seconds=0,
+        ),
+        clock=lambda: NOW,
+        sleep=no_wait,
+    )
+
+    outcome = await monitor.check(parked)
+
+    assert outcome.success
+    assert restorer.calls == 2
+    persisted = await repository.get(parked.session_id)
+    assert persisted is not None
+    assert persisted.status is QueueStatus.ACTIVE_QUEUE
+    assert persisted.next_check_at == NOW + timedelta(seconds=90)
+    await repository.close()
 
 
 async def test_monitor_tracks_updates_changes_staleness_and_next_check(tmp_path: Path) -> None:

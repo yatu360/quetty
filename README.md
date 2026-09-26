@@ -196,6 +196,21 @@ without Queue IDs or transfer URLs. See
 [the Phase 3 acquisition benchmark](docs/phase3-acquisition-benchmark.md) for the exact
 profile, shutdown behavior, report fields, and current `NOT RUN` result.
 
+## Phase 3 Synthetic Monitoring Sweep
+
+The local monitoring benchmark seeds 1,000 synthetic parked sessions, runs repeated
+all-due sweeps through SQLite leases and the bounded scheduler, then processes a
+deterministic jittered schedule. It does not start Chrome or contact Queue-it:
+
+```powershell
+queue-load-test-phase3-monitoring --database phase3-monitoring-synthetic.sqlite3 --report phase3-monitoring-benchmark.json --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2
+```
+
+Use a dedicated empty database for every run. The report defines full sweep duration,
+retains backlog and queue observations, and marks all browser/restore fields UNKNOWN.
+See [the Phase 3 monitoring benchmark](docs/phase3-monitoring-benchmark.md) for the
+verified local results and their limits.
+
 ## Phase 2 HYBRID Restore Benchmark
 
 The restore benchmark operates on existing HYBRID sessions in the configured SQLite

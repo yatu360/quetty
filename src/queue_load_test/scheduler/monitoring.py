@@ -360,6 +360,7 @@ class MonitoringHandler(Protocol):
 @dataclass(slots=True)
 class MonitoringMetrics:
     claimed: int = 0
+    checked: int = 0
     completed: int = 0
     failed: int = 0
     currently_checking: int = 0
@@ -658,6 +659,7 @@ class ParkedSessionScheduler:
                             error_type=type(exc).__name__,
                         )
                     self._owned_session_ids.discard(item.session_id)
+                    self.metrics.checked += 1
                     self._set_monitoring_activity()
             finally:
                 self._queue.task_done()

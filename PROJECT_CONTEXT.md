@@ -9,16 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–4 complete locally.
-- Last completed work: Phase 3 Prompt 4 — bounded 1,000-target acquisition logic and
-  benchmark harness; authorised staging acquisition was NOT RUN.
+- Current phase: Phase 3 — 1,000 Sessions, Prompts 1–5 complete locally.
+- Last completed work: Phase 3 Prompt 5 — repeated synthetic 1,000-session monitoring
+  sweeps and staggered scheduling; authorised Queue-it monitoring was NOT RUN.
 - Completion: local configuration, bounded-concurrency, SQLite query/lease/scheduler,
   and short synthetic browser-capacity evidence only. No Phase 3 Queue-it staging
   benchmark has run, and Phase 2 measurement gaps remain.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Next planned work: **Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep**. No real
-  acquisition or monitoring throughput should be inferred from synthetic tests.
+- Next planned work: **Phase 3 Prompt 6 — Persistence and State Storage Scalability**.
+  No real acquisition or monitoring throughput should be inferred from synthetic tests.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -244,6 +244,15 @@ For a 50-row batch, measured p50 latencies were 0.098 ms due count, 0.555 ms cla
 connections made disjoint concurrent claims. This supports retaining SQLite for the
 current local scale; it is not a browser, staging, or multi-host result.
 
+The Phase 3 synthetic sweep benchmark separately made all 1,000 sessions due and ran
+the actual bounded scheduler, SQLite updates, and lease releases with 20 fixed workers,
+a 50-item queue, and 50-row claims. Two sweeps completed in 1.0582 and 1.0557 seconds
+(944.98 and 947.26 synthetic checks/s), with p95 handler durations of 14.64 and 14.33
+ms. Each backlog drained from 1,000 to zero, queue depth peaked at 50, worker activity
+peaked at 20, and lease conflicts remained zero. A jittered pass processed all 1,000
+sessions across a ten-second simulated due window and drained every checkpoint. These
+are scheduler/SQLite measurements using a synthetic handler, not Queue-it check rates.
+
 `QueueSessionMonitor` restores one leased session, evaluates live status, verifies
 identity, persists progress and timestamps, refreshes HYBRID state when appropriate,
 computes `next_check_at`, and lets the scheduler release the lease. Defaults are:
@@ -254,6 +263,12 @@ and is stale only when Queue-it supplied a timestamp older than the configured l
 Unexpected worker errors re-park the session with a configured delay before releasing
 the owned lease. Shutdown drains within its timeout, then cancels active workers and
 releases active/queued leases without deleting persisted identities.
+
+`MonitoringMetrics.checked` counts every worker-handled session, including exception
+paths, separately from successful completed outcomes. Tests cover bounded batches and
+queues, worker backpressure, repeated sweeps, transient restoration retry, expired
+lease recovery, terminal-state exclusion, and statistical jitter spread across 1,000
+generated intervals.
 
 ## Failure Handling
 
@@ -323,6 +338,10 @@ releases active/queued leases without deleting persisted identities.
   and browser failures, context peak, bounded queue depth, and sampled CPU/RSS without
   emitting session identities or transfer data. It requires the 50-context/two-process
   candidate and two explicit staging gates. The authorised run is NOT RUN.
+- The Phase 3 monitoring harness emits repeated all-due sweep results, check latency,
+  checks/s, backlog, bounded queue/worker peaks, lease conflicts, staggered checkpoints,
+  and application CPU/RAM. Browser, restore, identity, and navigation fields remain
+  nullable/UNKNOWN because its local handler deliberately performs no browser work.
 
 ## Tests
 
@@ -334,10 +353,10 @@ releases active/queued leases without deleting persisted identities.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **261 passed, 4 deselected
-  in 12.32 seconds**. The deselected tests were explicitly gated staging harnesses.
-  Phase 3 Prompt 4 focused creation/acquisition/observability/runtime tests reported 25
-  passed; Ruff and strict mypy passed.
+- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **269 passed, 4 deselected
+  in 18.20 seconds**. The deselected tests were explicitly gated staging harnesses.
+  Phase 3 Prompt 5 focused monitoring/repository/benchmark tests reported 42 passed;
+  Ruff and strict mypy passed.
 
 ## Phase 1 Acceptance Results
 
@@ -417,6 +436,10 @@ mechanics only; they are not Queue-it staging or performance measurements.
   and restart continuation. The real 1,000-ID staging result is NOT RUN, so creation
   throughput, Queue-it duplicate/failure incidence, acquisition CPU/RAM, and observed
   active-context peak remain UNKNOWN.
+- The synthetic monitoring configuration drained repeated synchronized 1,000-session
+  backlogs and every staggered cohort without dropping work. Real Queue-it sweep time,
+  context wait/peak, restore failures, identity mismatches, browser crashes, navigation
+  failures, and Chrome resources remain UNKNOWN because staging monitoring was NOT RUN.
 - Target coordination is intentionally single-controller. If multiple independent
   application processes acquire different valid IDs concurrently, aggregate overshoot
   is not reserved transactionally; distributed target coordination is out of scope.
@@ -471,6 +494,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   resource caveats, and staging NOT RUN status for Phase 3 Prompt 3.
 - `docs/phase3-acquisition-benchmark.md` — bounded 1,000-target procedure, aggregate
   report fields, restart behavior, and staging NOT RUN status for Phase 3 Prompt 4.
+- `docs/phase3-monitoring-benchmark.md` — full-sweep definition, repeated/staggered
+  synthetic results, resource observations, and Queue-it UNKNOWN fields for Prompt 5.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -576,6 +601,12 @@ $env:RUN_PHASE3_ACQUISITION_BENCHMARK = "1"
 queue-load-test-phase3-acquisition --confirm-authorized-staging --report phase3-acquisition-benchmark.json
 ```
 
+Local synthetic Phase 3 monitoring sweep:
+
+```powershell
+queue-load-test-phase3-monitoring --database phase3-monitoring-synthetic.sqlite3 --report phase3-monitoring-benchmark.json --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2
+```
+
 Static checks used by this project:
 
 ```powershell
@@ -585,9 +616,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep.** Measure bounded restore/check/
-persist/re-park behavior, sweep duration, backlog, fairness, resource use, and failures
-without turning the persisted population into a matching live-context population.
+**Phase 3 Prompt 6 — Persistence and State Storage Scalability.** Measure SQLite and
+HYBRID state-file footprint, write/read behavior, filesystem scaling, failure isolation,
+and restart recovery across 1,000 persisted sessions.
 
 ## Instructions for Future AI Sessions
 

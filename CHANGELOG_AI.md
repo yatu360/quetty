@@ -1500,3 +1500,114 @@ Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 3 Prompt 4 implementation, tests, harness, and documentation
+
+## 2026-09-26 — Phase 3 Prompt 5 — 1,000-Session Monitoring Sweep
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Measure repeated bounded scheduler sweeps over 1,000 persisted sessions, validate
+staggered due times and jitter, and preserve UNKNOWN for all unavailable Queue-it and
+browser evidence.
+
+### Changes Made
+
+- Added a synthetic monitoring benchmark that seeds exactly 1,000 parked sessions and
+  runs the real SQLite due query, bounded transactional claims, fixed scheduler workers,
+  bounded queue, per-session update, and lease release path.
+- Defined full sweep duration as wall time from starting scheduling with all 1,000
+  sessions due until every synthetic check, persistence update, and lease release is
+  complete; initial seeding is excluded.
+- Added repeatable all-due sweeps plus a deterministic jittered/staggered pass that
+  advances simulated due time and drains every cohort without dropping work.
+- Added JSON and text output for due/checked/success/failure counts, checks/s,
+  average/p50/p95/max check latency, full sweep duration, backlog, queue/worker peaks,
+  lease conflicts, staggered checkpoints, and application CPU/RAM.
+- Kept context wait, active browser context, restore failure, identity mismatch,
+  browser crash, navigation failure, and Chrome resource results explicitly UNKNOWN or
+  synthetic-zero as appropriate; no browser or staging traffic is implied.
+- Added `MonitoringMetrics.checked` so successful outcomes and worker exception paths
+  contribute to an explicit total processed count.
+- Added tests for a complete repeated 1,000-row sweep, bounded batch/queue/workers,
+  zero-ending backlog, staggered scheduling, statistical jitter distribution, transient
+  restore retry, serialization, and invalid/unbounded benchmark configurations. Existing
+  lease recovery, worker backpressure, and terminal-state exclusion tests were retained.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase3_monitoring.py`
+- `tests/unit/test_phase3_monitoring.py`
+- `docs/phase3-monitoring-benchmark.md`
+
+### Files Modified
+
+- `.gitignore`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `pyproject.toml`
+- `src/queue_load_test/scheduler/monitoring.py`
+- `tests/unit/test_monitoring.py`
+
+### Tests and Checks Run
+
+- Focused monitoring/repository/benchmark tests — 42 passed in 7.31 seconds.
+- Full non-staging suite — 269 passed, 4 deselected in 18.20 seconds.
+- `.venv/bin/ruff check src tests` — passed.
+- `.venv/bin/mypy src` — passed with no issues in 45 source files.
+- `git diff --check` — passed.
+
+### Synthetic Benchmark
+
+- Configuration: 1,000 persisted sessions, 20 fixed workers, 50-item queue, 50-row
+  claim batch, 120-second leases, 1 ms synthetic async check delay, and two repeated
+  synchronized sweeps.
+- Sweep 1: 1,000/1,000 successful checks, zero failures, 1.0582-second full sweep,
+  944.98 checks/s, 11.05 ms average, 13.25 ms p50, and 14.64 ms p95 check duration.
+- Sweep 2: 1,000/1,000 successful checks, zero failures, 1.0557-second full sweep,
+  947.26 checks/s, 11.38 ms average, 13.14 ms p50, and 14.33 ms p95 check duration.
+- Both sweeps drained backlog from 1,000 to zero, peaked at the bounded 50 queued items
+  and 20 workers, and recorded zero lease conflicts.
+- Staggered pass: 1,000/1,000 checks, zero failures, due offsets from 25.007 to 34.982
+  seconds, 1,000 distinct exact timestamps, largest one-second bucket 128, and zero
+  backlog after every checkpoint and at completion.
+- Resource samples: application CPU average/peak 85.21%/114.3%; application RSS
+  average/peak 59,745,834/60,882,944 bytes; sampled queue peak 50 and worker peak 20.
+  No Chrome processes or BrowserContexts were started.
+
+### Staging Benchmark
+
+- **NOT RUN.** No `.env`, authorised Queue-it staging configuration, or explicit gates
+  were available. Real monitoring throughput and browser behavior remain UNKNOWN.
+
+### Important Decisions
+
+- Synthetic checks/s measure scheduler, SQLite, persistence, and lease mechanics only.
+  They must not be compared to or presented as Queue-it check throughput.
+- Full synchronized sweeps and normal staggered polling are reported separately.
+- Due backlog is never reduced by discarding work; every seeded session is updated and
+  re-parked, and each staggered checkpoint verifies zero remaining due rows.
+
+### Known Issues / Unknowns
+
+- Real Queue-it full-sweep duration, checks/s, p95 check duration, restoration failures,
+  identity mismatch incidence, navigation failures, browser crashes, context wait/peak,
+  and Chrome CPU/RAM remain UNKNOWN.
+- The benchmark does not measure HYBRID state-file refresh cost; Prompt 6 addresses
+  persistence and state storage scalability.
+- Sustained adaptive polling across real lifecycle states and a real Queue-it update
+  cadence remain unmeasured.
+
+### Follow-Up
+
+Phase 3 Prompt 6 — Persistence and State Storage Scalability
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 3 Prompt 5 implementation, tests, benchmark, and documentation

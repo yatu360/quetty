@@ -288,7 +288,7 @@ and strict mypy passed. These results do not replace the missing staging benchma
 
 ## Phase 3 — 1,000 Sessions
 
-**Status: Prompts 1–4 completed locally; Queue-it staging scalability remains
+**Status: Prompts 1–5 completed locally; Queue-it staging scalability remains
 unverified. Phase 2 measurement gaps are carried as blockers to large staging work.**
 
 Target profile:
@@ -338,8 +338,16 @@ Planned prompt breakdown:
    uses the conservative 50-context/two-process candidate and records attempts,
    retries, latency, throughput, CPU/RAM, failures, and active-context peak without
    identities. Real Queue-it acquisition rates and resource results remain UNKNOWN.
-5. **Large-population scheduler fairness** — measure due ordering, lease contention,
-   starvation, queue backpressure, and backlog behavior.
+5. **Large-population monitoring sweep** — **synthetic benchmark completed on
+   2026-09-26; authorised Queue-it monitoring NOT RUN.** Two synchronized 1,000-session
+   sweeps used 20 fixed workers, a 50-item queue, and 50-row claims. They completed in
+   1.0582/1.0557 seconds at 944.98/947.26 synthetic checks/s with p95 handler durations
+   of 14.64/14.33 ms; each backlog drained from 1,000 to zero without lease conflicts.
+   A deterministic jittered pass checked all 1,000 rows across a ten-second simulated
+   due window, with all 1,000 exact timestamps distinct, a largest one-second bucket of
+   128, and zero backlog after every checkpoint. This proves bounded local scheduler/
+   SQLite behavior only; real restoration, browser, identity, and navigation results
+   remain UNKNOWN.
 6. **Monitoring sweep benchmark** — measure full and priority-state sweep times under
    adaptive polling and bounded contexts.
 7. **State-file and restart scale test** — measure filesystem footprint, atomic writes,

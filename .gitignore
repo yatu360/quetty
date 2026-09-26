@@ -161,6 +161,8 @@ phase2-concurrency-benchmark*.json
 phase3-repository-benchmark*.json
 phase3-browser-capacity-benchmark*.json
 phase3-acquisition-benchmark*.json
+phase3-monitoring-benchmark*.json
+phase3-monitoring-synthetic*.sqlite3
 .phase2-concurrency-runs/
 .venv
 env/
