@@ -34,10 +34,11 @@ proceed without it.
 
 ## Phase 2 — 100 Sessions
 
-**Status: in progress. Prompts 1–5 are complete for local configuration, multi-browser,
-acquisition, bounded monitoring, restore-benchmark tooling, and resource/stability
-benchmark tooling and an objective concurrency-matrix harness. Prompt 8 is next. No
-100-session staging run or performance tuning has started.**
+**Status: implementation complete through Prompt 8; acceptance PARTIAL (3 PASS,
+2 FAIL, 15 UNKNOWN). No 100-session staging benchmark was run. Local bounded-capacity,
+parked-persistence, and fixed-scheduler-task gates pass, but Phase 3 readiness fails
+until acquisition, monitoring, restore, resource, stability, and concurrency evidence
+is collected.**
 
 Target profile:
 
@@ -256,6 +257,8 @@ is claimed.
 
 ### Prompt 8 — Phase 2 Acceptance Report
 
+**Status: completed on 2026-09-26 with PARTIAL acceptance.**
+
 Objective: consolidate the authorised 100-session evidence and decide whether Phase 3
 may begin.
 
@@ -272,9 +275,18 @@ Exit criteria:
 - All Phase 2 scaling gates are explicitly PASS or the next phase remains blocked.
 - Results are not generalized beyond 100 sessions.
 
+Acceptance result: `docs/phase2-acceptance.md` records 3 PASS, 2 FAIL, and 15 UNKNOWN.
+Local tests sufficiently verify bounded creation/context capacity, 100-session parked
+persistence, and fixed-task/bounded-queue scheduling. The authorised Phase 2 harnesses
+were not run, so creation/check throughput and latency, backlog drain, transfer and
+storage-state restore rates, fallback behavior, identity mismatch incidence, CPU/RAM,
+real browser/context/navigation stability, one-versus-two-browser differences, and the
+concurrency saturation point remain UNKNOWN. Phase 3 is blocked because no measured
+operating point or resource headroom supports selecting 50–100 active contexts.
+
 ## Phase 3 — 1,000 Sessions
 
-**Status: planned, not started.**
+**Status: planned, not started, and blocked by the Phase 2 acceptance evidence gaps.**
 
 Target profile:
 

@@ -9,13 +9,14 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 2 — 100 Sessions.
-- Last completed work: Phase 2 Prompt 7 — Concurrency Tuning Harness.
-- Completion: Phase 1 implementation is complete through Prompt 12; the Phase 2
-  configuration profile and bounded-population tests are now ready.
-- Acceptance: **PARTIAL**. The deterministic local 10-session run is PASS, but no
-  authorised real-staging run or generated `phase1-acceptance.json` is present.
-- Next planned work: Phase 2 Prompt 8 — Phase 2 Acceptance Report.
+- Current phase: Phase 2 — 100 Sessions, implementation complete through Prompt 8.
+- Last completed work: Phase 2 Prompt 8 — Phase 2 Acceptance Report.
+- Completion: **PARTIAL**. Local architecture gates pass, but the authorised Phase 2
+  acquisition, monitoring, restore, resource, and concurrency runs were not performed.
+- Acceptance: **3 PASS, 2 FAIL, 15 UNKNOWN**. Bounded capacity, parked persistence, and
+  fixed-task scheduling pass locally. Phase 3 readiness and absence of blockers fail.
+- Next planned work: **Phase 3 Prompt 1**, but it is blocked until the missing Phase 2
+  staging evidence establishes a measured operating point and resource headroom.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -23,6 +24,12 @@ capture performance/resource results, and verify the staging theme, transfer beh
 update cadence, and protected destination. The normal `queue-load-test` entry point
 currently validates configuration only; it does not assemble `ApplicationRuntime`
 unless a runtime is supplied programmatically.
+
+The final Phase 2 acceptance report is `docs/phase2-acceptance.md`. It records no
+measured creation/check throughput, restore rates, CPU/RAM, real browser stability,
+one-versus-two-browser comparison, or concurrency saturation point because no Phase 2
+result artifacts exist. These values remain `UNKNOWN`; they must not be inferred from
+unit tests or harness availability.
 
 ## Core Objective
 
@@ -316,6 +323,27 @@ PASS for the corresponding mechanisms.
 | 11 | ADMITTED detection | UNKNOWN | PASS |
 | 12 | Restart/recovery persistence | UNKNOWN | PASS |
 
+## Phase 2 Acceptance Results
+
+Phase 2 acceptance is **PARTIAL**: 3 PASS, 2 FAIL, and 15 UNKNOWN. The complete matrix
+and evidence notes are in `docs/phase2-acceptance.md`.
+
+- **PASS:** configured creation/context capacity stays bounded; 100 persisted sessions
+  can remain parked without 100 live contexts; the scheduler uses fixed workers and a
+  bounded queue/claim size.
+- **FAIL:** blockers remain before Phase 3, and readiness to test 1,000 sessions is not
+  established.
+- **UNKNOWN:** real 100-ID acquisition reliability; creation/check throughput and
+  latency; backlog control; transfer, storage-state, and fallback reliability; identity
+  mismatch incidence; CPU/RAM; real Chrome/context/navigation failures; one-versus-two
+  browser performance; and concurrency saturation.
+
+Verified local 100-row evidence includes an exact scripted 100-ID acquisition with at
+most 10 concurrent workers, a 90-to-100 restart continuation, a 99-to-100 deficit case,
+a 25-item claim from 80 due rows leaving a visible backlog of 55, and a blocked
+two-worker/two-queue case owning four rows while 96 remained due. These validate
+mechanics only; they are not Queue-it staging or performance measurements.
+
 ## Known Issues / Unknowns
 
 - No real authorised staging run or generated performance JSON is checked in; all
@@ -351,6 +379,8 @@ PASS for the corresponding mechanisms.
   checks per second, polling sweep time, and backlog drain rate remain unmeasured.
 - PostgreSQL, distributed workers, and shared/object state storage are not implemented.
 - No failing ordinary tests or source TODO/FIXME markers were found during this handoff.
+- Phase 2 acceptance is documented in `docs/phase2-acceptance.md`; the missing staging
+  evidence is a blocker to selecting the Phase 3 50–100-context operating range.
 
 ## Important Files
 
@@ -372,6 +402,7 @@ PASS for the corresponding mechanisms.
 - `docs/phase2-restore-benchmark.md` — Phase 2 benchmark scope and current NOT RUN result.
 - `docs/phase2-resource-benchmark.md` — resource harness procedure and NOT RUN result.
 - `docs/phase2-concurrency-benchmark.md` — tuning procedure and NOT RUN result.
+- `docs/phase2-acceptance.md` — final Phase 2 PASS/FAIL/UNKNOWN decision and evidence.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
 - `tests/integration/test_phase1_controlled_run.py` — deterministic 10-session run.
 - `tests/staging/test_phase1_staging.py` — gated real-staging entry.
@@ -466,11 +497,10 @@ python -m mypy src
 
 ## Next Task
 
-The next task is:
-
-**Phase 2 Prompt 8 — Phase 2 Acceptance Report**
-
-Do not implement it as part of this handoff.
+The next named task is **Phase 3 Prompt 1 — Phase 3 readiness and 1,000-session
+profile**. Do not begin implementation until the Phase 2 acceptance blockers are
+addressed or explicitly carried as blocking evidence; no 50–100-context setting is yet
+supported by measurement.
 
 ## Instructions for Future AI Sessions
 

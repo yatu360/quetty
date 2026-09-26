@@ -908,3 +908,82 @@ Phase 2 Prompt 8 — Phase 2 Acceptance Report
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 2 Prompt 7 changes present; clean before this prompt
+
+## 2026-09-26 — Phase 2 Prompt 8 — Phase 2 Acceptance Report
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Consolidate measured Phase 2 repository evidence into a PASS/FAIL/UNKNOWN acceptance
+decision without beginning Phase 3 or inferring staging behavior from unit tests.
+
+### Changes Made
+
+- Added the final Phase 2 acceptance report with exact target and locally tested
+  configurations, evidence limits, functional results, benchmark sections, all 20
+  required decisions, known issues, and Phase 3 readiness.
+- Inventoried tracked, untracked, and ignored workspace files. No Phase 2 result JSON,
+  staging result, metrics snapshot, SQLite population, browser-state work directory, or
+  other benchmark output was present.
+- Recorded 3 PASS, 2 FAIL, and 15 UNKNOWN. Only bounded creation/context capacity,
+  100-session parked persistence, and fixed-task/bounded-queue scheduling pass.
+- Marked Phase 2 implementation complete but acceptance PARTIAL, and marked Phase 3
+  blocked pending acquisition, monitoring, restore, resource, stability, comparison,
+  and saturation evidence.
+- Updated persistent context and the phase plan; no application behavior changed.
+
+### Files Added
+
+- `docs/phase2-acceptance.md`
+
+### Files Modified
+
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest -q` — **NOT RUN**; this shell has no `python` executable.
+- `python3 -m pytest -q` — **NOT RUN**; available Python is 3.14.7 and has no `pytest`
+  module.
+- Latest verified repository result remains `python -m pytest -q` — 216 passed,
+  4 deselected, recorded by Phase 2 Prompt 7.
+- `git diff --check` — passed before the changelog entry; repeated during final review.
+
+### Staging Tests
+
+- Phase 2 acquisition/resource, restore, and concurrency harnesses — **NOT RUN**.
+- Reason: no authorised staging configuration, gates, or existing result artifacts were
+  available. No browser traffic was sent.
+
+### Important Decisions
+
+- Local deterministic tests are sufficient for bounded architecture properties but not
+  for Queue-it reliability, throughput, restore rates, resource use, or stability.
+- A configured maximum of 25 contexts is not reported as an observed context peak.
+- The generated 5/10/15/20/25 matrix is not listed as tested because no case ran.
+- Missing evidence is UNKNOWN; Phase 3 blocker/readiness questions FAIL because the
+  required evidence-based operating point and headroom do not exist.
+
+### Known Issues
+
+- All real Phase 2 rates, latency, resource, failure, identity, backlog-drain,
+  one-versus-two-browser, and saturation results remain UNKNOWN.
+- The final suite could not be rerun in the current shell because project test
+  dependencies are unavailable.
+- The general `queue-load-test` CLI still does not assemble the full runtime by default.
+
+### Follow-Up
+
+Phase 3 Prompt 1 — Phase 3 readiness and 1,000-session profile. Do not begin until the
+Phase 2 acceptance blockers are resolved or explicitly treated as blocking evidence.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: documentation-only Phase 2 acceptance changes
