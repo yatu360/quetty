@@ -67,6 +67,11 @@ class LiveExtractor:
         )
 
 
+class NoTerminalStateDetector:
+    async def detect(self, _: object) -> None:
+        return None
+
+
 class ScriptedTransferExtractor:
     def __init__(self, results: list[TransferExtractionResult]) -> None:
         self.results = deque(results)
@@ -117,6 +122,7 @@ async def setup_restorer(
         state_store=state_store,
         expected_journey_url="https://queue.staging.test/journey",
         live_extractor=cast(Any, LiveExtractor()),
+        terminal_state_detector=cast(Any, NoTerminalStateDetector()),
         transfer_extractor_factory=lambda _: transfer_extractor,
         observation_timeout_seconds=0,
     )

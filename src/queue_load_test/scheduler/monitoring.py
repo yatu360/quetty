@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, Self
@@ -12,10 +12,11 @@ from uuid import uuid4
 from queue_load_test.config import Settings
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, evaluate_queue_status
 from queue_load_test.repository import SessionRepository
-from queue_load_test.transfer import SessionRestoreResult
+from queue_load_test.transfer import RestoreFailure, SessionRestoreResult
 
 type Clock = Callable[[], datetime]
 type Jitter = Callable[[float, float], float]
+type Sleep = Callable[[float], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +131,63 @@ class SessionRestorer(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class MonitoringRetryPolicy:
+    """Bound retries for failures that can plausibly recover on healthy capacity."""
+
+    max_attempts: int = 3
+    initial_backoff_seconds: float = 0.5
+    maximum_backoff_seconds: float = 5.0
+    jitter_seconds: float = 0.25
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if self.initial_backoff_seconds < 0 or self.maximum_backoff_seconds < 0:
+            raise ValueError("backoff values cannot be negative")
+        if self.maximum_backoff_seconds < self.initial_backoff_seconds:
+            raise ValueError("maximum_backoff_seconds cannot be less than initial backoff")
+        if self.jitter_seconds < 0:
+            raise ValueError("jitter_seconds cannot be negative")
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "MonitoringRetryPolicy":
+        return cls(
+            max_attempts=settings.monitor_retry_max_attempts,
+            initial_backoff_seconds=settings.monitor_retry_initial_backoff_seconds,
+            maximum_backoff_seconds=settings.monitor_retry_max_backoff_seconds,
+            jitter_seconds=settings.monitor_retry_jitter_seconds,
+        )
+
+    def delay(self, failed_attempt: int, jitter: Jitter) -> float:
+        exponential = min(
+            self.initial_backoff_seconds * (2.0 ** max(0, failed_attempt - 1)),
+            self.maximum_backoff_seconds,
+        )
+        return exponential + jitter(0.0, self.jitter_seconds)
+
+
+_EXPIRED_FAILURES = frozenset({RestoreFailure.SESSION_EXPIRED, RestoreFailure.EVENT_CLOSED})
+_PERMANENT_FAILURES = frozenset(
+    {
+        RestoreFailure.EXPECTED_IDENTITY_MISSING,
+        RestoreFailure.TRANSFER_URL_MISSING,
+        RestoreFailure.IDENTITY_MISMATCH,
+        RestoreFailure.INVALID_TRANSFER_URL,
+        RestoreFailure.STATE_CORRUPT,
+    }
+)
+
+
+def is_permanent_restore_failure(failure: RestoreFailure | None) -> bool:
+    return failure in _EXPIRED_FAILURES or failure in _PERMANENT_FAILURES
+
+
+@dataclass(frozen=True, slots=True)
 class MonitoringOutcome:
     session_id: str
     success: bool
     observed_status: QueueStatus
-    next_check_at: datetime
+    next_check_at: datetime | None
     queue_update_stale: bool
     progress_changed: bool
 
@@ -148,22 +201,35 @@ class QueueSessionMonitor:
         repository: SessionRepository,
         restorer: SessionRestorer,
         polling_policy: PollingPolicy,
+        retry_policy: MonitoringRetryPolicy | None = None,
         clock: Clock | None = None,
         jitter: Jitter = random.uniform,
+        sleep: Sleep = asyncio.sleep,
     ) -> None:
         self._repository = repository
         self._restorer = restorer
         self._polling_policy = polling_policy
+        self._retry_policy = retry_policy or MonitoringRetryPolicy()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._jitter = jitter
+        self._sleep = sleep
 
     async def check(self, session: QueueSession) -> MonitoringOutcome:
         previous_progress = await self._repository.get_progress(session.session_id)
-        result = await self._restorer.restore(session)
+        result = await self._restore_with_retries(session)
         observed_at = self._clock()
         progress_changed = False
 
-        if result.success and result.progress is not None:
+        if result.admitted:
+            observed_status = QueueStatus.ADMITTED
+            session.status = observed_status
+        elif result.expired or result.failure in _EXPIRED_FAILURES:
+            observed_status = QueueStatus.EXPIRED
+            session.status = observed_status
+        elif not result.success and result.failure in _PERMANENT_FAILURES:
+            observed_status = QueueStatus.FAILED
+            session.status = observed_status
+        elif result.success and result.progress is not None:
             observed_status = evaluate_queue_status(result.progress)
             session.status = observed_status
             progress_changed = _progress_signature(previous_progress) != _progress_signature(
@@ -177,14 +243,18 @@ class QueueSessionMonitor:
             ):
                 session.last_queue_update = result.progress.last_updated_at
         else:
-            observed_status = session.status
+            observed_status = QueueStatus.CONNECTION_LOST
+            session.status = observed_status
 
-        interval = self._polling_policy.interval_seconds(
-            observed_status,
-            result.progress,
-            jitter=self._jitter,
-        )
-        session.next_check_at = observed_at + timedelta(seconds=interval)
+        if observed_status in {QueueStatus.ADMITTED, QueueStatus.EXPIRED, QueueStatus.FAILED}:
+            session.next_check_at = None
+        else:
+            interval = self._polling_policy.interval_seconds(
+                observed_status,
+                result.progress,
+                jitter=self._jitter,
+            )
+            session.next_check_at = observed_at + timedelta(seconds=interval)
         await self._repository.update(session, result.progress)
         stale = is_queue_update_stale(
             session.last_queue_update,
@@ -199,6 +269,19 @@ class QueueSessionMonitor:
             queue_update_stale=stale,
             progress_changed=progress_changed,
         )
+
+    async def _restore_with_retries(self, session: QueueSession) -> SessionRestoreResult:
+        result = await self._restorer.restore(session)
+        attempt = 1
+        while (
+            not result.success
+            and not is_permanent_restore_failure(result.failure)
+            and attempt < self._retry_policy.max_attempts
+        ):
+            await self._sleep(self._retry_policy.delay(attempt, self._jitter))
+            attempt += 1
+            result = await self._restorer.restore(session)
+        return result
 
 
 def _progress_signature(progress: QueueProgress | None) -> tuple[object, ...] | None:
@@ -254,6 +337,7 @@ class ParkedSessionScheduler:
         lease_seconds: float,
         failure_delay_seconds: float,
         scheduler_tick_seconds: float = 1.0,
+        shutdown_timeout_seconds: float = 30.0,
         clock: Clock | None = None,
         scheduler_id: str | None = None,
     ) -> None:
@@ -263,7 +347,12 @@ class ParkedSessionScheduler:
             raise ValueError("queue_capacity must be at least 1")
         if claim_batch_size < 1 or claim_batch_size > queue_capacity:
             raise ValueError("claim_batch_size must be between 1 and queue_capacity")
-        if lease_seconds <= 0 or failure_delay_seconds <= 0 or scheduler_tick_seconds <= 0:
+        if (
+            lease_seconds <= 0
+            or failure_delay_seconds <= 0
+            or scheduler_tick_seconds <= 0
+            or shutdown_timeout_seconds <= 0
+        ):
             raise ValueError("lease, failure, and scheduler tick delays must be positive")
         self._repository = repository
         self._handler = handler
@@ -272,6 +361,7 @@ class ParkedSessionScheduler:
         self._lease_seconds = lease_seconds
         self._failure_delay_seconds = failure_delay_seconds
         self._scheduler_tick_seconds = scheduler_tick_seconds
+        self._shutdown_timeout_seconds = shutdown_timeout_seconds
         self._clock = clock or (lambda: datetime.now(UTC))
         self._scheduler_id = scheduler_id or f"monitor-{uuid4()}"
         self._queue: asyncio.Queue[QueueSession | _StopWorker] = asyncio.Queue(
@@ -279,6 +369,7 @@ class ParkedSessionScheduler:
         )
         self._workers: list[asyncio.Task[None]] = []
         self._schedule_lock = asyncio.Lock()
+        self._accepting = True
         self.metrics = MonitoringMetrics()
 
     @classmethod
@@ -300,6 +391,7 @@ class ParkedSessionScheduler:
             lease_seconds=settings.monitor_lease_seconds,
             failure_delay_seconds=settings.queue_poll_seconds,
             scheduler_tick_seconds=settings.monitor_scheduler_tick_seconds,
+            shutdown_timeout_seconds=settings.shutdown_timeout_seconds,
             clock=clock,
             scheduler_id=scheduler_id,
         )
@@ -324,6 +416,9 @@ class ParkedSessionScheduler:
             for index in range(self._worker_count)
         ]
 
+    def stop_scheduling(self) -> None:
+        self._accepting = False
+
     async def run(self, stop_event: asyncio.Event) -> MonitoringMetrics:
         """Continuously feed due work until asked to drain and stop."""
 
@@ -339,14 +434,15 @@ class ParkedSessionScheduler:
                 except TimeoutError:
                     pass
         finally:
-            await self.wait_until_idle()
-            await self.shutdown()
+            await self.shutdown(timeout_seconds=self._shutdown_timeout_seconds)
         return self.metrics
 
     async def schedule_due(self) -> int:
         """Claim no more sessions than the bounded queue can accept."""
 
         async with self._schedule_lock:
+            if not self._accepting:
+                return 0
             available = self._queue.maxsize - self._queue.qsize()
             limit = min(available, self._claim_batch_size)
             if limit < 1:
@@ -370,13 +466,38 @@ class ParkedSessionScheduler:
     async def wait_until_idle(self) -> None:
         await self._queue.join()
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+        self.stop_scheduling()
         if not self._workers:
+            await self._release_queued_leases()
             return
-        for _ in self._workers:
-            await self._queue.put(_STOP)
-        await asyncio.gather(*self._workers)
+        try:
+            if timeout_seconds is None:
+                await self._queue.join()
+            else:
+                await asyncio.wait_for(self._queue.join(), timeout=timeout_seconds)
+        except TimeoutError:
+            for worker in self._workers:
+                worker.cancel()
+            await asyncio.gather(*self._workers, return_exceptions=True)
+            await self._release_queued_leases()
+        else:
+            for _ in self._workers:
+                await self._queue.put(_STOP)
+            await asyncio.gather(*self._workers)
         self._workers.clear()
+
+    async def _release_queued_leases(self) -> None:
+        while not self._queue.empty():
+            item = self._queue.get_nowait()
+            try:
+                if isinstance(item, QueueSession):
+                    await self._repository.release_lease(
+                        item.session_id,
+                        worker_id=self._scheduler_id,
+                    )
+            finally:
+                self._queue.task_done()
 
     async def _worker(self, _: int) -> None:
         while True:

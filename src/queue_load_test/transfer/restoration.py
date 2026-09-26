@@ -6,13 +6,20 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, cast
+from urllib.parse import urlsplit
 
 from playwright.async_api import Page
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.browser.manager import ContextStorageState
+from queue_load_test.config import Settings
 from queue_load_test.models import QueueProgress, QueueSession, SessionMode
-from queue_load_test.queue_monitor import QueueItLiveStateExtractor
+from queue_load_test.queue_monitor import (
+    AdmissionDetector,
+    QueueItLiveStateExtractor,
+    QueueItTerminalStateDetector,
+    TerminalQueueState,
+)
 from queue_load_test.repository import SessionRepository
 from queue_load_test.state import BrowserState, StateStore, StateStoreError
 from queue_load_test.transfer.extractor import (
@@ -45,6 +52,9 @@ class RestoreFailure(StrEnum):
     STATE_CORRUPT = "STATE_CORRUPT"
     STATE_CONTEXT_FAILED = "STATE_CONTEXT_FAILED"
     STATE_REFRESH_FAILED = "STATE_REFRESH_FAILED"
+    INVALID_TRANSFER_URL = "INVALID_TRANSFER_URL"
+    SESSION_EXPIRED = "SESSION_EXPIRED"
+    EVENT_CLOSED = "EVENT_CLOSED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +68,8 @@ class RestoreAttempt:
     progress: QueueProgress | None = None
     failure: RestoreFailure | None = None
     state_refreshed: bool = False
+    admitted: bool = False
+    expired: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +84,8 @@ class SessionRestoreResult:
     progress: QueueProgress | None = None
     failure: RestoreFailure | None = None
     state_refreshed: bool = False
+    admitted: bool = False
+    expired: bool = False
     attempts: tuple[RestoreAttempt, ...] = ()
 
 
@@ -101,10 +115,13 @@ class QueueSessionRestorer:
         browser_manager: BrowserManager,
         repository: SessionRepository,
         state_store: StateStore,
-        expected_journey_url: str,
+        expected_journey_url: str | None = None,
         live_extractor: QueueItLiveStateExtractor | None = None,
+        admission_detector: AdmissionDetector | None = None,
+        terminal_state_detector: QueueItTerminalStateDetector | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
         navigation_timeout_ms: float = 30_000,
+        admission_wait_timeout_ms: float = 5_000,
         observation_timeout_seconds: float = 10.0,
         observation_interval_seconds: float = 0.25,
         sleep: Sleep = asyncio.sleep,
@@ -115,16 +132,40 @@ class QueueSessionRestorer:
             raise ValueError("observation_timeout_seconds cannot be negative")
         if observation_interval_seconds < 0:
             raise ValueError("observation_interval_seconds cannot be negative")
+        if admission_wait_timeout_ms < 0:
+            raise ValueError("admission_wait_timeout_ms cannot be negative")
         self._browser_manager = browser_manager
         self._repository = repository
         self._state_store = state_store
         self._expected_journey_url = expected_journey_url
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
+        self._admission_detector = admission_detector
+        self._terminal_state_detector = terminal_state_detector or QueueItTerminalStateDetector()
         self._transfer_extractor_factory = transfer_extractor_factory
         self._navigation_timeout_ms = navigation_timeout_ms
+        self._admission_wait_timeout_ms = admission_wait_timeout_ms
         self._observation_timeout_seconds = observation_timeout_seconds
         self._observation_interval_seconds = observation_interval_seconds
         self._sleep = sleep
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        browser_manager: BrowserManager,
+        repository: SessionRepository,
+        state_store: StateStore,
+    ) -> "QueueSessionRestorer":
+        """Use the configured staging URL solely as the admission destination."""
+
+        return cls(
+            browser_manager=browser_manager,
+            repository=repository,
+            state_store=state_store,
+            admission_detector=AdmissionDetector.from_urls(str(settings.staging_url)),
+            admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
+        )
 
     async def restore(self, session: QueueSession) -> SessionRestoreResult:
         """Restore one session, preserving its persisted Queue-it identity."""
@@ -147,6 +188,17 @@ class QueueSessionRestorer:
                     method=RestoreMethod.TRANSFER,
                     success=False,
                     failure=RestoreFailure.TRANSFER_URL_MISSING,
+                ),
+                expected_queue_id,
+            )
+            await self._record(session, result)
+            return result
+        if not self._valid_transfer_url(session.transfer_url):
+            result = self._result(
+                RestoreAttempt(
+                    method=RestoreMethod.TRANSFER,
+                    success=False,
+                    failure=RestoreFailure.INVALID_TRANSFER_URL,
                 ),
                 expected_queue_id,
             )
@@ -206,11 +258,32 @@ class QueueSessionRestorer:
                     wait_until="domcontentloaded",
                     timeout=self._navigation_timeout_ms,
                 )
-                if response is not None and response.status >= 400:
+                if response is not None and response.status == 410:
                     return RestoreAttempt(
                         method=method,
                         success=False,
-                        failure=RestoreFailure.HTTP_FAILURE,
+                        failure=RestoreFailure.SESSION_EXPIRED,
+                        expired=True,
+                    )
+                if response is not None and response.status >= 400:
+                    failure = (
+                        RestoreFailure.HTTP_FAILURE
+                        if response.status >= 500 or response.status in {408, 429}
+                        else RestoreFailure.INVALID_TRANSFER_URL
+                    )
+                    return RestoreAttempt(
+                        method=method,
+                        success=False,
+                        failure=failure,
+                    )
+                if self._admission_detector is not None and await self._admission_detector.detect(
+                    page
+                ):
+                    return RestoreAttempt(
+                        method=method,
+                        success=True,
+                        identity_match=True,
+                        admitted=True,
                     )
                 attempt = await self._observe(page, session, method)
                 if attempt.success and session.mode is SessionMode.HYBRID:
@@ -247,12 +320,53 @@ class QueueSessionRestorer:
         deadline = asyncio.get_running_loop().time() + self._observation_timeout_seconds
         latest_progress: QueueProgress | None = None
         latest_transfer: TransferExtractionResult | None = None
-        extractor = self._transfer_extractor_factory(self._expected_journey_url)
+        extractor = self._transfer_extractor_factory(
+            self._expected_journey_url or session.transfer_url
+        )
         while True:
+            terminal_state = await self._terminal_state_detector.detect(page)
+            if terminal_state is not None:
+                failure = (
+                    RestoreFailure.SESSION_EXPIRED
+                    if terminal_state is TerminalQueueState.EXPIRED
+                    else RestoreFailure.EVENT_CLOSED
+                )
+                return RestoreAttempt(
+                    method=method,
+                    success=False,
+                    failure=failure,
+                    expired=True,
+                )
+            if self._admission_detector is not None and await self._admission_detector.detect(page):
+                return RestoreAttempt(
+                    method=method,
+                    success=True,
+                    identity_match=True,
+                    admitted=True,
+                )
             latest_progress = await self._live_extractor.extract(
                 page,
                 session_id=session.session_id,
             )
+            if latest_progress.turn_started is True:
+                if self._admission_detector is not None and await self._admission_detector.detect(
+                    page,
+                    wait_timeout_ms=self._admission_wait_timeout_ms,
+                ):
+                    return RestoreAttempt(
+                        method=method,
+                        success=True,
+                        identity_match=True,
+                        progress=latest_progress,
+                        admitted=True,
+                    )
+                return RestoreAttempt(
+                    method=method,
+                    success=True,
+                    observed_queue_id=session.queue_id,
+                    identity_match=True,
+                    progress=latest_progress,
+                )
             latest_transfer = await extractor.extract(
                 page,
                 expected_queue_id=session.queue_id,
@@ -287,7 +401,7 @@ class QueueSessionRestorer:
                     success=False,
                     observed_queue_id=latest_transfer.observed_queue_id,
                     progress=latest_progress,
-                    failure=RestoreFailure.TRANSFER_UNAVAILABLE,
+                    failure=RestoreFailure.INVALID_TRANSFER_URL,
                 )
             if asyncio.get_running_loop().time() >= deadline:
                 failure = (
@@ -316,6 +430,22 @@ class QueueSessionRestorer:
         await self._repository.update(session, result.progress)
 
     @staticmethod
+    def _valid_transfer_url(value: str) -> bool:
+        if any(character.isspace() for character in value):
+            return False
+        try:
+            parsed = urlsplit(value)
+            _ = parsed.port
+        except ValueError:
+            return False
+        return (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname is not None
+            and parsed.username is None
+            and parsed.password is None
+        )
+
+    @staticmethod
     def _result(
         final_attempt: RestoreAttempt,
         expected_queue_id: str | None,
@@ -330,5 +460,7 @@ class QueueSessionRestorer:
             progress=final_attempt.progress,
             failure=final_attempt.failure,
             state_refreshed=final_attempt.state_refreshed,
+            admitted=final_attempt.admitted,
+            expired=final_attempt.expired,
             attempts=tuple(attempts or (final_attempt,)),
         )

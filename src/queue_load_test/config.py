@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     monitor_scheduler_tick_seconds: float = Field(
         default=1.0, alias="MONITOR_SCHEDULER_TICK_SECONDS", gt=0
     )
+    monitor_retry_max_attempts: int = Field(default=3, alias="MONITOR_RETRY_MAX_ATTEMPTS", ge=1)
+    monitor_retry_initial_backoff_seconds: float = Field(
+        default=0.5, alias="MONITOR_RETRY_INITIAL_BACKOFF_SECONDS", ge=0
+    )
+    monitor_retry_max_backoff_seconds: float = Field(
+        default=5.0, alias="MONITOR_RETRY_MAX_BACKOFF_SECONDS", ge=0
+    )
+    monitor_retry_jitter_seconds: float = Field(
+        default=0.25, alias="MONITOR_RETRY_JITTER_SECONDS", ge=0
+    )
+    admission_wait_seconds: float = Field(default=5.0, alias="ADMISSION_WAIT_SECONDS", ge=0)
+    shutdown_timeout_seconds: float = Field(default=30.0, alias="SHUTDOWN_TIMEOUT_SECONDS", gt=0)
     queue_poll_seconds: float = Field(default=30.0, alias="QUEUE_POLL_SECONDS", gt=0)
     poll_jitter_seconds: float = Field(default=5.0, alias="POLL_JITTER_SECONDS", ge=0)
     pre_queue_poll_min_seconds: float = Field(
@@ -105,6 +117,12 @@ class Settings(BaseSettings):
 
         if self.poll_jitter_seconds >= self.queue_poll_seconds:
             raise ValueError("POLL_JITTER_SECONDS must be less than QUEUE_POLL_SECONDS")
+
+        if self.monitor_retry_max_backoff_seconds < self.monitor_retry_initial_backoff_seconds:
+            raise ValueError(
+                "MONITOR_RETRY_MAX_BACKOFF_SECONDS cannot be less than "
+                "MONITOR_RETRY_INITIAL_BACKOFF_SECONDS"
+            )
 
         interval_pairs = (
             (

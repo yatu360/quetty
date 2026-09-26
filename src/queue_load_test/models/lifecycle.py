@@ -34,15 +34,19 @@ _ALLOWED_TRANSITIONS: dict[QueueStatus, frozenset[QueueStatus]] = {
     QueueStatus.NEW: frozenset({QueueStatus.CREATING, QueueStatus.FAILED}),
     QueueStatus.CREATING: frozenset({QueueStatus.PRE_QUEUE}) | _INTERRUPT_STATES,
     QueueStatus.PRE_QUEUE: (
-        frozenset({QueueStatus.ACTIVE_QUEUE, QueueStatus.PAUSED}) | _INTERRUPT_STATES
+        frozenset({QueueStatus.ACTIVE_QUEUE, QueueStatus.PAUSED, QueueStatus.ADMITTED})
+        | _INTERRUPT_STATES
     ),
     QueueStatus.ACTIVE_QUEUE: (
-        frozenset({QueueStatus.SERVICED_SOON, QueueStatus.PAUSED}) | _INTERRUPT_STATES
+        frozenset({QueueStatus.SERVICED_SOON, QueueStatus.PAUSED, QueueStatus.ADMITTED})
+        | _INTERRUPT_STATES
     ),
     QueueStatus.SERVICED_SOON: (
-        frozenset({QueueStatus.TURN_STARTED, QueueStatus.PAUSED}) | _INTERRUPT_STATES
+        frozenset({QueueStatus.TURN_STARTED, QueueStatus.PAUSED, QueueStatus.ADMITTED})
+        | _INTERRUPT_STATES
     ),
-    QueueStatus.TURN_STARTED: frozenset({QueueStatus.READY}) | _INTERRUPT_STATES,
+    QueueStatus.TURN_STARTED: frozenset({QueueStatus.READY, QueueStatus.ADMITTED})
+    | _INTERRUPT_STATES,
     QueueStatus.READY: frozenset({QueueStatus.ADMITTED}) | _INTERRUPT_STATES,
     QueueStatus.PAUSED: _OBSERVABLE_QUEUE_STATES | _INTERRUPT_STATES,
     QueueStatus.CONNECTION_LOST: _OBSERVABLE_QUEUE_STATES | _INTERRUPT_STATES,

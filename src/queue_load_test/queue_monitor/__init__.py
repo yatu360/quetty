@@ -1,5 +1,12 @@
 """Queue monitoring parsers and live browser extraction."""
 
+from queue_load_test.queue_monitor.admission import (
+    AdmissionDetector,
+    ExpectedDestination,
+    QueueItTerminalStateDetector,
+    TerminalQueueState,
+    TerminalStateSelectors,
+)
 from queue_load_test.queue_monitor.extractor import QueueItLiveStateExtractor, QueueItSelectors
 from queue_load_test.queue_monitor.parsing import (
     parse_connection_lost,
@@ -16,8 +23,13 @@ from queue_load_test.queue_monitor.parsing import (
 )
 
 __all__ = [
+    "AdmissionDetector",
+    "ExpectedDestination",
     "QueueItLiveStateExtractor",
     "QueueItSelectors",
+    "QueueItTerminalStateDetector",
+    "TerminalQueueState",
+    "TerminalStateSelectors",
     "parse_connection_lost",
     "parse_estimated_wait_text",
     "parse_expected_service_time",

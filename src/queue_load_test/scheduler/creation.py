@@ -345,7 +345,7 @@ class SessionCreationController:
         self._queue_capacity = queue_capacity or worker_count
         self.metrics = CreationMetrics()
 
-    async def run(self) -> CreationMetrics:
+    async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
         started = time.perf_counter()
         work_queue: asyncio.Queue[CreationWorkItem | None] = asyncio.Queue(
             maxsize=self._queue_capacity
@@ -362,7 +362,9 @@ class SessionCreationController:
         in_flight = 0
         try:
             self.metrics.successful_unique_ids = await self._repository.count_successful_queue_ids()
-            while self.metrics.successful_unique_ids < self._target:
+            while self.metrics.successful_unique_ids < self._target and not (
+                stop_event is not None and stop_event.is_set()
+            ):
                 deficit = self._target - self.metrics.successful_unique_ids
                 desired_in_flight = min(self._worker_count, deficit)
                 while in_flight < desired_in_flight:

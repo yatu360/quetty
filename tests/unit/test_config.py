@@ -69,6 +69,16 @@ def test_rejects_inverted_adaptive_poll_range() -> None:
         )
 
 
+def test_rejects_inverted_monitor_retry_backoff() -> None:
+    with pytest.raises(ValidationError, match="MONITOR_RETRY_MAX_BACKOFF_SECONDS"):
+        Settings(
+            **settings_kwargs(
+                MONITOR_RETRY_INITIAL_BACKOFF_SECONDS=5,
+                MONITOR_RETRY_MAX_BACKOFF_SECONDS=1,
+            )
+        )
+
+
 def test_hybrid_and_transfer_only_mode_parsing() -> None:
     assert Settings(**settings_kwargs(SESSION_MODE="HYBRID")).session_mode is SessionMode.HYBRID
     assert (

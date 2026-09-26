@@ -204,6 +204,38 @@ async def test_active_lease_prevents_simultaneous_check_of_same_session(
     await repository.close()
 
 
+async def test_shutdown_timeout_cancels_active_work_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "sessions.sqlite3")
+    await repository.create(make_session("due"))
+    handler = BlockingHandler()
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=1,
+        queue_capacity=1,
+        claim_batch_size=1,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="scheduler-1",
+    )
+    await scheduler.start()
+    await scheduler.schedule_due()
+    await handler.started.wait()
+
+    await scheduler.shutdown(timeout_seconds=0.01)
+
+    persisted = await repository.get("due")
+    assert persisted is not None
+    assert persisted.queue_id == "queue-due"
+    assert persisted.worker_id is None
+    assert persisted.lease_until is None
+    assert scheduler.worker_task_count == 0
+    await repository.close()
+
+
 def test_adaptive_intervals_follow_lifecycle_ranges() -> None:
     policy = PollingPolicy(jitter_seconds=5)
     early = QueueProgress(session_id="s", active_queue=True, progress_percentage=10)

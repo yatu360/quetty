@@ -15,11 +15,13 @@ This phase intentionally implements only:
 - bounded session creation until the configured unique Queue ID target is reached
 - identity-safe TRANSFER_ONLY restoration with HYBRID storage-state fallback
 - bounded parked-session monitoring with SQLite leases and adaptive polling
+- browser-verified admission, terminal failure classification, and bounded recovery
+- signal-aware graceful shutdown that preserves persisted journeys
 - project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement admission handling, PostgreSQL, Prometheus export, or
-later transfer workflows.
+It does not implement PostgreSQL, Prometheus export, or later post-admission
+workflows.
 
 ## Install
 
@@ -50,6 +52,11 @@ Playwright storage state only as a fallback. Storage state is not a complete
 browser snapshot: it does not preserve JavaScript memory, timers, WebSockets,
 the execution stack, every form of session storage, every browser store, or live
 service-worker state.
+
+`TURN_STARTED` records Queue-it entering its service/redirect stage. A session
+is only marked `ADMITTED` after normal browser navigation reaches the configured
+staging destination. The application does not extract or manipulate Queue-it
+admission tokens.
 
 ## Test
 
