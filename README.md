@@ -246,6 +246,18 @@ then resumes a bounded scheduler batch from expired leases:
 queue-load-test-phase3-recovery --database phase3-recovery-synthetic/sessions.sqlite3 --state-directory phase3-recovery-synthetic/state --restarts 5 --report phase3-recovery-benchmark.json
 ```
 
+Phase 4 10,000-ID acquisition is separately gated and resumable. Run its no-navigation
+preflight first, then enable both staging gates only for the authorised environment:
+
+```powershell
+queue-load-test-phase4-acquisition --preflight-only --preflight-report phase4-acquisition-preflight.json
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE4_ACQUISITION_BENCHMARK = "1"
+queue-load-test-phase4-acquisition --confirm-authorized-staging --report phase4-acquisition-benchmark.json
+```
+
+See `docs/phase4_acquisition.md` for the required bounded profile and persistent paths.
+
 Normal runtime startup uses one aggregate SQLite recovery query and does not scan all
 state files. Missing/corrupt state counts require the explicit state consistency scan.
 See [the Phase 3 recovery benchmark](docs/phase3-recovery.md) for scenario outcomes and

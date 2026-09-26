@@ -307,10 +307,10 @@ class ResourceBenchmarkRecorder:
             sample_interval_seconds=sample_interval_seconds,
             staging_status=staging_status,
             samples=tuple(self.samples),
-            summary=self._summary(metrics, test_duration_seconds),
+            summary=self.summary(metrics, test_duration_seconds),
         )
 
-    def _summary(
+    def summary(
         self,
         metrics: PrometheusMetrics,
         test_duration_seconds: float,
@@ -345,7 +345,7 @@ class ResourceBenchmarkRecorder:
             "restore_failures": _counter(metrics, "state_restore_failures_total")
             + _counter(metrics, "transfer_restore_failures_total"),
             "identity_mismatches": _counter(metrics, "identity_mismatches_total"),
-            "navigation_latency": _prometheus_histogram_summary(
+            "navigation_latency": prometheus_histogram_summary(
                 metrics,
                 "navigation_duration_seconds",
             ),
@@ -358,7 +358,7 @@ class ResourceBenchmarkRecorder:
                 "context_creation": asdict(
                     _latency_summary(self.context_creation_latencies)
                 ),
-                "context_acquisition": _prometheus_histogram_summary(
+                "context_acquisition": prometheus_histogram_summary(
                     metrics,
                     "browser_context_acquisition_duration_seconds",
                 ),
@@ -439,7 +439,7 @@ def _counter(metrics: PrometheusMetrics, name: str) -> int:
     return int(_metric(metrics, name) or 0)
 
 
-def _prometheus_histogram_summary(
+def prometheus_histogram_summary(
     metrics: PrometheusMetrics,
     name: str,
 ) -> dict[str, int | float | None]:

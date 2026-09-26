@@ -151,6 +151,12 @@ async def test_context_reports_creation_and_allocation_wait_duration() -> None:
         )
         == 1
     )
+    assert (
+        metrics.registry.get_sample_value(
+            "browser_context_acquisition_wait_seconds_count"
+        )
+        == 1
+    )
     await owned.close()
     await manager.shutdown()
 

@@ -2314,3 +2314,114 @@ the current roadmap remains Phase 4 Prompt 5 — Acquire 10,000 Queue IDs.
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: persistence recheck documentation
+
+## 2026-09-27 — Phase 4 Prompt 5 — Acquire 10,000 Queue IDs
+
+### Agent / Model
+
+Codex (exact model identifier is not recorded in the repository)
+
+### Goal
+
+Prepare and, only when the authorised staging environment is configured, run a bounded,
+resume-safe acquisition to 10,000 successful unique Queue IDs with complete aggregate
+preflight, resource, failure, and post-run verification evidence.
+
+### Changes Made
+
+- Added `queue-load-test-phase4-acquisition` with explicit preflight-only and gated
+  acquisition/resume modes.
+- Enforced the retained single-machine profile: one or two Chrome processes, no more
+  than 25 contexts per process or 50 globally, and no more than 10 creation workers or
+  10 queued items.
+- Added preflight checks for configuration, staging URL, SQLite/counts, active/expired
+  leases, atomic state write/delete, disk headroom, installed Chrome launch and context
+  cleanup, Prometheus registry, and shutdown/recovery availability.
+- Added aggregate JSON/text reporting for initial/final counts, overshoot, attempts,
+  failures, retries, creation and browser latency, CPU/RAM samples, active contexts,
+  per-worker distribution, and post-run context/lease/state consistency.
+- Added graceful stop/timeout handling that ceases replenishment and drains only the
+  bounded in-flight work within the configured shutdown timeout. Committed sessions are
+  retained for restart/resume.
+- Added per-local-worker completion/success/unexpected-failure accounting to the
+  creation controller without adding tasks or changing target semantics.
+- Added a dedicated state-persistence-failure metric and sanitized retry code, plus an
+  exact BrowserManager lock-wait histogram separate from total context acquisition.
+- Added tests for the 10,000 target, resume from 7,423, already-satisfied startup,
+  profile limits, staging gates, preflight success/failure, state-write failure, and
+  per-worker accounting. Existing duplicate, transient failure, shutdown/restart, and
+  uniqueness tests remain active.
+- Added `docs/phase4_acquisition.md` and updated project context, roadmap, README,
+  console entry point, and generated-output ignores.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase4_acquisition.py`
+- `tests/unit/test_phase4_acquisition.py`
+- `docs/phase4_acquisition.md`
+
+### Files Modified
+
+- `.gitignore`
+- `pyproject.toml`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/harness/resource_benchmark.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/scheduler/creation.py`
+- `tests/unit/test_browser_manager.py`
+- `tests/unit/test_creation.py`
+
+### Tests Run
+
+- Initial focused acquisition/resource/metrics tests — 33 passed.
+- Full `python -m pytest -q` — 321 passed, 2 Windows-inapplicable permission tests
+  skipped, 4 gated staging tests deselected in 290.11 seconds.
+- Final focused BrowserManager/metrics/Phase 4 acquisition/creation tests after adding
+  the exact context-wait metric — 50 passed.
+- `python -m ruff check src tests` — passed.
+- `python -m mypy src` — passed with no issues in 51 source files.
+
+### Staging Tests
+
+- Authorised 10,000-session acquisition: **NOT RUN**. No `.env` with the authorised
+  staging URL and neither staging execution gate was configured. No Queue-it page was
+  opened and no staging traffic was sent.
+- A no-navigation local preflight used temporary SQLite/state data and a test-only
+  hostname. It passed local capacity, database, state, disk, Chrome, metrics, lease,
+  and recovery mechanics; launched two Chrome processes; and returned one test context
+  to zero. This is not a Queue-it result.
+
+### Important Decisions
+
+- Deployment remains single-machine; no distributed workers or shared infrastructure
+  were added.
+- The harness refuses concurrency above the least-pressured 50-context Phase 3
+  candidate and uses at most 10 creation workers despite the larger target.
+- No checked-in or console output contains transfer URLs or Queue ID values.
+- The real result remains NOT RUN/UNKNOWN rather than being inferred from synthetic
+  controller tests or the local no-navigation preflight.
+
+### Known Issues
+
+- Final unique count, duration, sessions/s, duplicate/failure rates, Queue-it latency,
+  resource usage, browser stability, and real state consistency remain UNKNOWN.
+- The one-GiB disk gate is a configurable safety floor, not proof of real state-file or
+  Chrome profile size.
+- Prometheus histogram percentiles are bucket upper-bound estimates; creation latency
+  percentiles use recorded exact outcome durations.
+- A real Prompt 6 full-population sweep cannot run until the authorised population is
+  acquired or otherwise available in the configured persistent database/state paths.
+
+### Follow-Up
+
+Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep Benchmark
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 4 acquisition harness, tests, metrics, and project records

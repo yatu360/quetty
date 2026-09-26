@@ -9,10 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4 readiness; Prompts 1–4 complete. The 10,000-session target run
-  has not begun.
-- Last completed work: the evidence-based distributed-worker decision,
-  `docs/phase4_distributed_worker_decision.md`.
+- Current phase: Phase 4; Prompts 1–5 are implemented. The authorised 10,000-session
+  target run has **NOT RUN**.
+- Last completed work: the gated 10,000-ID acquisition preflight and resumable harness,
+  `docs/phase4_acquisition.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -56,9 +56,16 @@ live monitoring.
   and owner fencing—but has no PostgreSQL backend, shared state store, cross-node state
   write fencing, or multi-controller target reservation. Distributed correctness is
   therefore not claimed.
-- Next planned work: **Phase 4 Prompt 5 — Acquire 10,000 Queue IDs** using the bounded
-  single-machine architecture. No real acquisition or monitoring throughput should be
-  inferred from synthetic tests.
+- Phase 4 acquisition result: **NOT RUN / UNKNOWN**. No authorised staging URL or run
+  gates were configured. A no-navigation local preflight proved SQLite/state writes,
+  two-process installed-Chrome launch, one-context cleanup to zero, metrics, disk, and
+  recovery mechanics using temporary data, but it did not contact Queue-it.
+- The Phase 4 acquisition runner is resume-safe, enforces at most two Chrome processes,
+  25 contexts per process, 50 globally, and 10 creation workers/queue slots, and emits
+  aggregate JSON with post-run identity count, context, lease, and state-consistency
+  verification. Transfer URLs and Queue IDs are absent from the report.
+- Next planned work: **Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep
+  Benchmark**. A real sweep remains blocked until an authorised population exists.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -596,6 +603,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase4_distributed_worker_decision.md` — evidence-based single-machine decision,
   limiting-resource unknowns, distribution-readiness audit, and the gate for revisiting
   multi-node execution.
+- `docs/phase4_acquisition.md` — gated 10,000-ID preflight/run/resume procedure, aggregate
+  report fields, bounded profile, and current staging NOT RUN result.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -721,6 +730,16 @@ Phase 4 10,000-file state benchmark (dedicated empty paths; 20 concurrent operat
 queue-load-test-phase3-storage --database phase4-storage-synthetic/sessions.sqlite3 --state-directory phase4-storage-synthetic/state --sessions 10000 --concurrency 20 --report phase4-storage-benchmark.json
 ```
 
+Phase 4 acquisition preflight and authorised run/resume (use persistent dedicated
+database/state paths and the bounded profile from `docs/phase4_acquisition.md`):
+
+```powershell
+queue-load-test-phase4-acquisition --preflight-only --preflight-report phase4-acquisition-preflight.json
+$env:RUN_STAGING_TESTS = "1"
+$env:RUN_PHASE4_ACQUISITION_BENCHMARK = "1"
+queue-load-test-phase4-acquisition --confirm-authorized-staging --creation-timeout-seconds 86400 --report phase4-acquisition-benchmark.json
+```
+
 Read-only state consistency report for an existing database:
 
 ```powershell
@@ -742,10 +761,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 5 — Acquire 10,000 Queue IDs.** Proceed with the bounded single-machine
-architecture and record real acquisition cadence, reliability, resource, and identity
-evidence. Distribution remains deferred unless measured results establish a one-host
-shortfall.
+**Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep Benchmark.** Preserve the
+bounded single-machine deployment and report real results only if the authorised
+10,000-session population exists; otherwise retain UNKNOWN outcomes.
 
 ## Instructions for Future AI Sessions
 

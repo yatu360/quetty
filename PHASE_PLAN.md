@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–4 completed on 2026-09-26; 10,000-session staging run not started.**
+**Status: Prompts 1–5 implemented; 10,000-session staging acquisition NOT RUN.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -425,9 +425,15 @@ Planned prompt breakdown:
    boundaries, but PostgreSQL claims, shared state, cross-node state fencing, and
    multi-controller target reservations are not implemented. See
    `docs/phase4_distributed_worker_decision.md`.
-5. **Phase 4 Prompt 5 — Acquire 10,000 Queue IDs (next)** — run bounded acquisition
-   with throughput, reliability, and resource evidence.
-6. **10,000-session monitoring/backlog benchmark** — validate adaptive cadence,
+5. **Phase 4 Prompt 5 — Acquire 10,000 Queue IDs** — **harness and preflight completed
+   on 2026-09-27; authorised run NOT RUN.** The single-machine runner enforces at most
+   two Chrome processes, 50 global contexts, 10 creation workers, and 10 queue slots;
+   resumes from SQLite; records aggregate latency/resource/failure/per-worker results;
+   and verifies final counts, zero contexts, leases, and state consistency. Local
+   no-navigation preflight mechanics passed, but no configured authorised environment
+   existed, so all real 10,000-ID outcomes remain UNKNOWN. See
+   `docs/phase4_acquisition.md`.
+6. **Phase 4 Prompt 6 — 10,000-session monitoring/backlog benchmark (next)** — validate adaptive cadence,
    prioritization, sweep time, queue depth, fairness, and degraded-mode behavior.
 7. **Worker/node loss and disaster recovery** — exercise lease expiry, process/node
    loss, restart, state-store faults, and identity preservation.

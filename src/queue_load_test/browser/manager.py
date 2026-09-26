@@ -297,6 +297,9 @@ class BrowserManager:
                             self._observability.record_context_creation_duration(
                                 creation_duration
                             )
+                            self._observability.record_context_acquisition_wait(
+                                acquisition_wait_seconds
+                            )
                         owned_context = OwnedBrowserContext(
                             self,
                             slot,

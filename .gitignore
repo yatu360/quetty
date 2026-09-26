@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .browser-state/
+.phase4-browser-state/
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
@@ -170,6 +171,8 @@ phase3-recovery-benchmark*.json
 phase3-recovery-synthetic*/
 phase4-storage-benchmark*.json
 phase4-storage-synthetic*/
+phase4-acquisition-benchmark*.json
+phase4-acquisition-preflight*.json
 .phase2-concurrency-runs/
 .venv
 env/

@@ -842,3 +842,41 @@ async def test_temporary_server_failure_retries_without_transfer_only_state(
     assert observability.registry.get_sample_value("queue_creation_retries_total") == 1
     assert observability.registry.get_sample_value("queue_ids_acquired_total") == 1
     await repository.close()
+
+
+class FailingStateStore(FileSystemStateStore):
+    async def save(self, session_id: str, state: dict[str, object]) -> Path:
+        del session_id, state
+        raise OSError("controlled state write failure")
+
+
+async def test_state_persistence_failure_is_sanitized_counted_and_context_closed(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "state-failure.sqlite3")
+    state_store = FailingStateStore(tmp_path / "state")
+    browser_manager = FakeBrowserManager([200])
+    observability = PrometheusMetrics()
+    creator = QueueSessionCreator(
+        browser_manager=cast(BrowserManager, browser_manager),
+        repository=repository,
+        state_store=state_store,
+        staging_url="https://staging.test",
+        state_directory=state_store.directory,
+        mode=SessionMode.HYBRID,
+        live_extractor=cast(Any, LiveExtractor()),
+        transfer_extractor_factory=lambda _: SuccessfulTransferExtractor(),
+        retry_policy=CreationRetryPolicy(max_attempts=1),
+        observability=observability,
+    )
+
+    outcome = await creator.create(CreationWorkItem(sequence=1, session_id="state-failure"))
+
+    assert outcome.kind is CreationOutcomeKind.TEMPORARY_FAILURE
+    assert outcome.failure_code == "state_persistence_failed"
+    assert browser_manager.contexts[0].closed
+    assert observability.registry.get_sample_value("state_persistence_failures_total") == 1
+    persisted = await repository.get("state-failure")
+    assert persisted is not None and persisted.status is QueueStatus.FAILED
+    assert persisted.last_error == "state_persistence_failed"
+    await repository.close()

@@ -69,6 +69,11 @@ class PrometheusMetrics:
             "Permanent creation failures that are not retried.",
             registry=self.registry,
         )
+        self.state_persistence_failures_total = Counter(
+            "state_persistence_failures_total",
+            "Browser storage-state writes that failed during session creation.",
+            registry=self.registry,
+        )
         self.queue_creation_in_flight = Gauge(
             "queue_creation_in_flight",
             "Creation workers currently processing a session.",
@@ -123,6 +128,12 @@ class PrometheusMetrics:
         self.browser_context_acquisition_duration_seconds = Histogram(
             "browser_context_acquisition_duration_seconds",
             "Time spent acquiring a BrowserContext, including manager contention.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.browser_context_acquisition_wait_seconds = Histogram(
+            "browser_context_acquisition_wait_seconds",
+            "Time spent waiting for BrowserManager allocation locks.",
             buckets=_DURATION_BUCKETS,
             registry=self.registry,
         )
@@ -272,6 +283,9 @@ class PrometheusMetrics:
     def record_creation_permanent_failure(self) -> None:
         self.queue_creation_permanent_failures_total.inc()
 
+    def record_state_persistence_failure(self) -> None:
+        self.state_persistence_failures_total.inc()
+
     def set_creation_activity(self, *, in_flight: int, queue_depth: int) -> None:
         self.queue_creation_in_flight.set(in_flight)
         self.queue_creation_queue_depth.set(queue_depth)
@@ -362,6 +376,9 @@ class PrometheusMetrics:
 
     def record_context_acquisition_duration(self, duration_seconds: float) -> None:
         self.browser_context_acquisition_duration_seconds.observe(duration_seconds)
+
+    def record_context_acquisition_wait(self, duration_seconds: float) -> None:
+        self.browser_context_acquisition_wait_seconds.observe(duration_seconds)
 
     def sync_session_counts(self, sessions: Iterable[QueueSession]) -> None:
         counts = dict.fromkeys(self._session_gauges, 0)

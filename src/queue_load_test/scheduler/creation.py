@@ -23,7 +23,7 @@ from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import QueueIdConflictError, SessionRepository
-from queue_load_test.state import BrowserState, StateStore
+from queue_load_test.state import BrowserState, StateStore, StateStoreError
 from queue_load_test.transfer import (
     QueueItTransferExtractor,
     TransferExtractionResult,
@@ -135,6 +135,9 @@ class CreationMetrics:
     maximum_queue_depth: int = 0
     total_creation_duration_seconds: float = 0.0
     elapsed_seconds: float = 0.0
+    worker_completed: dict[int, int] = field(default_factory=dict)
+    worker_successes: dict[int, int] = field(default_factory=dict)
+    worker_failures: dict[int, int] = field(default_factory=dict)
 
     @property
     def sessions_created_per_second(self) -> float:
@@ -303,7 +306,15 @@ class QueueSessionCreator:
 
             if self._mode is SessionMode.HYBRID:
                 storage_state = cast(BrowserState, await context.storage_state())
-                state_path = await self._state_store.save(work_item.session_id, storage_state)
+                try:
+                    state_path = await self._state_store.save(
+                        work_item.session_id,
+                        storage_state,
+                    )
+                except (OSError, StateStoreError) as exc:
+                    if self._observability is not None:
+                        self._observability.record_state_persistence_failure()
+                    raise TransientCreationError("state_persistence_failed") from exc
                 state_saved = True
 
             observed_at = datetime.now(UTC)
@@ -448,10 +459,12 @@ class SessionCreationController:
         work_queue: asyncio.Queue[CreationWorkItem | None] = asyncio.Queue(
             maxsize=self._queue_capacity
         )
-        result_queue: asyncio.Queue[CreationOutcome] = asyncio.Queue(maxsize=self._worker_count)
+        result_queue: asyncio.Queue[tuple[int, CreationOutcome]] = asyncio.Queue(
+            maxsize=self._worker_count
+        )
         workers = [
             asyncio.create_task(
-                self._worker(work_queue, result_queue),
+                self._worker(index, work_queue, result_queue),
                 name=f"creation-worker-{index}",
             )
             for index in range(self._worker_count)
@@ -475,9 +488,9 @@ class SessionCreationController:
                         in_flight += 1
                         self._set_creation_activity(work_queue)
 
-                    outcome = await result_queue.get()
+                    worker_index, outcome = await result_queue.get()
                     in_flight -= 1
-                    self._record(outcome)
+                    self._record(outcome, worker_index=worker_index)
                     if self._observability is not None:
                         elapsed = max(time.perf_counter() - started, 1e-9)
                         self._observability.set_creation_rate(
@@ -497,8 +510,8 @@ class SessionCreationController:
 
             if in_flight:
                 for _ in range(in_flight):
-                    outcome = await result_queue.get()
-                    self._record(outcome)
+                    worker_index, outcome = await result_queue.get()
+                    self._record(outcome, worker_index=worker_index)
                 self.metrics.successful_unique_ids = (
                     await self._repository.count_successful_queue_ids()
                 )
@@ -523,8 +536,9 @@ class SessionCreationController:
 
     async def _worker(
         self,
+        worker_index: int,
         work_queue: asyncio.Queue[CreationWorkItem | None],
-        result_queue: asyncio.Queue[CreationOutcome],
+        result_queue: asyncio.Queue[tuple[int, CreationOutcome]],
     ) -> None:
         while True:
             work_item = await work_queue.get()
@@ -555,12 +569,15 @@ class SessionCreationController:
                 finally:
                     self.metrics.currently_creating -= 1
                     self._set_creation_activity(work_queue)
-                await result_queue.put(outcome)
+                await result_queue.put((worker_index, outcome))
             finally:
                 work_queue.task_done()
 
-    def _record(self, outcome: CreationOutcome) -> None:
+    def _record(self, outcome: CreationOutcome, *, worker_index: int) -> None:
         self.metrics.completed_work_items += 1
+        self.metrics.worker_completed[worker_index] = (
+            self.metrics.worker_completed.get(worker_index, 0) + 1
+        )
         self.metrics.attempts += outcome.attempts
         self.metrics.retries += max(0, outcome.attempts - 1)
         self.metrics.temporary_failures += outcome.temporary_failures
@@ -568,12 +585,19 @@ class SessionCreationController:
         if outcome.kind is CreationOutcomeKind.SUCCESS:
             self.metrics.unique_ids_acquired += 1
             self.metrics.successful_unique_ids += 1
+            self.metrics.worker_successes[worker_index] = (
+                self.metrics.worker_successes.get(worker_index, 0) + 1
+            )
         elif outcome.kind is CreationOutcomeKind.DUPLICATE:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
             self.metrics.permanent_failures += 1
         elif outcome.kind is CreationOutcomeKind.TEMPORARY_FAILURE:
             self.metrics.temporary_failure_outcomes += 1
+        if outcome.failure_code == "unexpected_creation_error":
+            self.metrics.worker_failures[worker_index] = (
+                self.metrics.worker_failures.get(worker_index, 0) + 1
+            )
 
     def _set_creation_activity(
         self,
