@@ -9,11 +9,12 @@ This phase intentionally implements only:
 - defensive, browser-independent Queue-it progress parsing
 - SQLite session persistence with lightweight work leases
 - atomic local JSON browser-state persistence
-- project structure for future browser, scheduler, transfer, and metrics code
+- shared Google Chrome process and isolated BrowserContext resource management
+- project structure for future scheduler, transfer, and metrics code
 - unit tests for configuration, domain behavior, parsing, and persistence
 
-It does not implement browser automation, queue polling, scheduling, transfer
-logic, PostgreSQL, or metrics.
+It does not implement Queue-it navigation or extraction, queue polling,
+scheduling, transfer logic, PostgreSQL, or metrics.
 
 ## Install
 
@@ -24,9 +25,9 @@ python -m pip install -e ".[test]"
 python -m playwright install chrome
 ```
 
-The browser implementation in a later phase must use Playwright's async API
-and launch the installed Google Chrome build with `channel="chrome"`. Phase 1
-does not launch a browser.
+The browser manager uses Playwright's async API to launch the installed Google
+Chrome build with `channel="chrome"`. It shares each Chrome process across
+isolated browser contexts and does not implement stealth or automation hiding.
 
 The application is configured through environment variables. Start from:
 
