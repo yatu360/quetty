@@ -33,4 +33,6 @@ th { color: #526159; font-size: .72rem; text-transform: uppercase; }
 .pagination { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
 .pagination a { color: #24583a; cursor: pointer; font-weight: 700; }
 .muted, .empty { color: #748078; }
+.action-feedback:empty, .refresh-status:empty { display: none; }
+.session-toolbar { display: flex; gap: 1rem; align-items: center; margin-bottom: .75rem; }
 @media (max-width: 900px) { .filters { grid-template-columns: 1fr; } .dashboard-shell { padding: 1rem; } }

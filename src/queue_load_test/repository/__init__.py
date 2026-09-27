@@ -1,6 +1,7 @@
 """Session persistence abstractions and SQLite implementation."""
 
 from queue_load_test.repository.base import (
+    OPERATOR_WORKER_PREFIX,
     PROGRESS_BUCKETS,
     ActiveRunExistsError,
     ClaimedSessions,
@@ -8,6 +9,7 @@ from queue_load_test.repository.base import (
     LeaseOwnershipError,
     ManualSessionBusyError,
     ManualSessionCapacityError,
+    OwnershipRecovery,
     QueueIdConflictError,
     RecoverySummary,
     RepositoryError,
@@ -18,6 +20,7 @@ from queue_load_test.repository.base import (
 from queue_load_test.repository.sqlite import SQLiteSessionRepository
 
 __all__ = [
+    "OPERATOR_WORKER_PREFIX",
     "PROGRESS_BUCKETS",
     "ActiveRunExistsError",
     "ClaimedSessions",
@@ -25,6 +28,7 @@ __all__ = [
     "LeaseOwnershipError",
     "ManualSessionBusyError",
     "ManualSessionCapacityError",
+    "OwnershipRecovery",
     "QueueIdConflictError",
     "RecoverySummary",
     "RepositoryError",

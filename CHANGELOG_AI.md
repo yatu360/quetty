@@ -3065,3 +3065,148 @@ Phase 5 Prompt 5 — UI Reliability and Recovery
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: implementation, tests, and documentation pending commit
+
+## 2026-09-27 — Phase 5 Prompt 5 — UI Reliability and Recovery
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Harden the local operator UI and its actions. Browser refreshes, double clicks,
+restarts, Chrome crashes, scheduler activity, database failures, and conflicting
+actions must not corrupt persisted Queue-it identities or leave sessions stuck. No new
+infrastructure was added.
+
+### Defects Found and Fixed
+
+1. `ApplicationRuntime` replaced uvicorn's SIGINT/SIGTERM handlers with
+   `loop.add_signal_handler`. Ctrl+C stopped the scheduler, creation, and Chrome but
+   left the web server serving. This was reproduced against the previous commit.
+   `install_signal_handlers=False` is now used for the UI; uvicorn drives the lifespan
+   shutdown.
+2. Shutdown order cancelled operator workers mid-browser-call and could close Chrome
+   under running operator work. It is now ordered, with `before_browser_shutdown`
+   hooks and a bounded operator drain.
+3. Startup recovered only expired headed ownership and never cleared stale leases.
+   Paused or non-monitorable leased rows stayed blocked forever. A new OS lock on
+   `<database>.lock` (`InstanceLock`) makes startup clear all persisted owners in one
+   transaction, and refuses a second UI process.
+4. Operator and headed acquisition rejected expired leases. They now take them over
+   with owner fencing.
+5. Dashboard browser state mapped lifecycle `CHECKING` and expired leases to ownership
+   `CHECKING`, which disabled every action. It now reflects live leases only.
+6. HTMX polls replaced containers while a POST was in flight, losing feedback and
+   allowing double-clicks. Fixed with `hx-sync=replace`, `hx-disabled-elt`, and an
+   out-of-band feedback region outside the polled container.
+7. Duplicate Add submissions created duplicate visitors. Fixed with per-render request
+   tokens, per-session pending-action deduplication, and explicit rejection of a
+   different pending action on the same session.
+8. Add/Replace population accounting was not crash-consistent, and a raising creator
+   skipped cleanup. There is now a +1 reservation before browser work, and the old
+   row's delete carries the −1 in the same transaction. Non-valid rows are discarded;
+   a valid committed identity is kept.
+9. Route, template, database, and invalid-filter failures produced raw 500s that HTMX
+   ignored. Middleware now returns sanitized 503 fragments retargeted to feedback or
+   refresh-status, and invalid filters are ignored with a notice.
+10. The headed heartbeat used repairing `capacity()` (possible visible relaunch), ended
+    on one renewal error, and leaked release errors. It is now non-repairing and
+    slot-aware, tolerates renewal errors until the lease could lapse, closes the
+    context before release, and contains release failures.
+11. The dashboard page query sorted the whole population. Added the
+    `idx_queue_sessions_dashboard_order (created_at, session_id)` covering index.
+12. HTMX loaded from a public CDN. HTMX 2.0.4 (0BSD) is now vendored.
+
+### Files Added
+
+- `src/queue_load_test/utils/instance_lock.py`
+- `src/queue_load_test/harness/phase5_ui_benchmark.py`
+- `src/queue_load_test/web/static/htmx.min.js`
+- `docs/phase5_ui_reliability.md`, `docs/results/phase5_ui_benchmark_result.json`
+- `tests/unit/test_ui_reliability.py`, `tests/unit/test_operator_fencing.py`,
+  `tests/unit/test_phase5_ui_benchmark.py`, `tests/integration/test_ui_chrome_recovery.py`
+
+### Files Modified
+
+- `src/queue_load_test/repository/base.py`, `sqlite.py`, `__init__.py`
+- `src/queue_load_test/runtime.py`
+- `src/queue_load_test/web/app.py`, `actions.py`, `manual.py`, `service.py`, `cli.py`,
+  templates, and `static/app.css`
+- `tests/unit/test_web_ui.py`, `test_operator_actions.py`
+- `pyproject.toml`, `.gitignore`, `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`,
+  `CHANGELOG_AI.md`
+
+### Database / Configuration
+
+- New index `idx_queue_sessions_dashboard_order`, created idempotently on connect.
+  There is no table or column change.
+- New repository method `recover_startup_ownership(now, exclusive)` and exported
+  `OPERATOR_WORKER_PREFIX`.
+- New CLI `queue-load-test-phase5-ui-benchmark`. The UI now creates
+  `<database>.lock` beside a file database (git-ignored as `*.sqlite3.lock`).
+- `RunRuntime` gained `stop_accepting()`, and `request_action(..., request_token=...)`.
+  Mutating routes accept an optional `token` query value.
+
+### 10,000-Row UI Measurements
+
+Local synthetic data on an Apple M5 Pro with SQLite 3.50.4, 100 iterations; not
+Queue-it throughput. Repository p95:
+
+| Query | p95 |
+|-------|-----|
+| First page | 0.219 ms |
+| Middle page | 0.703 ms |
+| Last page | 1.219 ms |
+| Search | 1.61–2.11 ms |
+| Status filter | 0.629 ms |
+| Browser-state filter | 0.691 ms |
+| Summary | 6.647 ms |
+
+Other results:
+
+- HTTP partials p95: 1.07–2.56 ms for sessions and 7.13 ms for summary.
+- 2 SQL statements per page query, 4 per summary, and 0 writes.
+- Polling duty cycle: 0.34% at 2 s. Pause and resume write 1 row each.
+- 0 browser calls and no task growth.
+- Before the index, the first and last pages took 1.86 and 4.36 ms p95.
+
+### Tests Run
+
+- Focused Phase 5 tests (web UI, operator actions, manual open, reliability, fencing,
+  benchmark, and the Chrome integration test): passed.
+- `.venv/bin/python -m pytest`: 445 passed, 4 gated staging tests deselected.
+- `ruff check src tests`: passed.
+- `mypy src`: no issues in 64 source files.
+- Installed-Chrome integration against `LocalQueueSimulator`: SIGKILL of headed-pool
+  Chrome while open, then reopen; refresh with failing state save.
+- End-to-end smoke of the real `queue-load-test-ui` process against the local simulator,
+  driven by Playwright/Chrome. All checks passed:
+  - acquisition reached 3;
+  - a double-click Add sent 1 POST and added exactly 1;
+  - feedback survived polling, and Refresh succeeded;
+  - a second instance was refused;
+  - SIGINT exited in about 0.5 s with 0 Chrome processes and 0 persisted owners.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it traffic was required or sent.
+
+### Known Issues
+
+- Real Queue-it Open/Refresh/Add/Replace and long headed dwell remain unverified.
+- Harness CLIs do not take the instance lock; do not run them against a live UI database.
+- Operator action banners and request tokens are process-local (effects persist).
+- Automatic checks do not renew their lease. A check longer than
+  `MONITOR_LEASE_SECONDS` could be taken over; writes stay fenced.
+- If reverting an Add/Replace reservation fails during a database outage, the +1 stays.
+  Restart then fulfills that one visitor.
+
+### Follow-Up
+
+Phase 5 Prompt 6 — Phase 5 Acceptance
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+import sqlite3
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs
 from uuid import uuid4
@@ -16,9 +19,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from queue_load_test.config import Settings
+from queue_load_test.metrics.logging import log_event
 from queue_load_test.models import BrowserRuntimeState, QueueStatus, RunConfig, SessionSummaryPage
 from queue_load_test.repository import RepositoryError, SessionRepository
-from queue_load_test.web.actions import OperatorActionKind
+from queue_load_test.utils.instance_lock import InstanceLock
+from queue_load_test.web.actions import OperatorActionKind, OperatorActionStatus
 from queue_load_test.web.manual import ManualOpenError
 from queue_load_test.web.service import (
     ApplicationRunRuntime,
@@ -27,6 +32,9 @@ from queue_load_test.web.service import (
 )
 
 _WEB_ROOT = Path(__file__).parent
+_PAGE_SIZE = 50
+_SHUTTING_DOWN = "Application is shutting down; the action was not accepted."
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -34,25 +42,91 @@ def create_app(
     settings: Settings,
     repository: SessionRepository,
     runtime: RunRuntime | None = None,
+    instance_lock: InstanceLock | None = None,
 ) -> FastAPI:
+    """Build the operator UI.
+
+    ``instance_lock`` proves this is the only UI process for the database; startup
+    then clears every persisted browser owner (all belong to dead processes).
+    Without it only expired ownership is recovered.
+    """
+
     run_runtime = runtime or ApplicationRunRuntime(settings=settings, repository=repository)
     dashboard = DashboardService(repository, run_runtime)
     templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
+    lifecycle = {"accepting": False}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        await repository.initialize()
-        active = await repository.get_active_run()
-        if active is not None:
-            await run_runtime.start_run(active)
+        if instance_lock is not None:
+            instance_lock.acquire()
         try:
-            yield
+            await repository.initialize()
+            recovery = await repository.recover_startup_ownership(
+                now=datetime.now(UTC),
+                exclusive=instance_lock is not None and instance_lock.held,
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                "startup_ownership_recovered",
+                count=recovery.manual_released,
+                recovered_leases=recovery.leases_released,
+            )
+            active = await repository.get_active_run()
+            if active is not None:
+                await run_runtime.start_run(active)
+            lifecycle["accepting"] = True
+            try:
+                yield
+            finally:
+                # Uvicorn has stopped accepting connections and finished in-flight
+                # requests; refuse anything still arriving before tearing down.
+                lifecycle["accepting"] = False
+                run_runtime.stop_accepting()
+                try:
+                    await run_runtime.close()
+                finally:
+                    await repository.close()
         finally:
-            await run_runtime.close()
-            await repository.close()
+            if instance_lock is not None:
+                instance_lock.release()
 
     app = FastAPI(title="Queue Session Operator", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=_WEB_ROOT / "static"), name="static")
+
+    @app.middleware("http")
+    async def contain_failures(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Turn any route/template failure into a sanitized, non-destructive response.
+
+        Scheduler, creation, and browser workers are separate tasks; a failing page
+        never reaches them. Mutating routes persist through the repository's own
+        transactions, so a failure while rendering the result cannot half-apply one.
+        """
+
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 - the browser only sees a generic message
+            log_event(
+                logger,
+                logging.ERROR,
+                "web_request_failed",
+                operation=f"{request.method} {request.url.path}",
+                error_type=type(exc).__name__,
+            )
+            database = isinstance(exc, (sqlite3.Error, RepositoryError))
+            reason = "database temporarily unavailable" if database else "internal error"
+            return _failure_response(
+                request,
+                f"Request failed ({reason}). Persisted sessions are unchanged by this page; "
+                "the dashboard will show current state when it next refreshes.",
+            )
+
+    def feedback(request: Request, message: str, *, status_code: int = 503) -> Response:
+        return _failure_response(request, message, status_code=status_code)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> RedirectResponse:
@@ -73,6 +147,8 @@ def create_app(
     async def submit_setup(request: Request) -> Response:
         if await repository.get_active_run() is not None:
             return RedirectResponse("/dashboard", status_code=303)
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
         form = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         raw_url = form.get("target_url", [""])[0].strip()
         raw_count = form.get("requested_sessions", [""])[0].strip()
@@ -117,6 +193,10 @@ def create_app(
         try:
             await repository.create_run(run)
         except RepositoryError as exc:
+            # A duplicate submission loses the singleton insert race; the first
+            # one's run is the only run and the user simply continues to it.
+            if await repository.get_active_run() is not None:
+                return RedirectResponse("/dashboard", status_code=303)
             return templates.TemplateResponse(
                 request,
                 "setup.html",
@@ -141,21 +221,31 @@ def create_app(
         runtime_state: str,
         action_error: str | None = None,
         action_message: str | None = None,
+        partial: bool = False,
+        feedback_oob: bool = False,
     ) -> dict[str, object]:
-        session_page = await _session_page(repository, page, search, status, runtime_state)
+        parsed_status, parsed_runtime, filter_error = _parse_filters(status, runtime_state)
+        session_page = await _session_page(
+            repository, page, search, parsed_status, parsed_runtime
+        )
+        session_actions = {}
+        for item in session_page.items:
+            action = run_runtime.session_action(item.session_id)
+            if action is not None:
+                session_actions[item.session_id] = action
         return {
             "session_page": session_page,
             "search": search,
-            "selected_status": status,
-            "selected_runtime": runtime_state,
+            "selected_status": parsed_status.value if parsed_status is not None else "",
+            "selected_runtime": parsed_runtime.value if parsed_runtime is not None else "",
+            "filter_error": filter_error,
             "action_error": action_error,
             "action_message": action_message,
-            "session_actions": {
-                item.session_id: run_runtime.session_action(item.session_id)
-                for item in session_page.items
-                if run_runtime.session_action(item.session_id) is not None
-            },
+            "session_actions": session_actions,
             "add_action": run_runtime.latest_add_action(),
+            "render_token": uuid4().hex,
+            "partial": partial,
+            "feedback_oob": feedback_oob,
         }
 
     @app.get("/dashboard", response_class=HTMLResponse)
@@ -183,40 +273,39 @@ def create_app(
             },
         )
 
+    async def summary_response(request: Request, run: RunConfig) -> Response:
+        return templates.TemplateResponse(
+            request,
+            "_summary.html",
+            {"summary": await dashboard.summary(run), "partial": True},
+        )
+
     @app.get("/partials/summary", response_class=HTMLResponse)
     async def summary_partial(request: Request) -> Response:
         run = await require_run()
         if run is None:
             return RedirectResponse("/setup", status_code=303)
-        return templates.TemplateResponse(
-            request,
-            "_summary.html",
-            {"summary": await dashboard.summary(run)},
-        )
+        return await summary_response(request, run)
 
     @app.post("/monitoring/pause", response_class=HTMLResponse)
     async def pause_monitoring(request: Request) -> Response:
         run = await require_run()
         if run is None:
             return RedirectResponse("/setup", status_code=303)
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
         await run_runtime.pause_monitoring()
-        return templates.TemplateResponse(
-            request,
-            "_summary.html",
-            {"summary": await dashboard.summary(run)},
-        )
+        return await summary_response(request, run)
 
     @app.post("/monitoring/resume", response_class=HTMLResponse)
     async def resume_monitoring(request: Request) -> Response:
         run = await require_run()
         if run is None:
             return RedirectResponse("/setup", status_code=303)
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
         await run_runtime.resume_monitoring()
-        return templates.TemplateResponse(
-            request,
-            "_summary.html",
-            {"summary": await dashboard.summary(run)},
-        )
+        return await summary_response(request, run)
 
     @app.get("/partials/sessions", response_class=HTMLResponse)
     async def sessions_partial(
@@ -232,7 +321,36 @@ def create_app(
             request,
             "_sessions.html",
             await sessions_context(
-                page=page, search=search, status=status, runtime_state=runtime_state
+                page=page,
+                search=search,
+                status=status,
+                runtime_state=runtime_state,
+                partial=True,
+            ),
+        )
+
+    async def mutation_response(
+        request: Request,
+        *,
+        page: int,
+        search: str,
+        status: str,
+        runtime_state: str,
+        error: str | None,
+        message: str | None,
+    ) -> Response:
+        return templates.TemplateResponse(
+            request,
+            "_sessions.html",
+            await sessions_context(
+                page=page,
+                search=search,
+                status=status,
+                runtime_state=runtime_state,
+                action_error=error,
+                action_message=message,
+                partial=True,
+                feedback_oob=True,
             ),
         )
 
@@ -247,23 +365,22 @@ def create_app(
     ) -> Response:
         if await require_run() is None:
             return RedirectResponse("/setup", status_code=303)
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
         message: str | None = None
         error: str | None = None
         try:
             message = (await run_runtime.open_session(session_id)).message
         except (ManualOpenError, RepositoryError) as exc:
             error = str(exc)
-        return templates.TemplateResponse(
+        return await mutation_response(
             request,
-            "_sessions.html",
-            await sessions_context(
-                page=page,
-                search=search,
-                status=status,
-                runtime_state=runtime_state,
-                action_error=error,
-                action_message=message,
-            ),
+            page=page,
+            search=search,
+            status=status,
+            runtime_state=runtime_state,
+            error=error,
+            message=message,
         )
 
     @app.post("/sessions/{session_id}/close", response_class=HTMLResponse)
@@ -277,18 +394,16 @@ def create_app(
     ) -> Response:
         if await require_run() is None:
             return RedirectResponse("/setup", status_code=303)
+        # Close stays available during shutdown: it only releases resources.
         closed = await run_runtime.close_session(session_id)
-        return templates.TemplateResponse(
+        return await mutation_response(
             request,
-            "_sessions.html",
-            await sessions_context(
-                page=page,
-                search=search,
-                status=status,
-                runtime_state=runtime_state,
-                action_error=None if closed else "Session is not open in Chrome",
-                action_message="Chrome session closed" if closed else None,
-            ),
+            page=page,
+            search=search,
+            status=status,
+            runtime_state=runtime_state,
+            error=None if closed else "Session is not open in Chrome",
+            message="Chrome session closed" if closed else None,
         )
 
     async def submit_operator_action(
@@ -299,23 +414,26 @@ def create_app(
         search: str,
         status: str,
         runtime_state: str,
+        token: str,
     ) -> Response:
         if await require_run() is None:
             return RedirectResponse("/setup", status_code=303)
-        action = await run_runtime.request_action(kind, session_id)
-        error = action.message if action.status.value == "FAILED" else None
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
+        request_token = f"{token}:{kind.value}:{session_id or ''}" if token else None
+        action = await run_runtime.request_action(
+            kind, session_id, request_token=request_token
+        )
+        error = action.message if action.status is OperatorActionStatus.FAILED else None
         message = None if error is not None else action.message
-        return templates.TemplateResponse(
+        return await mutation_response(
             request,
-            "_sessions.html",
-            await sessions_context(
-                page=page,
-                search=search,
-                status=status,
-                runtime_state=runtime_state,
-                action_error=error,
-                action_message=message,
-            ),
+            page=page,
+            search=search,
+            status=status,
+            runtime_state=runtime_state,
+            error=error,
+            message=message,
         )
 
     def action_route(kind: OperatorActionKind):  # type: ignore[no-untyped-def]
@@ -326,9 +444,10 @@ def create_app(
             search: str = "",
             status: str = "",
             runtime_state: str = "",
+            token: str = "",
         ) -> Response:
             return await submit_operator_action(
-                request, kind, session_id, page, search, status, runtime_state
+                request, kind, session_id, page, search, status, runtime_state, token
             )
 
         return route
@@ -350,6 +469,7 @@ def create_app(
         search: str = "",
         status: str = "",
         runtime_state: str = "",
+        token: str = "",
     ) -> Response:
         return await submit_operator_action(
             request,
@@ -359,24 +479,72 @@ def create_app(
             search,
             status,
             runtime_state,
+            token,
         )
 
     return app
+
+
+def _failure_response(request: Request, message: str, *, status_code: int = 503) -> Response:
+    """A static fragment: rendering it touches neither templates nor the database."""
+
+    safe = escape(message)
+    if request.headers.get("HX-Request") != "true":
+        return HTMLResponse(
+            "<!doctype html><title>Queue Session Operator</title>"
+            f'<p role="alert">{safe}</p><p><a href="/dashboard">Back to dashboard</a></p>',
+            status_code=status_code,
+        )
+    target = "#refresh-status" if request.method == "GET" else "#action-feedback"
+    return HTMLResponse(
+        f'<p class="error" role="alert">{safe}</p>',
+        status_code=status_code,
+        headers={"HX-Retarget": target, "HX-Reswap": "innerHTML"},
+    )
+
+
+def _parse_filters(
+    status: str,
+    runtime_state: str,
+) -> tuple[QueueStatus | None, BrowserRuntimeState | None, str | None]:
+    parsed_status: QueueStatus | None = None
+    parsed_runtime: BrowserRuntimeState | None = None
+    errors: list[str] = []
+    if status:
+        try:
+            parsed_status = QueueStatus.parse(status)
+        except ValueError:
+            errors.append("lifecycle status")
+    if runtime_state:
+        try:
+            parsed_runtime = BrowserRuntimeState(runtime_state)
+        except ValueError:
+            errors.append("browser state")
+    message = f"Ignored unknown {' and '.join(errors)} filter." if errors else None
+    return parsed_status, parsed_runtime, message
 
 
 async def _session_page(
     repository: SessionRepository,
     page: int,
     search: str,
-    status: str,
-    runtime_state: str,
+    status: QueueStatus | None,
+    runtime_state: BrowserRuntimeState | None,
 ) -> SessionSummaryPage:
-    parsed_status = QueueStatus.parse(status) if status else None
-    parsed_runtime = BrowserRuntimeState(runtime_state) if runtime_state else None
-    return await repository.list_session_summaries(
+    result = await repository.list_session_summaries(
         page=page,
-        page_size=50,
+        page_size=_PAGE_SIZE,
         search=search or None,
-        status=parsed_status,
-        runtime_state=parsed_runtime,
+        status=status,
+        runtime_state=runtime_state,
+    )
+    if result.items or page <= result.page_count:
+        return result
+    # A deleted row can shrink the population under a deep page; show the last one.
+    return await repository.list_session_summaries(
+        page=result.page_count,
+        page_size=_PAGE_SIZE,
+        search=search or None,
+        status=status,
+        runtime_state=runtime_state,
     )

@@ -21,6 +21,7 @@ from queue_load_test.models import (
     validate_transition,
 )
 from queue_load_test.repository.base import (
+    OPERATOR_WORKER_PREFIX,
     PROGRESS_BUCKETS,
     ActiveRunExistsError,
     ClaimedSessions,
@@ -28,6 +29,7 @@ from queue_load_test.repository.base import (
     LeaseOwnershipError,
     ManualSessionBusyError,
     ManualSessionCapacityError,
+    OwnershipRecovery,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
@@ -59,6 +61,11 @@ CREATE INDEX IF NOT EXISTS {_DUE_INDEX_NAME}
     ON queue_sessions ({_DUE_ORDER_SQL})
     WHERE status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
 """
+_DASHBOARD_ORDER_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_queue_sessions_dashboard_order
+    ON queue_sessions (created_at, session_id)
+"""
+"""Lets the dashboard page walk rows in display order instead of sorting the population."""
 _MANUAL_LEASE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_queue_sessions_manual_lease
     ON queue_sessions (manual_lease_until)
@@ -259,14 +266,33 @@ def _row_to_progress(row: sqlite3.Row) -> QueueProgress:
 
 
 def _row_runtime_state(row: sqlite3.Row, *, now: datetime) -> BrowserRuntimeState:
+    """Derive browser ownership from live leases only.
+
+    ``QueueStatus.CHECKING`` is a lifecycle observation (insufficient page evidence),
+    not ownership, and an expired lease belongs to a stopped owner that any fenced
+    claimer may take over. Neither may make a row look busy forever.
+    """
+
     manual_lease_until = _from_storage(row["manual_lease_until"])
     if row["manual_owner_id"] is not None and (
         manual_lease_until is not None and manual_lease_until > now
     ):
         return BrowserRuntimeState.OPEN_IN_CHROME
-    if row["worker_id"] is not None or row["status"] == "CHECKING":
+    lease_until = _from_storage(row["lease_until"])
+    if row["worker_id"] is not None and lease_until is not None and lease_until > now:
         return BrowserRuntimeState.CHECKING
     return BrowserRuntimeState.PARKED
+
+
+def _lease_is_live(row: sqlite3.Row, *, now: datetime) -> bool:
+    lease_until = _from_storage(row["lease_until"])
+    return row["worker_id"] is not None and (lease_until is None or lease_until > now)
+
+
+def _busy_lease_message(row: sqlite3.Row) -> str:
+    if str(row["worker_id"]).startswith(OPERATOR_WORKER_PREFIX):
+        return "Another operator action is already running for this session"
+    return "Session is currently being checked"
 
 
 def _save_progress(connection: sqlite3.Connection, progress: QueueProgress) -> None:
@@ -468,14 +494,17 @@ class SQLiteSessionRepository:
                     manual_until is None or manual_until > now
                 ):
                     raise ManualSessionBusyError("Close the Chrome session before continuing")
-                if row["worker_id"] is not None:
-                    raise ManualSessionBusyError("Session is currently being checked")
+                # An expired lease belongs to an owner that stopped renewing it; every
+                # later write from that owner is fenced by worker_id, exactly as for
+                # the scheduler's own expired-lease reclaim.
+                if _lease_is_live(row, now=now):
+                    raise ManualSessionBusyError(_busy_lease_message(row))
                 cursor = connection.execute(
                     "UPDATE queue_sessions SET worker_id = ?, lease_until = ?, "
                     "manual_owner_id = NULL, manual_lease_until = NULL "
-                    "WHERE session_id = ? AND worker_id IS NULL "
+                    "WHERE session_id = ? AND (worker_id IS NULL OR lease_until <= ?) "
                     "AND (manual_owner_id IS NULL OR manual_lease_until <= ?)",
-                    (worker_id, lease_storage, session_id, now_storage),
+                    (worker_id, lease_storage, session_id, now_storage, now_storage),
                 )
                 if cursor.rowcount != 1:
                     raise ManualSessionBusyError("Session browser ownership changed")
@@ -598,11 +627,12 @@ class SQLiteSessionRepository:
                     raise SessionNotFoundError(f"Session {session_id!r} does not exist")
                 if row["manual_owner_id"] is not None:
                     raise ManualSessionBusyError("Session is already open in Chrome")
-                # Any automatic owner, including one whose lease just expired, may
-                # still have live browser work. Do not overlap it; the scheduler can
-                # reclaim/release that ownership through its normal fenced path.
-                if row["worker_id"] is not None:
-                    raise ManualSessionBusyError("Session is currently being checked")
+                # A live automatic/operator lease excludes headed ownership. An expired
+                # lease is abandoned (its owner stopped renewing it, or crashed) and
+                # is taken over with the same fencing the scheduler uses; otherwise
+                # a paused or non-monitorable row could stay unopenable forever.
+                if _lease_is_live(row, now=now):
+                    raise ManualSessionBusyError(_busy_lease_message(row))
                 active = int(
                     connection.execute(
                         """
@@ -617,10 +647,12 @@ class SQLiteSessionRepository:
                 cursor = connection.execute(
                     """
                     UPDATE queue_sessions
-                    SET manual_owner_id = ?, manual_lease_until = ?
-                    WHERE session_id = ? AND worker_id IS NULL AND manual_owner_id IS NULL
+                    SET manual_owner_id = ?, manual_lease_until = ?,
+                        worker_id = NULL, lease_until = NULL
+                    WHERE session_id = ? AND manual_owner_id IS NULL
+                      AND (worker_id IS NULL OR lease_until <= ?)
                     """,
-                    (owner_id, lease_storage, session_id),
+                    (owner_id, lease_storage, session_id, now_storage),
                 )
                 if cursor.rowcount != 1:
                     raise ManualSessionBusyError("Session browser ownership changed")
@@ -697,6 +729,54 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def recover_startup_ownership(
+        self,
+        *,
+        now: datetime,
+        exclusive: bool,
+    ) -> OwnershipRecovery:
+        """Clear browser ownership left by a stopped process in one transaction.
+
+        With ``exclusive`` the caller holds the single-instance lock for this
+        database, so no other live process can own a headed Chrome window or a
+        lease: every persisted owner belongs to a dead process and is cleared even
+        if its lease has not expired yet. Without it only expired ownership is
+        cleared. Queue IDs, lifecycle status, progress, and schedules are untouched.
+        """
+
+        now_storage = _to_storage(now)
+        if now_storage is None:
+            raise ValueError("now is required")
+        manual_filter = "manual_owner_id IS NOT NULL"
+        lease_filter = "worker_id IS NOT NULL"
+        parameters: tuple[str, ...] = ()
+        if not exclusive:
+            manual_filter += " AND manual_lease_until <= ?"
+            lease_filter += " AND lease_until <= ?"
+            parameters = (now_storage,)
+
+        def operation() -> OwnershipRecovery:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                manual = connection.execute(
+                    "UPDATE queue_sessions SET manual_owner_id = NULL, "
+                    f"manual_lease_until = NULL WHERE {manual_filter}",
+                    parameters,
+                ).rowcount
+                leases = connection.execute(
+                    "UPDATE queue_sessions SET worker_id = NULL, lease_until = NULL "
+                    f"WHERE {lease_filter}",
+                    parameters,
+                ).rowcount
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return OwnershipRecovery(manual_released=manual, leases_released=leases)
+
+        return await self._run(operation)
+
     def _connect(self) -> sqlite3.Connection:
         if self._connection is None:
             if self._database != ":memory:":
@@ -710,6 +790,7 @@ class SQLiteSessionRepository:
             self._migrate_runtime_control_columns(connection)
             self._ensure_due_index(connection)
             connection.execute(_MANUAL_LEASE_INDEX_SQL)
+            connection.execute(_DASHBOARD_ORDER_INDEX_SQL)
             connection.commit()
             if self._database != ":memory:":
                 Path(self._database).chmod(0o600)
@@ -1141,17 +1222,19 @@ class SQLiteSessionRepository:
         if parsed_status is not None:
             clauses.append("s.status = ?")
             parameters.append(parsed_status.value)
+        now = datetime.now(UTC)
+        now_storage = _to_storage(now)
+        manual_live = "(s.manual_owner_id IS NOT NULL AND s.manual_lease_until > ?)"
+        lease_live = "(s.worker_id IS NOT NULL AND s.lease_until > ?)"
         if parsed_runtime is BrowserRuntimeState.CHECKING:
-            clauses.append("(s.worker_id IS NOT NULL OR s.status = 'CHECKING')")
+            clauses.append(f"(NOT {manual_live} AND {lease_live})")
+            parameters.extend((now_storage, now_storage))
         elif parsed_runtime is BrowserRuntimeState.PARKED:
-            clauses.append(
-                "(s.worker_id IS NULL AND s.status != 'CHECKING' "
-                "AND (s.manual_owner_id IS NULL OR s.manual_lease_until <= ?))"
-            )
-            parameters.append(_to_storage(datetime.now(UTC)))
+            clauses.append(f"(NOT {manual_live} AND NOT {lease_live})")
+            parameters.extend((now_storage, now_storage))
         elif parsed_runtime is BrowserRuntimeState.OPEN_IN_CHROME:
-            clauses.append("(s.manual_owner_id IS NOT NULL AND s.manual_lease_until > ?)")
-            parameters.append(_to_storage(datetime.now(UTC)))
+            clauses.append(manual_live)
+            parameters.append(now_storage)
         where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
         offset = (page - 1) * page_size
 
@@ -1165,7 +1248,7 @@ class SQLiteSessionRepository:
                 """
                 SELECT s.session_id, s.queue_id, s.status, p.progress_percentage,
                        s.last_queue_update, s.last_checked_at, s.next_check_at,
-                       s.worker_id, s.manual_owner_id, s.manual_lease_until
+                       s.worker_id, s.lease_until, s.manual_owner_id, s.manual_lease_until
                 FROM queue_sessions AS s
                 LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
                 """
@@ -1182,7 +1265,7 @@ class SQLiteSessionRepository:
                     last_queue_update=_from_storage(row["last_queue_update"]),
                     last_checked_at=_from_storage(row["last_checked_at"]),
                     next_check_at=_from_storage(row["next_check_at"]),
-                    runtime_state=_row_runtime_state(row, now=datetime.now(UTC)),
+                    runtime_state=_row_runtime_state(row, now=now),
                 )
                 for row in rows
             )

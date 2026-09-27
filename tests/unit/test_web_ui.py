@@ -36,6 +36,8 @@ class FakeRuntime:
         self.open_calls: list[str] = []
         self.close_calls: list[str] = []
         self.actions: list[OperatorAction] = []
+        self.tokens: list[str | None] = []
+        self.stopped_accepting = False
 
     async def start_run(self, run: RunConfig) -> None:
         self.started.append(run)
@@ -82,9 +84,17 @@ class FakeRuntime:
             owner_id="fake-ui",
         )
 
+    def stop_accepting(self) -> None:
+        self.stopped_accepting = True
+
     async def request_action(
-        self, kind: OperatorActionKind, session_id: str | None = None
+        self,
+        kind: OperatorActionKind,
+        session_id: str | None = None,
+        *,
+        request_token: str | None = None,
     ) -> OperatorAction:
+        self.tokens.append(request_token)
         action = OperatorAction(
             action_id="fake-action",
             kind=kind,

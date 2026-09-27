@@ -1,0 +1,147 @@
+{
+  "population": 10000,
+  "page_size": 50,
+  "iterations": 100,
+  "repository": {
+    "dashboard_first_page": {
+      "samples": 100,
+      "p50_ms": 0.195,
+      "p95_ms": 0.219,
+      "max_ms": 0.242,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "pagination_middle_page": {
+      "samples": 100,
+      "p50_ms": 0.681,
+      "p95_ms": 0.703,
+      "max_ms": 0.714,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "pagination_last_page": {
+      "samples": 100,
+      "p50_ms": 1.173,
+      "p95_ms": 1.219,
+      "max_ms": 1.292,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "search_exact_queue_id": {
+      "samples": 100,
+      "p50_ms": 2.004,
+      "p95_ms": 2.111,
+      "max_ms": 2.21,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "search_substring": {
+      "samples": 100,
+      "p50_ms": 1.878,
+      "p95_ms": 1.929,
+      "max_ms": 1.968,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "search_miss": {
+      "samples": 100,
+      "p50_ms": 1.548,
+      "p95_ms": 1.608,
+      "max_ms": 1.625,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "status_filter": {
+      "samples": 100,
+      "p50_ms": 0.605,
+      "p95_ms": 0.629,
+      "max_ms": 0.662,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "runtime_filter_parked": {
+      "samples": 100,
+      "p50_ms": 0.665,
+      "p95_ms": 0.691,
+      "max_ms": 0.71,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "runtime_filter_open_in_chrome": {
+      "samples": 100,
+      "p50_ms": 0.115,
+      "p95_ms": 0.132,
+      "max_ms": 0.142,
+      "statements_per_call": 2.0,
+      "writes_per_call": 0.0
+    },
+    "summary_aggregate": {
+      "samples": 100,
+      "p50_ms": 6.467,
+      "p95_ms": 6.647,
+      "max_ms": 6.972,
+      "statements_per_call": 4.0,
+      "writes_per_call": 0.0
+    }
+  },
+  "http": {
+    "sessions_partial_first_page": {
+      "samples": 100,
+      "p50_ms": 0.989,
+      "p95_ms": 1.072,
+      "max_ms": 1.227,
+      "statements_per_call": 3.0,
+      "writes_per_call": 0.0
+    },
+    "sessions_partial_search": {
+      "samples": 100,
+      "p50_ms": 2.405,
+      "p95_ms": 2.564,
+      "max_ms": 2.68,
+      "statements_per_call": 3.0,
+      "writes_per_call": 0.0
+    },
+    "sessions_partial_status": {
+      "samples": 100,
+      "p50_ms": 1.409,
+      "p95_ms": 1.483,
+      "max_ms": 1.722,
+      "statements_per_call": 3.0,
+      "writes_per_call": 0.0
+    },
+    "sessions_partial_last_page": {
+      "samples": 100,
+      "p50_ms": 1.964,
+      "p95_ms": 2.075,
+      "max_ms": 2.175,
+      "statements_per_call": 3.0,
+      "writes_per_call": 0.0
+    },
+    "summary_partial": {
+      "samples": 100,
+      "p50_ms": 6.886,
+      "p95_ms": 7.134,
+      "max_ms": 7.43,
+      "statements_per_call": 5.0,
+      "writes_per_call": 0.0
+    }
+  },
+  "deep_page_query_plan": [
+    "SCAN s USING COVERING INDEX idx_queue_sessions_dashboard_order"
+  ],
+  "polling": {
+    "polls": 100,
+    "p95_ms_per_poll_pair": 6.866,
+    "duty_cycle_one_tab_1s_percent": 0.687,
+    "duty_cycle_one_tab_2s_percent": 0.343,
+    "rows_written_during_polling": 0,
+    "asyncio_tasks_before": 1,
+    "asyncio_tasks_after": 1
+  },
+  "pause_rows_written": 1,
+  "resume_rows_written": 1,
+  "browser_calls": 0,
+  "note": "Local synthetic SQLite/dashboard measurement only; not Queue-it throughput.",
+  "measured_at": "2026-09-27T12:35:07.786480+00:00",
+  "sqlite_version": "3.50.4"
+}

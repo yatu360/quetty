@@ -1,11 +1,14 @@
+{%- set query = "page=" ~ session_page.page ~ "&search=" ~ (search | urlencode) ~ "&status=" ~ selected_status ~ "&runtime_state=" ~ selected_runtime -%}
+{#- Mutations sync on the polled container: a click aborts an in-flight poll, a poll
+    waits behind a mutation, and the clicked button is disabled until it returns. -#}
+{%- set mutate = 'hx-target="#session-results" hx-swap="outerHTML" hx-disabled-elt="this"' -%}
 <div id="session-results"
-     hx-get="/partials/sessions?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+     hx-get="/partials/sessions?{{ query }}"
      hx-trigger="every 2s" hx-swap="outerHTML">
-{% if action_error %}<p class="error" role="alert">{{ action_error }}</p>{% endif %}
-{% if action_message %}<p class="notice" role="status">{{ action_message }}</p>{% endif %}
+<div class="session-body" hx-sync="closest #session-results:replace">
+{% if filter_error %}<p class="error" role="alert">{{ filter_error }}</p>{% endif %}
 <div class="session-toolbar">
-  <button hx-post="/sessions/new?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
-          hx-target="#session-results" hx-swap="outerHTML">+ New Session</button>
+  <button hx-post="/sessions/new?{{ query }}&token={{ render_token }}" {{ mutate | safe }}>+ New Session</button>
   {% if add_action %}<span role="status">Add: {{ add_action.status.value | lower }} — {{ add_action.message }}</span>{% endif %}
 </div>
 {% if session_page.items %}
@@ -19,6 +22,8 @@
     <tbody>
     {% for session in session_page.items %}
       {% set action = session_actions.get(session.session_id) %}
+      {% set pending = action and action.status.value in ("REQUESTED", "RUNNING") %}
+      {% set base = "/sessions/" ~ session.session_id %}
       <tr>
         <td class="mono">{{ session.session_id }}</td>
         <td class="mono">{{ session.queue_id or "—" }}</td>
@@ -31,22 +36,19 @@
         <td>
           {% if action %}<div class="action-status">{{ action.kind.value | title }}: {{ action.status.value | lower }}</div>{% endif %}
           {% if session.runtime_state.value == "OPEN_IN_CHROME" %}
-          <button hx-post="/sessions/{{ session.session_id }}/close?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
-                  hx-target="#session-results" hx-swap="outerHTML">Close</button>
-          {% elif session.runtime_state.value == "CHECKING" %}
-          <button disabled title="Automatic monitoring currently owns this session">Open in Chrome</button>
+          <button hx-post="{{ base }}/close?{{ query }}" {{ mutate | safe }}>Close</button>
+          {% elif session.runtime_state.value == "CHECKING" or pending %}
+          <button disabled title="Another owner is using this session">Open in Chrome</button>
           <button disabled>Refresh Now</button><button disabled>Replace</button><button disabled>Delete</button>
           {% else %}
-          <button hx-post="/sessions/{{ session.session_id }}/open?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
-                  hx-target="#session-results" hx-swap="outerHTML">Open in Chrome</button>
-          <button hx-post="/sessions/{{ session.session_id }}/refresh?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
-                  hx-target="#session-results" hx-swap="outerHTML">Refresh Now</button>
-          <button hx-post="/sessions/{{ session.session_id }}/replace?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+          <button hx-post="{{ base }}/open?{{ query }}" {{ mutate | safe }}>Open in Chrome</button>
+          <button hx-post="{{ base }}/refresh?{{ query }}&token={{ render_token }}" {{ mutate | safe }}>Refresh Now</button>
+          <button hx-post="{{ base }}/replace?{{ query }}&token={{ render_token }}"
                   hx-confirm="Replace this managed session? The old session is kept if acquisition fails."
-                  hx-target="#session-results" hx-swap="outerHTML">Replace</button>
-          <button hx-post="/sessions/{{ session.session_id }}/delete?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  {{ mutate | safe }}>Replace</button>
+          <button hx-post="{{ base }}/delete?{{ query }}&token={{ render_token }}"
                   hx-confirm="Delete this managed session? This does not cancel anything at Queue-it."
-                  hx-target="#session-results" hx-swap="outerHTML">Delete</button>
+                  {{ mutate | safe }}>Delete</button>
           {% endif %}
         </td>
       </tr>
@@ -69,3 +71,13 @@
 <p class="empty">No sessions match this view yet. Acquisition progress will appear here.</p>
 {% endif %}
 </div>
+</div>
+{%- if feedback_oob %}
+<div id="action-feedback" class="action-feedback" aria-live="polite" hx-swap-oob="true">
+{% if action_error %}<p class="error" role="alert">{{ action_error }}</p>{% endif %}
+{% if action_message %}<p class="notice" role="status">{{ action_message }}</p>{% endif %}
+</div>
+{%- endif %}
+{%- if partial %}
+<p id="refresh-status" class="refresh-status" aria-live="polite" hx-swap-oob="true"></p>
+{%- endif %}

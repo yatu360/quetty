@@ -465,7 +465,7 @@ Planned prompt breakdown:
 
 ## Phase 5 — Operator UI
 
-**Status: Prompt 4 complete.**
+**Status: Prompt 5 complete.**
 
 1. **Lightweight Web Dashboard Foundation + Startup Run Setup** — **completed on
    2026-09-27.** Added a localhost FastAPI/Jinja2/HTMX UI, immutable persisted run
@@ -489,7 +489,18 @@ Planned prompt breakdown:
    refresh works during global pause; requested and actual counts remain distinct, and
    a persisted adjustment keeps explicit Add/Delete population changes stable across
    restart.
-5. **UI Reliability and Recovery** — planned.
+5. **UI Reliability and Recovery** — **completed on 2026-09-27.**
+   - Ownership: per-session persisted, fenced ownership instead of a global lock, plus
+     a single-UI-process database lock that lets startup clear stale headed and lease
+     ownership.
+   - Shutdown and recovery: ordered shutdown with a bounded operator drain;
+     crash-consistent Add/Replace population accounting; expired-lease takeover.
+   - Web layer: HTMX poll/mutation serialization, per-render request tokens, and
+     sanitized failure containment.
+   - Performance: a dashboard ordering index; 10,000-row dashboard evidence is in
+     `docs/phase5_ui_reliability.md`.
+
+   No new infrastructure was added.
 6. **Phase 5 Acceptance** — planned.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and

@@ -115,9 +115,9 @@ Closing the page/window, using **Close**, losing the headed Chrome process, or s
 down the application releases ownership. When the page is still inspectable, closure
 uses the normal lifecycle evaluator, saves progress and a fresh HYBRID `storage_state`,
 and computes the normal next check. If Chrome has already gone away, the last persisted
-state is preserved and automatic monitoring can recover later. Expired persisted manual
-leases are recovered after a crash/restart; no browser-only state can keep a session
-open forever.
+state is preserved and automatic monitoring can recover later. After a crash, restart
+clears all persisted headed ownership (see below); no browser-only state can keep a
+session open forever.
 
 The remaining per-row controls reuse those same domain services. **Refresh Now** claims
 the session, restores its expected identity, runs one normal evaluator/monitor pass,
@@ -142,6 +142,59 @@ Sessions**, and **Remaining To Initial Target** (`max(0, requested - valid)`). O
 action status is retained in the application-owned worker manager and appears as
 requested, running, success, or failed across HTMX partial refreshes. Errors shown in
 the browser are sanitized.
+
+### Reliability, Restart, and Shutdown
+
+See `docs/phase5_ui_reliability.md` for the full audit, fencing matrix, fault tests, and
+10,000-row measurements.
+
+- **One UI process per database.** Startup takes an OS lock on `<database>.lock`
+  (released automatically on any exit, including `SIGKILL`). A second
+  `queue-load-test-ui` on the same database refuses to start. Do not point harness CLIs
+  at a database a UI is using.
+- **Restart/resume.** A valid persisted run skips setup. Acquisition resumes only the
+  deficit to `requested_sessions + operator adjustment`, and a complete target creates
+  nothing. Existing identities are never discarded or retargeted.
+- **Stale browser ownership.** Because the lock proves no other UI process is alive,
+  startup clears every persisted `OPEN_IN_CHROME` owner and automatic/operator lease in
+  one transaction, without assuming the old Chrome still exists. Queue IDs, lifecycle,
+  progress, and schedules are unchanged, and those sessions are immediately eligible
+  for Open, Refresh, and monitoring. While running, an *expired* lease can be taken over
+  by a fenced claimer; a live one never is.
+- **Monitoring pause persistence.** RUNNING/PAUSED survives restart. A paused restart
+  makes no automatic claims or checks, but acquisition still fills any deficit.
+- **Conflicting actions.** Each session has persisted, fenced ownership: an automatic
+  check, one operator action, or one headed window. Incompatible requests on the same
+  session are rejected, and a repeated identical request returns the original action.
+  Different sessions run concurrently up to `OPERATOR_WORKERS`. Buttons are disabled
+  while their request is in flight and carry a per-render token, so a double-click or
+  resubmission does not repeat Add/Replace/Delete.
+- **Auto-refresh.** Polls are read-only GETs. A click aborts an in-flight poll, and a
+  poll waits behind a mutation. Action feedback lives outside the polled region, so a
+  refresh never erases it.
+- **Chrome crash.** A crash during Open or while open releases ownership, returns the
+  context budget, and keeps the last persisted observation and Queue ID. A crashed
+  headed Chrome is not relaunched until the next Open.
+- **Failures.** A database, route, or template failure returns a sanitized message
+  (HTTP 503) into the feedback line and never reaches the scheduler, creation, or
+  browser workers.
+- **Shutdown (Ctrl+C / SIGTERM).** Uvicorn owns the signals. Shutdown runs in order:
+  1. refuse new mutations;
+  2. stop creation and automatic claims;
+  3. drain automatic checks;
+  4. finish or cancel operator work within `SHUTDOWN_TIMEOUT_SECONDS`;
+  5. persist a final observation for headed sessions, close their contexts, and release
+     ownership;
+  6. close Chrome and SQLite.
+
+  Nothing is deleted or replaced.
+- **10,000-row dashboard.** `queue-load-test-phase5-ui-benchmark` measured first page
+  0.22 ms p95, last page 1.22 ms, search 1.9–2.1 ms, status filter 0.63 ms, and
+  summary aggregates 6.6 ms, with 2–4 SQL statements per request. Polling wrote zero
+  rows; pause/resume write one row each. This is local synthetic SQLite evidence only,
+  not Queue-it throughput.
+
+HTMX 2.0.4 is vendored under `web/static/`; the UI makes no CDN requests.
 
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;

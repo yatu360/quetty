@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -12,9 +13,11 @@ from uuid import uuid4
 from playwright.async_api import Page
 
 from queue_load_test.browser import BrowserCapacityError, BrowserManager, OwnedBrowserContext
+from queue_load_test.metrics.logging import log_event
 from queue_load_test.repository import (
     ManualSessionBusyError,
     ManualSessionCapacityError,
+    SessionNotFoundError,
     SessionRepository,
 )
 from queue_load_test.scheduler import QueueSessionMonitor
@@ -74,6 +77,15 @@ class ManualChromeSessionManager:
         self._start_lock = asyncio.Lock()
         self._closing = False
 
+    @property
+    def open_count(self) -> int:
+        return len(self._open)
+
+    def stop_accepting(self) -> None:
+        """Reject new opens immediately; already-open windows stay until close()."""
+
+        self._closing = True
+
     async def recover_stale(self) -> int:
         return await self._repository.recover_stale_manual_ownership(
             now=datetime.now(UTC)
@@ -115,6 +127,8 @@ class ManualChromeSessionManager:
             )
         except (ManualSessionBusyError, ManualSessionCapacityError) as exc:
             raise ManualOpenError(str(exc)) from exc
+        except SessionNotFoundError as exc:
+            raise ManualOpenError("Session no longer exists") from exc
 
         opened: OpenedSessionRestore | None = None
         try:
@@ -154,17 +168,36 @@ class ManualChromeSessionManager:
             if not retained:
                 if opened is not None and opened.owned_context is not None:
                     await opened.owned_context.close()
-                await self._repository.release_manual_ownership(
-                    session_id,
-                    owner_id=owner_id,
-                )
+                await self._release(session_id, owner_id)
 
     async def _ensure_started(self) -> None:
         async with self._start_lock:
             if not self._browser_manager.started:
                 await self._browser_manager.start()
 
+    async def _browser_alive(self, record: _OpenSession) -> bool:
+        """Check the owning headed Chrome without triggering a restart.
+
+        Repairing here would relaunch a visible Chrome window after a crash even
+        though no operator asked for one; the pool is restarted lazily by the next
+        Open instead.
+        """
+
+        if record.owned_context.closed or record.page.is_closed():
+            return False
+        capacity = await self._browser_manager.capacity(repair=False)
+        return any(
+            process.index == record.owned_context.browser_id and process.connected
+            for process in capacity.processes
+        )
+
     async def _watch(self, record: _OpenSession) -> None:
+        last_renewed = time.monotonic()
+        # Stop before the lease can lapse: after that the scheduler may take the
+        # session over, and two browsers must never drive one identity.
+        renewal_deadline = max(
+            self._heartbeat_seconds, self._lease_seconds - self._heartbeat_seconds
+        )
         try:
             while not record.closed.is_set():
                 try:
@@ -174,21 +207,34 @@ class ManualChromeSessionManager:
                     )
                 except TimeoutError:
                     try:
-                        await self._browser_manager.capacity()
-                    except Exception:  # noqa: BLE001
+                        alive = await self._browser_alive(record)
+                    except Exception:  # noqa: BLE001 - treat an unreadable pool as lost
+                        alive = False
+                    if not alive:
                         record.closed.set()
                         continue
-                    if record.owned_context.closed:
-                        record.closed.set()
+                    try:
+                        renewed = await self._repository.renew_manual_ownership(
+                            record.session_id,
+                            owner_id=record.owner_id,
+                            lease_until=datetime.now(UTC)
+                            + timedelta(seconds=self._lease_seconds),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - transient database outage
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            "manual_lease_renewal_failed",
+                            session_id=record.session_id,
+                            error_type=type(exc).__name__,
+                        )
+                        if time.monotonic() - last_renewed >= renewal_deadline:
+                            record.closed.set()
                         continue
-                    renewed = await self._repository.renew_manual_ownership(
-                        record.session_id,
-                        owner_id=record.owner_id,
-                        lease_until=datetime.now(UTC)
-                        + timedelta(seconds=self._lease_seconds),
-                    )
                     if not renewed:
                         record.closed.set()
+                    else:
+                        last_renewed = time.monotonic()
         finally:
             await self._finalize(record, inspect=True)
 
@@ -226,12 +272,22 @@ class ManualChromeSessionManager:
             )
         finally:
             try:
-                await self._repository.release_manual_ownership(
-                    record.session_id,
-                    owner_id=record.owner_id,
-                )
-            finally:
                 await record.owned_context.close()
+            finally:
+                await self._release(record.session_id, record.owner_id)
+
+    async def _release(self, session_id: str, owner_id: str) -> None:
+        try:
+            await self._repository.release_manual_ownership(session_id, owner_id=owner_id)
+        except Exception as exc:  # noqa: BLE001
+            # The short manual lease expires, and restart clears it unconditionally.
+            log_event(
+                logger,
+                logging.ERROR,
+                "manual_ownership_release_failed",
+                session_id=session_id,
+                error_type=type(exc).__name__,
+            )
 
     async def close(self) -> None:
         async with self._lock:
@@ -248,4 +304,12 @@ class ManualChromeSessionManager:
         if watchers:
             await asyncio.gather(*watchers, return_exceptions=True)
         if self._browser_manager.started:
-            await self._browser_manager.shutdown()
+            try:
+                await self._browser_manager.shutdown()
+            except Exception as exc:  # noqa: BLE001 - ownership is already released
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "manual_chrome_shutdown_failed",
+                    error_type=type(exc).__name__,
+                )

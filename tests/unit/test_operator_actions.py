@@ -248,7 +248,9 @@ async def test_replace_keeps_old_on_failure_and_swaps_after_success(tmp_path: Pa
     assert await wait_for_action(manager, "old") is OperatorActionStatus.SUCCESS
     assert await repository.get("old") is None
     assert await repository.count_successful_queue_ids() == 1
-    assert target.adjustments == []
+    # The replacement reserves +1 and the old row's delete applies -1 atomically.
+    assert target.adjustments == [1, -1]
+    assert await repository.get_operator_population_adjustment() == 0
     await manager.close()
     await repository.close()
 

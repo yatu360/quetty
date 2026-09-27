@@ -48,6 +48,14 @@ class ManualSessionCapacityError(RepositoryError):
     """Raised when the persisted manual-open capacity is exhausted."""
 
 
+@dataclass(frozen=True, slots=True)
+class OwnershipRecovery:
+    """Browser ownership cleared at startup; identities and progress are untouched."""
+
+    manual_released: int
+    leases_released: int
+
+
 class ClaimedSessions(list[QueueSession]):
     """Claimed sessions plus how many of them were taken over from expired leases.
 
@@ -70,6 +78,9 @@ class ClaimedSessions(list[QueueSession]):
         self.recovered_expired_leases = recovered_expired_leases
         self.reclaimed_own_expired_leases = reclaimed_own_expired_leases
 
+
+OPERATOR_WORKER_PREFIX = "operator-"
+"""Lease owner prefix for fenced operator actions, distinct from scheduler owners."""
 
 PROGRESS_BUCKETS: tuple[str, ...] = (
     "unknown",
@@ -176,6 +187,10 @@ class SessionRepository(Protocol):
     async def release_manual_ownership(self, session_id: str, *, owner_id: str) -> bool: ...
 
     async def recover_stale_manual_ownership(self, *, now: datetime) -> int: ...
+
+    async def recover_startup_ownership(
+        self, *, now: datetime, exclusive: bool
+    ) -> OwnershipRecovery: ...
 
     async def create(
         self,

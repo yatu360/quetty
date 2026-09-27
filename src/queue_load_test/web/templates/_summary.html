@@ -7,10 +7,12 @@
       <span>Monitoring</span><strong class="state">{{ summary.monitoring }}</strong>
       {% if summary.monitoring == "PAUSED" %}
       <button type="button" hx-post="/monitoring/resume" hx-target="#summary"
-              hx-swap="outerHTML">Resume Monitoring</button>
+              hx-swap="outerHTML" hx-sync="closest #summary:replace"
+              hx-disabled-elt="this">Resume Monitoring</button>
       {% else %}
       <button type="button" hx-post="/monitoring/pause" hx-target="#summary"
-              hx-swap="outerHTML">Pause Monitoring</button>
+              hx-swap="outerHTML" hx-sync="closest #summary:replace"
+              hx-disabled-elt="this">Pause Monitoring</button>
       {% endif %}
     </div>
   </div>
@@ -26,3 +28,6 @@
     <div><dt>Managed Chrome processes</dt><dd>{{ summary.chrome_processes }}</dd></div>
   </dl>
 </section>
+{%- if partial %}
+<p id="refresh-status" class="refresh-status" aria-live="polite" hx-swap-oob="true"></p>
+{%- endif %}

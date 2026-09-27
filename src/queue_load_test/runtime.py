@@ -4,7 +4,7 @@ import asyncio
 import logging
 import signal
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -34,7 +34,19 @@ class ApplicationRuntime:
         shutdown_timeout_seconds: float = 30.0,
         observability: PrometheusMetrics | None = None,
         target_queue_ids: int | None = None,
+        install_signal_handlers: bool = True,
+        before_browser_shutdown: Sequence[tuple[str, Callable[[], Awaitable[object]]]] = (),
     ) -> None:
+        """Create the runtime.
+
+        ``install_signal_handlers=False`` is for hosts such as uvicorn that own
+        SIGINT/SIGTERM themselves and call :meth:`request_shutdown` from their own
+        shutdown path; replacing their handlers would stop the runtime while the
+        host kept running. ``before_browser_shutdown`` steps run, in order, after
+        producers and automatic monitoring stop but while Chrome is still usable,
+        so dependent work can finish and persist its observations.
+        """
+
         if shutdown_timeout_seconds <= 0:
             raise ValueError("shutdown_timeout_seconds must be positive")
         self._browser_manager = browser_manager
@@ -48,6 +60,8 @@ class ApplicationRuntime:
         self._startup_recovery_summary: RecoverySummary | None = None
         self._startup_recovery_seconds: float | None = None
         self._target_queue_ids = target_queue_ids
+        self._install_signals = install_signal_handlers
+        self._before_browser_shutdown = tuple(before_browser_shutdown)
 
     @property
     def stopping(self) -> bool:
@@ -70,7 +84,7 @@ class ApplicationRuntime:
 
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
-        installed_signals = self._install_signal_handlers(loop)
+        installed_signals = self._install_signal_handlers(loop) if self._install_signals else ()
         try:
             recovery_started = time.perf_counter()
             self._startup_recovery_summary = await self._repository.recovery_summary(
@@ -125,6 +139,8 @@ class ApplicationRuntime:
                     timeout_seconds=self._shutdown_timeout_seconds
                 ),
             )
+            for operation, step in self._before_browser_shutdown:
+                await self._shutdown_step(operation, step())
             await self._shutdown_step("browser", self._browser_manager.shutdown())
             await self._shutdown_step("repository", self._repository.close())
             log_event(logger, logging.INFO, "application_runtime_stopped")

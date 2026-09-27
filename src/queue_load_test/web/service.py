@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -58,8 +59,14 @@ class RunRuntime(Protocol):
     async def close_session(self, session_id: str) -> bool: ...
 
     async def request_action(
-        self, kind: OperatorActionKind, session_id: str | None = None
+        self,
+        kind: OperatorActionKind,
+        session_id: str | None = None,
+        *,
+        request_token: str | None = None,
     ) -> OperatorAction: ...
+
+    def stop_accepting(self) -> None: ...
 
     def session_action(self, session_id: str) -> OperatorAction | None: ...
 
@@ -71,8 +78,17 @@ class RunRuntime(Protocol):
 class ApplicationRunRuntime:
     """Assemble one background runtime from an immutable persisted run."""
 
-    def __init__(self, *, settings: Settings, repository: SessionRepository) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        repository: SessionRepository,
+        manual_headless: bool = False,
+    ) -> None:
+        """``manual_headless`` exists for local installed-Chrome tests only."""
+
         self._base_settings = settings
+        self._manual_headless = manual_headless
         self._repository = repository
         self._browser_manager: BrowserManager | None = None
         self._runtime: ApplicationRuntime | None = None
@@ -145,7 +161,7 @@ class ApplicationRunRuntime:
                 chrome_process_count=1,
                 max_contexts_per_browser=settings.max_manual_open_sessions,
                 max_active_contexts=settings.max_manual_open_sessions,
-                headless=False,
+                headless=self._manual_headless,
                 observability=metrics,
                 shared_capacity=shared_capacity,
             )
@@ -192,6 +208,22 @@ class ApplicationRunRuntime:
                 shutdown_timeout_seconds=settings.shutdown_timeout_seconds,
                 observability=metrics,
                 target_queue_ids=run.requested_sessions,
+                # uvicorn owns SIGINT/SIGTERM and runs the lifespan shutdown, which
+                # calls close(); installing handlers here would stop the runtime
+                # while the web server kept running.
+                install_signal_handlers=False,
+                # After producers and automatic monitoring stop, but while Chrome is
+                # still usable: finish or cancel operator work, then persist and close
+                # headed sessions and release their ownership.
+                before_browser_shutdown=(
+                    (
+                        "operator_actions",
+                        lambda: operator_actions.close(
+                            timeout_seconds=settings.shutdown_timeout_seconds
+                        ),
+                    ),
+                    ("manual_chrome", manual_sessions.close),
+                ),
             )
             self._browser_manager = browser_manager
             self._monitoring_scheduler = scheduler
@@ -256,12 +288,22 @@ class ApplicationRunRuntime:
         return await manager.close_session(session_id)
 
     async def request_action(
-        self, kind: OperatorActionKind, session_id: str | None = None
+        self,
+        kind: OperatorActionKind,
+        session_id: str | None = None,
+        *,
+        request_token: str | None = None,
     ) -> OperatorAction:
         manager = self._operator_actions
         if manager is None:
             raise RuntimeError("Run runtime has not started")
-        return await manager.request(kind, session_id)
+        return await manager.request(kind, session_id, request_token=request_token)
+
+    def stop_accepting(self) -> None:
+        if self._operator_actions is not None:
+            self._operator_actions.stop_accepting()
+        if self._manual_sessions is not None:
+            self._manual_sessions.stop_accepting()
 
     def session_action(self, session_id: str) -> OperatorAction | None:
         manager = self._operator_actions
@@ -272,14 +314,29 @@ class ApplicationRunRuntime:
         return manager.latest_add() if manager is not None else None
 
     async def close(self) -> None:
-        if self._operator_actions is not None:
-            await self._operator_actions.close()
-        if self._manual_sessions is not None:
-            await self._manual_sessions.close()
+        """Shut down in dependency order without deleting or replacing identities.
+
+        1. reject new operator/headed requests; 2. stop creation and automatic
+        claims; 3. drain in-flight automatic checks and release queued leases;
+        4. finish or cancel operator work; 5. persist and close headed sessions and
+        release their ownership; 6. close Chrome and the repository. Steps 3-6 run
+        inside ``ApplicationRuntime.run`` so each is isolated from the others'
+        failures.
+        """
+
+        self.stop_accepting()
         if self._runtime is not None:
             self._runtime.request_shutdown()
         if self._task is not None:
-            await self._task
+            with contextlib.suppress(Exception):
+                await self._task
+        # Idempotent fallbacks for a runtime that never reached its shutdown hooks.
+        if self._operator_actions is not None:
+            await self._operator_actions.close(
+                timeout_seconds=self._base_settings.shutdown_timeout_seconds
+            )
+        if self._manual_sessions is not None:
+            await self._manual_sessions.close()
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,9 +9,47 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 5 Prompt 4 is complete. A localhost FastAPI/Jinja2/HTMX operator
-  UI now provides persisted first-run setup, bounded acquisition/runtime startup, run
-  recovery, aggregate status, and a safe paginated session dashboard.
+- Current phase: Phase 5 Prompt 5 is complete. The localhost operator UI is hardened for
+  refresh/double-click/restart/Chrome-crash/database-failure/shutdown. See
+  `docs/phase5_ui_reliability.md`.
+- Twelve defects were fixed:
+  - The UI runtime no longer replaces uvicorn's SIGINT/SIGTERM handlers. Before, Ctrl+C
+    stopped the runtime but left the web server running.
+  - Shutdown is ordered, with a bounded drain for operator work.
+  - Startup clears stale headed ownership and leases under a single-instance lock.
+  - Operator and headed acquisition take over expired leases.
+  - Lifecycle `CHECKING` and expired leases no longer appear as browser ownership.
+  - HTMX poll/mutation races and double-submits are fixed (`hx-sync`,
+    `hx-disabled-elt`, OOB feedback, per-render request tokens).
+  - Add/Replace population accounting is crash-consistent.
+  - Web failures are contained as sanitized 503 fragments.
+  - The headed heartbeat is non-repairing and tolerates renewal errors.
+  - The dashboard page query uses an ordering index.
+  - HTMX is vendored.
+- Ownership model: per-session persisted, fenced ownership in the row. There is exactly
+  one of an automatic lease, an operator lease (taken before queueing), or a headed
+  lease; there is no global lock. Live ownership is never overlapped. Expired ownership
+  may be taken over, and stale writers are rejected by owner id. `queue-load-test-ui`
+  holds an OS lock on `<database>.lock`, so startup treats every persisted owner as dead
+  and clears it without touching identities.
+- Shutdown order:
+  1. reject new mutations;
+  2. stop creation and claims;
+  3. drain automatic checks;
+  4. finish or cancel operator work within `SHUTDOWN_TIMEOUT_SECONDS`;
+  5. final headed inspection, then close contexts and release ownership;
+  6. close Chrome and SQLite.
+
+  A real SIGINT exited in about 0.5 s with no Chrome processes and zero owners.
+- 10,000-row synthetic dashboard (Apple M5 Pro, SQLite 3.50.4; not Queue-it evidence):
+  - Page query p95: first 0.22 ms, last 1.22 ms.
+  - Search p95: 1.9–2.1 ms. Status filter p95: 0.63 ms. Summary p95: 6.6 ms.
+  - 2–4 statements per request.
+  - Zero writes while polling; pause/resume write one row each.
+  - No browser work and no task growth.
+- Phase 5 Prompt 4 summary: a localhost FastAPI/Jinja2/HTMX operator UI provides
+  persisted first-run setup, bounded acquisition/runtime startup, run recovery,
+  aggregate status, and a safe paginated session dashboard.
 - The SQLite schema now includes one immutable current `run_config` row. The run target
   and requested session count survive restart; the existing creation controller counts
   valid Queue IDs and resumes only the deficit. Setup refuses a database with legacy
@@ -46,7 +84,7 @@ live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 5 Prompt 5 — UI Reliability and Recovery**.
+- Exact next task: **Phase 5 Prompt 6 — Phase 5 Acceptance**.
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -195,6 +233,9 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/repository/base.py` and `sqlite.py`.
 - Local operator UI and runtime assembly:
   `src/queue_load_test/web/`.
+- Single-UI-process database lock: `src/queue_load_test/utils/instance_lock.py`.
+- Phase 5 10,000-row dashboard benchmark:
+  `src/queue_load_test/harness/phase5_ui_benchmark.py`.
 - State-store protocol and atomic filesystem implementation:
   `src/queue_load_test/state/base.py` and `filesystem.py`.
 - Shared-Chrome resource manager with stable process-slot identifiers, least-loaded
@@ -319,6 +360,8 @@ Phase 5 manual opens use a separate `headless=False`, `channel="chrome"` manager
 headed mode is a process launch option. It is one shared lazy process with up to five
 contexts by default, not one process per session. A shared context-capacity coordinator
 spans the headed and automatic managers so both count against `MAX_ACTIVE_CONTEXTS`.
+Headed liveness checks use `capacity(repair=False)`. A crashed headed Chrome is
+relaunched only by the next explicit Open, never by the heartbeat.
 
 ## Target Acquisition Model
 
@@ -904,7 +947,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 Prompt 5 — UI Reliability and Recovery.
+Phase 5 Prompt 6 — Phase 5 Acceptance.
 
 ## Instructions for Future AI Sessions
 
