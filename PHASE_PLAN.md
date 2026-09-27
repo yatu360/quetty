@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 5 — Camoufox Queue-Session Recovery and Capacity Benchmark.
+**Next:** Phase 6 Prompt 6 — Camoufox Default Migration and Operational Polish.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -531,10 +531,11 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 4 runtime integration completed on 2026-09-27. Camoufox supports the
-complete local Queue-session workflow as an opt-in backend; it is not yet the default.**
-See `docs/phase6_camoufox_context_strategy.md` and
-`docs/phase6_runtime_integration.md`.
+**Status: Prompt 5 recovery and capacity benchmark completed on 2026-09-27. Camoufox
+supports the complete local Queue-session workflow as an opt-in backend. It is not yet
+the default.**
+See `docs/phase6_camoufox_context_strategy.md`, `docs/phase6_runtime_integration.md`,
+and `docs/phase6_camoufox_benchmark.md`.
 
 The Phase 6 identity architecture is:
 
@@ -627,18 +628,47 @@ or one browser process/profile per persisted session.
    - Every restore verifies the expected Queue ID. Mismatch evidence never overwrites
      it or creates a replacement identity.
    - Camoufox 0.5.6 repeated concurrent navigation waves proved unreliable locally, so
-     `CamoufoxBackend` serializes live contexts per process (not for the retained
-     manual Open pool). Fixed workers, global
+     `CamoufoxBackend` serializes live contexts per process. Prompt 5 replaced the
+     unserialized manual pool with one process per window. Fixed workers, global
      capacity, shared processes, deadlines, and disposable contexts remain intact.
    - Controlled local results: Camoufox application workflow 61/61, Chrome workflow
      61/61, and 20/20 Camoufox park/reopen cycles including full process/repository
      restart. No staging traffic was sent.
 
-5. **Camoufox Queue-Session Recovery and Capacity Benchmark** — next. Quantify the
-   serialized Camoufox capacity profile, browser failure/restart recovery, sustained
-   park/reopen behavior, resource use, and safe operating bounds before default review.
+5. **Camoufox Queue-Session Recovery and Capacity Benchmark** — **completed on
+   2026-09-27** (`docs/phase6_camoufox_benchmark.md`, local simulator only).
+   - 22/22 scenarios and 282/282 checks passed for Camoufox plus a same-host Chrome
+     comparison, with 0 Queue ID changes or replacements. Coverage:
+     - 200 park/reopen restores;
+     - 3 full browser restarts;
+     - application restart with stranded leases and both-direction provenance
+       rejection;
+     - kills with 0/1/3 contexts, multi-slot and repeated kills, and kills during
+       monitoring;
+     - restoration faults;
+     - headed manual Close, window loss, kill, shutdown, and reopen;
+     - pause under failure, and shutdown under mixed load.
+   - Serialized Camoufox (1–4 processes) had 0 failures. Unserialized churn wedged a
+     process at 5 contexts while it still reported connected, and a 30-context hold
+     failed 75/90 navigations. That family stopped on evidence. Chrome passed to 50.
+   - Automatic Camoufox concurrency is bounded by `CHROME_PROCESS_COUNT` (≤ 4).
+     Locally, Camoufox restores took about 2.5–3× Chrome's latency.
+   - Fixes:
+     - browser-neutral process accounting;
+     - deadline-bounded manual final inspection and adoption (an observed shutdown
+       hang);
+     - a per-window process pool for manual Camoufox windows.
 
-6. **Phase 6 Compatibility and Staging Acceptance** — planned. Require bounded
+6. **Camoufox Default Migration and Operational Polish** — next.
+   - Decide whether new runs default to Camoufox, and set the Camoufox process-ceiling
+     and worker defaults.
+   - Address:
+     - wedged-but-connected process detection;
+     - shutdown-stage timeout composition;
+     - operator-facing documentation.
+   - Keep existing Chrome runs fail-closed.
+
+7. **Phase 6 Compatibility and Staging Acceptance** — planned. Require bounded
    multi-context/process evidence, app/process restart identity round trips, local
    HYBRID and TRANSFER_ONLY workflows, headed behavior on supported hosts, provenance
    fail-closed tests, exact packaging/fetch evidence, and authorised Queue-it staging

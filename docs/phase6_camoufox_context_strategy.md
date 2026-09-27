@@ -340,7 +340,7 @@ tests are intentionally absent because Quetty persists no descriptor.
 | Question | Conclusion |
 |---|---|
 | Exact dependency compatibility | **PASS** |
-| Disposable contexts in one bounded Camoufox process | **PASS**; serialized for 0.5.6 reliability |
+| Disposable contexts in one bounded Camoufox process | **PASS** when serialized to one live context per process; unserialized churn **FAIL** (Prompt 5) |
 | Normal-context launch identity repeatability | **PASS**, but shared |
 | Fresh `AsyncNewContext` suitable for fingerprint persistence | **FAIL** |
 | Reused preset preserves core fields | **PASS** |
@@ -371,8 +371,11 @@ tests are intentionally absent because Quetty persists no descriptor.
 - Launch replay was tested only to evaluate an alternative; it is not approved state.
 - Camoufox 0.5.6 repeated concurrent navigation waves were unreliable locally. The
   backend therefore permits one live context per managed Camoufox process while fixed
-  workers and the global capacity coordinator remain bounded. Prompt 5 will benchmark
-  recovery and capacity before any default change.
+  workers and the global capacity coordinator remain bounded. Prompt 5
+  (`docs/phase6_camoufox_benchmark.md`) confirmed the constraint:
+  - without serialization, create/navigate/close churn wedged a process at 5 contexts,
+    and it still reported connected;
+  - with serialization, 1–4 processes and all recovery scenarios passed.
 - No authorised staging tests ran.
 
 Fingerprint continuity can be revisited if a future released API documents a complete,

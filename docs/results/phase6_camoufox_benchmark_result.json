@@ -1,0 +1,3925 @@
+{
+  "generated_at": "2026-09-27T19:33:16.142599+00:00",
+  "target": "LocalQueueSimulator on 127.0.0.1 (not Queue-it)",
+  "staging_status": "NOT RUN",
+  "environment": {
+    "host_platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+    "host_machine": "arm64",
+    "host_logical_cpus": 15,
+    "host_ram_bytes": 25769803776,
+    "python": "3.14.7",
+    "playwright": "1.62.0",
+    "camoufox_package": "0.5.6",
+    "camoufox_browser_build": "152.0.4-beta.30",
+    "browser_versions": {
+      "camoufox": "152.0.4-beta.30",
+      "chrome": "153.0.8010.54"
+    }
+  },
+  "configuration": {
+    "backends": [
+      "camoufox",
+      "chrome"
+    ],
+    "context_levels": [
+      5,
+      10,
+      20,
+      30,
+      40,
+      50
+    ],
+    "contexts_per_process_for_capacity": 25,
+    "navigation_waves": 3,
+    "sample_interval_seconds": 0.25,
+    "navigation_timeout_ms": 10000,
+    "production_profile": {
+      "browser_processes": 2,
+      "monitor_workers": 4,
+      "camoufox_contexts_serialized_per_process": true
+    },
+    "population_size": 40,
+    "sweeps": 5,
+    "full_browser_restart_cycles": 3,
+    "repeated_failure_cycles": 10,
+    "headed_manual_pool": true
+  },
+  "measurement_notes": {
+    "cpu": "Process CPU percent where 100 means one logical core.",
+    "ram": "Summed RSS of the backend's browser process tree; shared pages may be counted more than once. Camoufox tree = camoufox + plugin-container children; Chrome tree = processes named *chrome*.",
+    "throughput": "local_simulator_checks_per_second is a local page rate, not Queue-it throughput or a staging-safe level.",
+    "fingerprints": "No fingerprint/browser-device values are read or compared."
+  },
+  "capacity": {
+    "cases": [
+      {
+        "case": "camoufox-serialized-p1",
+        "family": "camoufox-serialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": true,
+        "configured_browser_processes": 1,
+        "configured_contexts": 1,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 1,
+        "observed_peak_active_contexts": 1,
+        "navigation_waves": 3,
+        "duration_seconds": 4.594,
+        "context_creation_seconds": {
+          "count": 1,
+          "mean": 0.1757,
+          "p50": 0.1757,
+          "p95": 0.1757,
+          "max": 0.1757
+        },
+        "context_acquisition_seconds": {
+          "count": 1,
+          "mean": 0.1757,
+          "p50": 0.1757,
+          "p95": 0.1757,
+          "max": 0.1757
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 1,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "local_navigation_seconds": {
+          "count": 3,
+          "mean": 0.0189,
+          "p50": 0.0165,
+          "p95": 0.0299,
+          "max": 0.0314
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 2.756,
+          "checks": 8,
+          "peak_active_contexts": 1,
+          "queue_depth": {
+            "average": 1.52,
+            "peak": 2.0
+          },
+          "due_backlog": {
+            "average": 1.78,
+            "peak": 5.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 1.19,
+            "peak": 2.69
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 2.903
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.3317,
+            "p50": 0.3283,
+            "p95": 0.348,
+            "max": 0.3492
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 14.14,
+            "peak": 76.5
+          },
+          "application_rss_bytes": {
+            "average": 178909184.0,
+            "peak": 179978240.0
+          },
+          "browser_cpu_percent": {
+            "average": 137.76,
+            "peak": 219.2
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1061228544.0,
+            "peak": 1609990144.0
+          },
+          "browser_tree_processes": {
+            "average": 4.69,
+            "peak": 6.0
+          },
+          "browser_main_processes": {
+            "average": 0.94,
+            "peak": 1.0
+          }
+        },
+        "samples": 16,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-serialized-p2",
+        "family": "camoufox-serialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": true,
+        "configured_browser_processes": 2,
+        "configured_contexts": 2,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 2,
+        "observed_peak_active_contexts": 2,
+        "navigation_waves": 3,
+        "duration_seconds": 4.96,
+        "context_creation_seconds": {
+          "count": 2,
+          "mean": 0.0797,
+          "p50": 0.0797,
+          "p95": 0.1475,
+          "max": 0.1551
+        },
+        "context_acquisition_seconds": {
+          "count": 2,
+          "mean": 0.082,
+          "p50": 0.082,
+          "p95": 0.1518,
+          "max": 0.1596
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 2,
+          "mean": 0.0022,
+          "p50": 0.0022,
+          "p95": 0.0042,
+          "max": 0.0045
+        },
+        "local_navigation_seconds": {
+          "count": 6,
+          "mean": 0.1453,
+          "p50": 0.0322,
+          "p95": 0.4087,
+          "max": 0.4329
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 1.662,
+          "checks": 8,
+          "peak_active_contexts": 2,
+          "queue_depth": {
+            "average": 2.12,
+            "peak": 4.0
+          },
+          "due_backlog": {
+            "average": 0.5,
+            "peak": 2.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.3,
+            "peak": 1.38
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 4.813
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.4071,
+            "p50": 0.4063,
+            "p95": 0.423,
+            "max": 0.4239
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 17.16,
+            "peak": 89.7
+          },
+          "application_rss_bytes": {
+            "average": 180544933.65,
+            "peak": 180699136.0
+          },
+          "browser_cpu_percent": {
+            "average": 247.11,
+            "peak": 531.7
+          },
+          "browser_tree_rss_bytes": {
+            "average": 2015099964.24,
+            "peak": 3447013376.0
+          },
+          "browser_tree_processes": {
+            "average": 8.76,
+            "peak": 12.0
+          },
+          "browser_main_processes": {
+            "average": 1.71,
+            "peak": 2.0
+          }
+        },
+        "samples": 17,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-serialized-p3",
+        "family": "camoufox-serialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": true,
+        "configured_browser_processes": 3,
+        "configured_contexts": 3,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 3,
+        "observed_peak_active_contexts": 3,
+        "navigation_waves": 3,
+        "duration_seconds": 5.6,
+        "context_creation_seconds": {
+          "count": 3,
+          "mean": 0.0596,
+          "p50": 0.0047,
+          "p95": 0.1542,
+          "max": 0.1708
+        },
+        "context_acquisition_seconds": {
+          "count": 3,
+          "mean": 0.064,
+          "p50": 0.0082,
+          "p95": 0.162,
+          "max": 0.1791
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 3,
+          "mean": 0.0044,
+          "p50": 0.0048,
+          "p95": 0.008,
+          "max": 0.0083
+        },
+        "local_navigation_seconds": {
+          "count": 9,
+          "mean": 0.1753,
+          "p50": 0.0389,
+          "p95": 0.5529,
+          "max": 0.5718
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 1.463,
+          "checks": 8,
+          "peak_active_contexts": 3,
+          "queue_depth": {
+            "average": 2.0,
+            "peak": 5.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.08,
+            "peak": 1.05
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 5.468
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.4616,
+            "p50": 0.4611,
+            "p95": 0.476,
+            "max": 0.4793
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 18.92,
+            "peak": 90.7
+          },
+          "application_rss_bytes": {
+            "average": 181244119.58,
+            "peak": 181665792.0
+          },
+          "browser_cpu_percent": {
+            "average": 298.85,
+            "peak": 693.5
+          },
+          "browser_tree_rss_bytes": {
+            "average": 2531139152.84,
+            "peak": 4545691648.0
+          },
+          "browser_tree_processes": {
+            "average": 11.63,
+            "peak": 18.0
+          },
+          "browser_main_processes": {
+            "average": 2.37,
+            "peak": 3.0
+          }
+        },
+        "samples": 19,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-serialized-p4",
+        "family": "camoufox-serialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": true,
+        "configured_browser_processes": 4,
+        "configured_contexts": 4,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 4,
+        "observed_peak_active_contexts": 4,
+        "navigation_waves": 3,
+        "duration_seconds": 6.089,
+        "context_creation_seconds": {
+          "count": 4,
+          "mean": 0.0534,
+          "p50": 0.0042,
+          "p95": 0.1725,
+          "max": 0.2021
+        },
+        "context_acquisition_seconds": {
+          "count": 4,
+          "mean": 0.0597,
+          "p50": 0.0101,
+          "p95": 0.1837,
+          "max": 0.214
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 4,
+          "mean": 0.0063,
+          "p50": 0.0066,
+          "p95": 0.0113,
+          "max": 0.0118
+        },
+        "local_navigation_seconds": {
+          "count": 12,
+          "mean": 0.1884,
+          "p50": 0.0197,
+          "p95": 0.6139,
+          "max": 0.6615
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 1.181,
+          "checks": 8,
+          "peak_active_contexts": 4,
+          "queue_depth": {
+            "average": 1.82,
+            "peak": 4.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 6.774
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.53,
+            "p50": 0.5286,
+            "p95": 0.5531,
+            "max": 0.5533
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 20.22,
+            "peak": 90.5
+          },
+          "application_rss_bytes": {
+            "average": 170129817.6,
+            "peak": 181665792.0
+          },
+          "browser_cpu_percent": {
+            "average": 351.7,
+            "peak": 859.8
+          },
+          "browser_tree_rss_bytes": {
+            "average": 3143208140.8,
+            "peak": 5709873152.0
+          },
+          "browser_tree_processes": {
+            "average": 14.7,
+            "peak": 24.0
+          },
+          "browser_main_processes": {
+            "average": 3.05,
+            "peak": 4.0
+          }
+        },
+        "samples": 20,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-unserialized-c5",
+        "family": "camoufox-unserialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 5,
+        "configured_contexts_per_process": 5,
+        "achieved_active_contexts": 5,
+        "observed_peak_active_contexts": 5,
+        "navigation_waves": 3,
+        "duration_seconds": 67.208,
+        "context_creation_seconds": {
+          "count": 5,
+          "mean": 0.0873,
+          "p50": 0.0978,
+          "p95": 0.1416,
+          "max": 0.1507
+        },
+        "context_acquisition_seconds": {
+          "count": 5,
+          "mean": 0.2955,
+          "p50": 0.3277,
+          "p95": 0.4162,
+          "max": 0.4373
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 5,
+          "mean": 0.2081,
+          "p50": 0.2299,
+          "p95": 0.3311,
+          "max": 0.3319
+        },
+        "local_navigation_seconds": {
+          "count": 15,
+          "mean": 0.0589,
+          "p50": 0.0499,
+          "p95": 0.079,
+          "max": 0.0795
+        },
+        "sweep": {
+          "completed": false,
+          "duration_seconds": 64.803,
+          "checks": 10,
+          "peak_active_contexts": 5,
+          "queue_depth": {
+            "average": 2.7,
+            "peak": 5.0
+          },
+          "due_backlog": {
+            "average": 0.01,
+            "peak": 5.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.45,
+            "peak": 54.84
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 0.0
+        },
+        "restoration": {
+          "restores": 30,
+          "successes": 0,
+          "identity_mismatches": 0,
+          "failures": {
+            "STATE_MISSING": 30
+          },
+          "attempt_failures": {
+            "TRANSFER:NAVIGATION_FAILED": 30,
+            "STORAGE_STATE:STATE_MISSING": 30
+          },
+          "methods": {},
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 30,
+            "mean": 10.5549,
+            "p50": 10.5522,
+            "p95": 10.6637,
+            "max": 10.683
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 12.11,
+            "peak": 90.9
+          },
+          "application_rss_bytes": {
+            "average": 144999833.6,
+            "peak": 156499968.0
+          },
+          "browser_cpu_percent": {
+            "average": 41.4,
+            "peak": 455.3
+          },
+          "browser_tree_rss_bytes": {
+            "average": 2313832311.47,
+            "peak": 2504540160.0
+          },
+          "browser_tree_processes": {
+            "average": 9.63,
+            "peak": 10.0
+          },
+          "browser_main_processes": {
+            "average": 1.0,
+            "peak": 1.0
+          }
+        },
+        "samples": 240,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 30,
+          "transfer_restore_failures": 30,
+          "storage_restore_failures": 30,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-unserialized-c10",
+        "family": "camoufox-unserialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 10,
+        "configured_contexts_per_process": 10,
+        "achieved_active_contexts": 10,
+        "observed_peak_active_contexts": 10,
+        "navigation_waves": 3,
+        "duration_seconds": 3.124,
+        "context_creation_seconds": {
+          "count": 10,
+          "mean": 0.0781,
+          "p50": 0.0801,
+          "p95": 0.1469,
+          "max": 0.1497
+        },
+        "context_acquisition_seconds": {
+          "count": 10,
+          "mean": 0.4476,
+          "p50": 0.4002,
+          "p95": 0.7357,
+          "max": 0.7831
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 10,
+          "mean": 0.3694,
+          "p50": 0.361,
+          "p95": 0.6731,
+          "max": 0.6779
+        },
+        "local_navigation_seconds": {
+          "count": 30,
+          "mean": 0.0853,
+          "p50": 0.0756,
+          "p95": 0.127,
+          "max": 0.1296
+        },
+        "sweep": {
+          "skipped": "churn sweep already failed at a lower level"
+        },
+        "restoration": {},
+        "resources": {
+          "application_cpu_percent": {
+            "average": 16.23,
+            "peak": 88.5
+          },
+          "application_rss_bytes": {
+            "average": 143569715.2,
+            "peak": 143572992.0
+          },
+          "browser_cpu_percent": {
+            "average": 172.87,
+            "peak": 423.5
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1549205504.0,
+            "peak": 3145154560.0
+          },
+          "browser_tree_processes": {
+            "average": 6.9,
+            "peak": 12.0
+          },
+          "browser_main_processes": {
+            "average": 0.9,
+            "peak": 1.0
+          }
+        },
+        "samples": 10,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-unserialized-c20",
+        "family": "camoufox-unserialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 20,
+        "configured_contexts_per_process": 20,
+        "achieved_active_contexts": 20,
+        "observed_peak_active_contexts": 20,
+        "navigation_waves": 3,
+        "duration_seconds": 4.849,
+        "context_creation_seconds": {
+          "count": 20,
+          "mean": 0.0928,
+          "p50": 0.1006,
+          "p95": 0.132,
+          "max": 0.141
+        },
+        "context_acquisition_seconds": {
+          "count": 20,
+          "mean": 0.2926,
+          "p50": 0.2297,
+          "p95": 0.6987,
+          "max": 0.8084
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 20,
+          "mean": 0.1998,
+          "p50": 0.1357,
+          "p95": 0.6073,
+          "max": 0.6931
+        },
+        "local_navigation_seconds": {
+          "count": 60,
+          "mean": 0.1654,
+          "p50": 0.1583,
+          "p95": 0.2345,
+          "max": 0.2441
+        },
+        "sweep": {
+          "skipped": "churn sweep already failed at a lower level"
+        },
+        "restoration": {},
+        "resources": {
+          "application_cpu_percent": {
+            "average": 13.19,
+            "peak": 82.3
+          },
+          "application_rss_bytes": {
+            "average": 143696353.88,
+            "peak": 144031744.0
+          },
+          "browser_cpu_percent": {
+            "average": 199.35,
+            "peak": 440.1
+          },
+          "browser_tree_rss_bytes": {
+            "average": 2323682002.82,
+            "peak": 3888021504.0
+          },
+          "browser_tree_processes": {
+            "average": 8.65,
+            "peak": 12.0
+          },
+          "browser_main_processes": {
+            "average": 0.94,
+            "peak": 1.0
+          }
+        },
+        "samples": 17,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "camoufox-unserialized-c30",
+        "family": "camoufox-unserialized",
+        "backend": "camoufox",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 2,
+        "configured_contexts": 30,
+        "configured_contexts_per_process": 15,
+        "achieved_active_contexts": 30,
+        "observed_peak_active_contexts": 30,
+        "navigation_waves": 3,
+        "duration_seconds": 34.608,
+        "context_creation_seconds": {
+          "count": 30,
+          "mean": 0.0633,
+          "p50": 0.0641,
+          "p95": 0.1437,
+          "max": 0.1624
+        },
+        "context_acquisition_seconds": {
+          "count": 30,
+          "mean": 0.1766,
+          "p50": 0.1006,
+          "p95": 0.6308,
+          "max": 0.7409
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 30,
+          "mean": 0.1133,
+          "p50": 0.0139,
+          "p95": 0.536,
+          "max": 0.6489
+        },
+        "local_navigation_seconds": {
+          "count": 90,
+          "mean": 8.3783,
+          "p50": 10.0015,
+          "p95": 10.0204,
+          "max": 10.0209
+        },
+        "sweep": {
+          "skipped": "churn sweep already failed at a lower level"
+        },
+        "restoration": {},
+        "resources": {
+          "application_cpu_percent": {
+            "average": 14.29,
+            "peak": 90.5
+          },
+          "application_rss_bytes": {
+            "average": 145897714.98,
+            "peak": 146161664.0
+          },
+          "browser_cpu_percent": {
+            "average": 154.68,
+            "peak": 791.2
+          },
+          "browser_tree_rss_bytes": {
+            "average": 6711457757.29,
+            "peak": 7280148480.0
+          },
+          "browser_tree_processes": {
+            "average": 24.47,
+            "peak": 26.0
+          },
+          "browser_main_processes": {
+            "average": 1.97,
+            "peak": 2.0
+          }
+        },
+        "samples": 118,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 75,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-per-process-p1",
+        "family": "chrome-p",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 1,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 1,
+        "observed_peak_active_contexts": 1,
+        "navigation_waves": 3,
+        "duration_seconds": 2.216,
+        "context_creation_seconds": {
+          "count": 1,
+          "mean": 0.0068,
+          "p50": 0.0068,
+          "p95": 0.0068,
+          "max": 0.0068
+        },
+        "context_acquisition_seconds": {
+          "count": 1,
+          "mean": 0.0069,
+          "p50": 0.0069,
+          "p95": 0.0069,
+          "max": 0.0069
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 1,
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "local_navigation_seconds": {
+          "count": 3,
+          "mean": 0.0095,
+          "p50": 0.0092,
+          "p95": 0.0105,
+          "max": 0.0106
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 1.143,
+          "checks": 8,
+          "peak_active_contexts": 1,
+          "queue_depth": {
+            "average": 1.18,
+            "peak": 2.0
+          },
+          "due_backlog": {
+            "average": 1.82,
+            "peak": 5.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.87,
+            "peak": 1.67
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 6.999
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.1325,
+            "p50": 0.1326,
+            "p95": 0.1358,
+            "max": 0.1363
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 22.64,
+            "peak": 90.0
+          },
+          "application_rss_bytes": {
+            "average": 146266989.71,
+            "peak": 146391040.0
+          },
+          "browser_cpu_percent": {
+            "average": 79.27,
+            "peak": 154.5
+          },
+          "browser_tree_rss_bytes": {
+            "average": 646362843.43,
+            "peak": 983285760.0
+          },
+          "browser_tree_processes": {
+            "average": 4.71,
+            "peak": 7.0
+          },
+          "browser_main_processes": {
+            "average": 0.86,
+            "peak": 1.0
+          }
+        },
+        "samples": 7,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-per-process-p2",
+        "family": "chrome-p",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 2,
+        "configured_contexts": 2,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 2,
+        "observed_peak_active_contexts": 2,
+        "navigation_waves": 3,
+        "duration_seconds": 1.937,
+        "context_creation_seconds": {
+          "count": 2,
+          "mean": 0.005,
+          "p50": 0.005,
+          "p95": 0.0059,
+          "max": 0.006
+        },
+        "context_acquisition_seconds": {
+          "count": 2,
+          "mean": 0.008,
+          "p50": 0.008,
+          "p95": 0.0097,
+          "max": 0.0099
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 2,
+          "mean": 0.0029,
+          "p50": 0.0029,
+          "p95": 0.0056,
+          "max": 0.0059
+        },
+        "local_navigation_seconds": {
+          "count": 6,
+          "mean": 0.0117,
+          "p50": 0.0111,
+          "p95": 0.0149,
+          "max": 0.0159
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 0.738,
+          "checks": 8,
+          "peak_active_contexts": 2,
+          "queue_depth": {
+            "average": 1.86,
+            "peak": 4.0
+          },
+          "due_backlog": {
+            "average": 0.43,
+            "peak": 2.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.32,
+            "peak": 1.16
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 10.84
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.148,
+            "p50": 0.146,
+            "p95": 0.1583,
+            "max": 0.1595
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 26.63,
+            "peak": 86.3
+          },
+          "application_rss_bytes": {
+            "average": 146549418.67,
+            "peak": 146669568.0
+          },
+          "browser_cpu_percent": {
+            "average": 123.2,
+            "peak": 277.9
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1049012906.67,
+            "peak": 1956216832.0
+          },
+          "browser_tree_processes": {
+            "average": 8.33,
+            "peak": 15.0
+          },
+          "browser_main_processes": {
+            "average": 1.5,
+            "peak": 2.0
+          }
+        },
+        "samples": 6,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-per-process-p3",
+        "family": "chrome-p",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 3,
+        "configured_contexts": 3,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 3,
+        "observed_peak_active_contexts": 3,
+        "navigation_waves": 3,
+        "duration_seconds": 2.081,
+        "context_creation_seconds": {
+          "count": 3,
+          "mean": 0.0042,
+          "p50": 0.0036,
+          "p95": 0.0055,
+          "max": 0.0057
+        },
+        "context_acquisition_seconds": {
+          "count": 3,
+          "mean": 0.0094,
+          "p50": 0.0094,
+          "p95": 0.0126,
+          "max": 0.013
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 3,
+          "mean": 0.0051,
+          "p50": 0.0057,
+          "p95": 0.0093,
+          "max": 0.0096
+        },
+        "local_navigation_seconds": {
+          "count": 9,
+          "mean": 0.0144,
+          "p50": 0.0125,
+          "p95": 0.0241,
+          "max": 0.0301
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 0.65,
+          "checks": 8,
+          "peak_active_contexts": 3,
+          "queue_depth": {
+            "average": 1.5,
+            "peak": 5.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.18,
+            "peak": 1.06
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 12.308
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.1666,
+            "p50": 0.1678,
+            "p95": 0.1748,
+            "max": 0.1756
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 24.47,
+            "peak": 90.5
+          },
+          "application_rss_bytes": {
+            "average": 146664886.86,
+            "peak": 146669568.0
+          },
+          "browser_cpu_percent": {
+            "average": 140.41,
+            "peak": 355.8
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1225766619.43,
+            "peak": 2881961984.0
+          },
+          "browser_tree_processes": {
+            "average": 9.71,
+            "peak": 21.0
+          },
+          "browser_main_processes": {
+            "average": 1.86,
+            "peak": 3.0
+          }
+        },
+        "samples": 7,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-per-process-p4",
+        "family": "chrome-p",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 4,
+        "configured_contexts": 4,
+        "configured_contexts_per_process": 1,
+        "achieved_active_contexts": 4,
+        "observed_peak_active_contexts": 4,
+        "navigation_waves": 3,
+        "duration_seconds": 2.194,
+        "context_creation_seconds": {
+          "count": 4,
+          "mean": 0.0041,
+          "p50": 0.0038,
+          "p95": 0.0055,
+          "max": 0.0056
+        },
+        "context_acquisition_seconds": {
+          "count": 4,
+          "mean": 0.0117,
+          "p50": 0.012,
+          "p95": 0.0165,
+          "max": 0.017
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 4,
+          "mean": 0.0075,
+          "p50": 0.0081,
+          "p95": 0.0133,
+          "max": 0.0138
+        },
+        "local_navigation_seconds": {
+          "count": 12,
+          "mean": 0.0194,
+          "p50": 0.0139,
+          "p95": 0.0419,
+          "max": 0.0531
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 0.555,
+          "checks": 8,
+          "peak_active_contexts": 4,
+          "queue_depth": {
+            "average": 1.6,
+            "peak": 4.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 14.414
+        },
+        "restoration": {
+          "restores": 8,
+          "successes": 8,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 8
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 8,
+            "mean": 0.2194,
+            "p50": 0.2175,
+            "p95": 0.2287,
+            "max": 0.2312
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 26.23,
+            "peak": 91.5
+          },
+          "application_rss_bytes": {
+            "average": 146898944.0,
+            "peak": 147013632.0
+          },
+          "browser_cpu_percent": {
+            "average": 173.6,
+            "peak": 498.6
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1579487817.14,
+            "peak": 3304996864.0
+          },
+          "browser_tree_processes": {
+            "average": 13.86,
+            "peak": 28.0
+          },
+          "browser_main_processes": {
+            "average": 2.71,
+            "peak": 4.0
+          }
+        },
+        "samples": 7,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c5",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 5,
+        "configured_contexts_per_process": 5,
+        "achieved_active_contexts": 5,
+        "observed_peak_active_contexts": 5,
+        "navigation_waves": 3,
+        "duration_seconds": 2.566,
+        "context_creation_seconds": {
+          "count": 5,
+          "mean": 0.0603,
+          "p50": 0.0654,
+          "p95": 0.0862,
+          "max": 0.0876
+        },
+        "context_acquisition_seconds": {
+          "count": 5,
+          "mean": 0.1612,
+          "p50": 0.172,
+          "p95": 0.2892,
+          "max": 0.3021
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 5,
+          "mean": 0.1009,
+          "p50": 0.0912,
+          "p95": 0.2247,
+          "max": 0.2379
+        },
+        "local_navigation_seconds": {
+          "count": 15,
+          "mean": 0.041,
+          "p50": 0.0421,
+          "p95": 0.0573,
+          "max": 0.0583
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 1.145,
+          "checks": 10,
+          "peak_active_contexts": 5,
+          "queue_depth": {
+            "average": 1.91,
+            "peak": 5.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 8.734
+        },
+        "restoration": {
+          "restores": 10,
+          "successes": 10,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 10
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 10,
+            "mean": 0.5281,
+            "p50": 0.5402,
+            "p95": 0.57,
+            "max": 0.5755
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 20.9,
+            "peak": 88.4
+          },
+          "application_rss_bytes": {
+            "average": 147275776.0,
+            "peak": 147718144.0
+          },
+          "browser_cpu_percent": {
+            "average": 138.45,
+            "peak": 238.1
+          },
+          "browser_tree_rss_bytes": {
+            "average": 1451288576.0,
+            "peak": 2334916608.0
+          },
+          "browser_tree_processes": {
+            "average": 10.12,
+            "peak": 15.0
+          },
+          "browser_main_processes": {
+            "average": 0.88,
+            "peak": 1.0
+          }
+        },
+        "samples": 8,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c10",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 10,
+        "configured_contexts_per_process": 10,
+        "achieved_active_contexts": 10,
+        "observed_peak_active_contexts": 10,
+        "navigation_waves": 3,
+        "duration_seconds": 4.266,
+        "context_creation_seconds": {
+          "count": 10,
+          "mean": 0.0662,
+          "p50": 0.0694,
+          "p95": 0.0856,
+          "max": 0.0888
+        },
+        "context_acquisition_seconds": {
+          "count": 10,
+          "mean": 0.3417,
+          "p50": 0.3418,
+          "p95": 0.6302,
+          "max": 0.6644
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 10,
+          "mean": 0.2754,
+          "p50": 0.2733,
+          "p95": 0.5585,
+          "max": 0.5888
+        },
+        "local_navigation_seconds": {
+          "count": 30,
+          "mean": 0.0775,
+          "p50": 0.0759,
+          "p95": 0.1016,
+          "max": 0.1062
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 2.251,
+          "checks": 20,
+          "peak_active_contexts": 10,
+          "queue_depth": {
+            "average": 4.73,
+            "peak": 10.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 8.885
+        },
+        "restoration": {
+          "restores": 20,
+          "successes": 20,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 20
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 20,
+            "mean": 1.0793,
+            "p50": 1.0764,
+            "p95": 1.4009,
+            "max": 1.4084
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 19.04,
+            "peak": 89.6
+          },
+          "application_rss_bytes": {
+            "average": 148200925.87,
+            "peak": 148701184.0
+          },
+          "browser_cpu_percent": {
+            "average": 175.31,
+            "peak": 291.9
+          },
+          "browser_tree_rss_bytes": {
+            "average": 2362801083.73,
+            "peak": 4025106432.0
+          },
+          "browser_tree_processes": {
+            "average": 15.8,
+            "peak": 26.0
+          },
+          "browser_main_processes": {
+            "average": 0.93,
+            "peak": 1.0
+          }
+        },
+        "samples": 15,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c20",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 1,
+        "configured_contexts": 20,
+        "configured_contexts_per_process": 20,
+        "achieved_active_contexts": 20,
+        "observed_peak_active_contexts": 20,
+        "navigation_waves": 3,
+        "duration_seconds": 8.107,
+        "context_creation_seconds": {
+          "count": 20,
+          "mean": 0.0692,
+          "p50": 0.0699,
+          "p95": 0.087,
+          "max": 0.0876
+        },
+        "context_acquisition_seconds": {
+          "count": 20,
+          "mean": 0.4629,
+          "p50": 0.5694,
+          "p95": 0.6012,
+          "max": 0.674
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 20,
+          "mean": 0.3937,
+          "p50": 0.5005,
+          "p95": 0.5372,
+          "max": 0.5976
+        },
+        "local_navigation_seconds": {
+          "count": 60,
+          "mean": 0.1698,
+          "p50": 0.1716,
+          "p95": 0.2031,
+          "max": 0.2067
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 4.828,
+          "checks": 40,
+          "peak_active_contexts": 20,
+          "queue_depth": {
+            "average": 11.45,
+            "peak": 20.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 8.285
+        },
+        "restoration": {
+          "restores": 40,
+          "successes": 40,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 40
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 40,
+            "mean": 2.2888,
+            "p50": 2.2698,
+            "p95": 3.713,
+            "max": 3.9412
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 17.51,
+            "peak": 86.8
+          },
+          "application_rss_bytes": {
+            "average": 150871781.52,
+            "peak": 153124864.0
+          },
+          "browser_cpu_percent": {
+            "average": 205.34,
+            "peak": 280.2
+          },
+          "browser_tree_rss_bytes": {
+            "average": 4863268369.66,
+            "peak": 7682326528.0
+          },
+          "browser_tree_processes": {
+            "average": 30.62,
+            "peak": 53.0
+          },
+          "browser_main_processes": {
+            "average": 0.97,
+            "peak": 1.0
+          }
+        },
+        "samples": 29,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c30",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 2,
+        "configured_contexts": 30,
+        "configured_contexts_per_process": 15,
+        "achieved_active_contexts": 30,
+        "observed_peak_active_contexts": 30,
+        "navigation_waves": 3,
+        "duration_seconds": 8.341,
+        "context_creation_seconds": {
+          "count": 30,
+          "mean": 0.0441,
+          "p50": 0.0389,
+          "p95": 0.0703,
+          "max": 0.0931
+        },
+        "context_acquisition_seconds": {
+          "count": 30,
+          "mean": 0.2878,
+          "p50": 0.324,
+          "p95": 0.3678,
+          "max": 0.4137
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 30,
+          "mean": 0.2437,
+          "p50": 0.2712,
+          "p95": 0.3152,
+          "max": 0.3904
+        },
+        "local_navigation_seconds": {
+          "count": 90,
+          "mean": 0.25,
+          "p50": 0.2525,
+          "p95": 0.2768,
+          "max": 0.2855
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 4.574,
+          "checks": 60,
+          "peak_active_contexts": 30,
+          "queue_depth": {
+            "average": 14.75,
+            "peak": 30.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 13.118
+        },
+        "restoration": {
+          "restores": 60,
+          "successes": 60,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 60
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 60,
+            "mean": 2.17,
+            "p50": 2.1556,
+            "p95": 2.7028,
+            "max": 2.8275
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 24.76,
+            "peak": 92.3
+          },
+          "application_rss_bytes": {
+            "average": 155994794.67,
+            "peak": 157925376.0
+          },
+          "browser_cpu_percent": {
+            "average": 331.13,
+            "peak": 458.7
+          },
+          "browser_tree_rss_bytes": {
+            "average": 6829426824.53,
+            "peak": 11415126016.0
+          },
+          "browser_tree_processes": {
+            "average": 43.57,
+            "peak": 70.0
+          },
+          "browser_main_processes": {
+            "average": 1.9,
+            "peak": 2.0
+          }
+        },
+        "samples": 30,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c40",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 2,
+        "configured_contexts": 40,
+        "configured_contexts_per_process": 20,
+        "achieved_active_contexts": 40,
+        "observed_peak_active_contexts": 40,
+        "navigation_waves": 3,
+        "duration_seconds": 11.247,
+        "context_creation_seconds": {
+          "count": 40,
+          "mean": 0.0459,
+          "p50": 0.0484,
+          "p95": 0.0665,
+          "max": 0.0947
+        },
+        "context_acquisition_seconds": {
+          "count": 40,
+          "mean": 0.2934,
+          "p50": 0.3127,
+          "p95": 0.3589,
+          "max": 0.4075
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 40,
+          "mean": 0.2474,
+          "p50": 0.2667,
+          "p95": 0.3282,
+          "max": 0.3759
+        },
+        "local_navigation_seconds": {
+          "count": 120,
+          "mean": 0.3759,
+          "p50": 0.3783,
+          "p95": 0.4375,
+          "max": 0.4591
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 6.349,
+          "checks": 80,
+          "peak_active_contexts": 40,
+          "queue_depth": {
+            "average": 22.73,
+            "peak": 40.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 12.6
+        },
+        "restoration": {
+          "restores": 80,
+          "successes": 80,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 80
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 80,
+            "mean": 2.9792,
+            "p50": 2.8739,
+            "p95": 4.582,
+            "max": 4.797
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 25.2,
+            "peak": 90.6
+          },
+          "application_rss_bytes": {
+            "average": 149727232.0,
+            "peak": 157990912.0
+          },
+          "browser_cpu_percent": {
+            "average": 346.53,
+            "peak": 478.7
+          },
+          "browser_tree_rss_bytes": {
+            "average": 9277086105.6,
+            "peak": 14181662720.0
+          },
+          "browser_tree_processes": {
+            "average": 59.23,
+            "peak": 90.0
+          },
+          "browser_main_processes": {
+            "average": 1.93,
+            "peak": 2.0
+          }
+        },
+        "samples": 40,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      },
+      {
+        "case": "chrome-shared-c50",
+        "family": "chrome-shared-processes",
+        "backend": "chrome",
+        "status": "COMPLETED",
+        "error_category": null,
+        "serialized_contexts": false,
+        "configured_browser_processes": 2,
+        "configured_contexts": 50,
+        "configured_contexts_per_process": 25,
+        "achieved_active_contexts": 50,
+        "observed_peak_active_contexts": 50,
+        "navigation_waves": 3,
+        "duration_seconds": 14.14,
+        "context_creation_seconds": {
+          "count": 50,
+          "mean": 0.0476,
+          "p50": 0.0498,
+          "p95": 0.0745,
+          "max": 0.0873
+        },
+        "context_acquisition_seconds": {
+          "count": 50,
+          "mean": 0.3115,
+          "p50": 0.3255,
+          "p95": 0.3906,
+          "max": 0.4152
+        },
+        "allocation_lock_wait_seconds": {
+          "count": 50,
+          "mean": 0.2638,
+          "p50": 0.2812,
+          "p95": 0.3463,
+          "max": 0.3816
+        },
+        "local_navigation_seconds": {
+          "count": 150,
+          "mean": 0.5017,
+          "p50": 0.515,
+          "p95": 0.6173,
+          "max": 0.6353
+        },
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 8.058,
+          "checks": 100,
+          "peak_active_contexts": 43,
+          "queue_depth": {
+            "average": 26.27,
+            "peak": 50.0
+          },
+          "due_backlog": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 0.0,
+            "peak": 0.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0,
+          "local_simulator_checks_per_second": 12.41
+        },
+        "restoration": {
+          "restores": 100,
+          "successes": 100,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {},
+          "methods": {
+            "TRANSFER": 100
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 100,
+            "mean": 3.5883,
+            "p50": 3.2744,
+            "p95": 5.7179,
+            "max": 5.9488
+          }
+        },
+        "resources": {
+          "application_cpu_percent": {
+            "average": 25.71,
+            "peak": 90.9
+          },
+          "application_rss_bytes": {
+            "average": 149329346.56,
+            "peak": 150847488.0
+          },
+          "browser_cpu_percent": {
+            "average": 348.97,
+            "peak": 449.7
+          },
+          "browser_tree_rss_bytes": {
+            "average": 10215685488.64,
+            "peak": 16258957312.0
+          },
+          "browser_tree_processes": {
+            "average": 66.06,
+            "peak": 110.0
+          },
+          "browser_main_processes": {
+            "average": 1.94,
+            "peak": 2.0
+          }
+        },
+        "samples": 50,
+        "failures": {
+          "context_creation_failures": 0,
+          "navigation_failures": 0,
+          "restore_navigation_failures": 0,
+          "transfer_restore_failures": 0,
+          "storage_restore_failures": 0,
+          "identity_mismatches": 0,
+          "browser_crashes": 0,
+          "browser_operation_timeouts": 0,
+          "cleanup_failures": 0,
+          "lost_contexts": 0,
+          "restarts": 0
+        },
+        "final": {
+          "contexts": 0,
+          "browser_main_processes": 0
+        }
+      }
+    ],
+    "stopped_early": {
+      "camoufox-unserialized": {
+        "after_case": "camoufox-unserialized-c30",
+        "reason": "hold-phase navigation failures"
+      }
+    },
+    "churn_sweep_first_failure": {
+      "camoufox-unserialized": "camoufox-unserialized-c5"
+    }
+  },
+  "scenarios": [
+    {
+      "key": "park_reopen_camoufox",
+      "title": "camoufox park/reopen sweeps over 40 persisted sessions",
+      "evidence": "real browser + LocalQueueSimulator + SQLite + state files",
+      "outcome": "PASS",
+      "checks": {
+        "population_created": true,
+        "unique_queue_ids": true,
+        "hybrid_state_saved_for_every_session": true,
+        "contexts_closed_after_creation": true,
+        "sweep_1_completed": true,
+        "sweep_1_every_session_verified": true,
+        "sweep_1_queue_ids_unchanged": true,
+        "sweep_1_zero_contexts_and_leases_after": true,
+        "sweep_1_no_state_refresh_failures": true,
+        "sweep_2_completed": true,
+        "sweep_2_every_session_verified": true,
+        "sweep_2_queue_ids_unchanged": true,
+        "sweep_2_zero_contexts_and_leases_after": true,
+        "sweep_2_no_state_refresh_failures": true,
+        "sweep_3_completed": true,
+        "sweep_3_every_session_verified": true,
+        "sweep_3_queue_ids_unchanged": true,
+        "sweep_3_zero_contexts_and_leases_after": true,
+        "sweep_3_no_state_refresh_failures": true,
+        "sweep_4_completed": true,
+        "sweep_4_every_session_verified": true,
+        "sweep_4_queue_ids_unchanged": true,
+        "sweep_4_zero_contexts_and_leases_after": true,
+        "sweep_4_no_state_refresh_failures": true,
+        "sweep_5_completed": true,
+        "sweep_5_every_session_verified": true,
+        "sweep_5_queue_ids_unchanged": true,
+        "sweep_5_zero_contexts_and_leases_after": true,
+        "sweep_5_no_state_refresh_failures": true,
+        "no_new_identities_during_sweeps": true
+      },
+      "measurements": {
+        "creation": {
+          "requested": 40,
+          "outcomes": {
+            "SUCCESS": 40
+          },
+          "created": 40,
+          "duration_seconds": 8.404,
+          "creation_latency_seconds": {
+            "count": 40,
+            "mean": 0.8004,
+            "p50": 0.7807,
+            "p95": 0.9276,
+            "max": 1.3165
+          }
+        },
+        "sweeps": [
+          {
+            "sweep": 1,
+            "completed": true,
+            "duration_seconds": 8.45,
+            "checks": 40,
+            "peak_active_contexts": 2,
+            "queue_depth": {
+              "average": 6.25,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 9.99,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 2.86,
+              "peak": 6.99
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.7947,
+                "p50": 0.7882,
+                "p95": 0.8921,
+                "max": 1.1448
+              }
+            }
+          },
+          {
+            "sweep": 2,
+            "completed": true,
+            "duration_seconds": 8.444,
+            "checks": 40,
+            "peak_active_contexts": 2,
+            "queue_depth": {
+              "average": 6.36,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.02,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 2.86,
+              "peak": 6.99
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.7978,
+                "p50": 0.7929,
+                "p95": 0.9252,
+                "max": 1.1788
+              }
+            }
+          },
+          {
+            "sweep": 3,
+            "completed": true,
+            "duration_seconds": 8.669,
+            "checks": 40,
+            "peak_active_contexts": 2,
+            "queue_depth": {
+              "average": 6.28,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.18,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 2.96,
+              "peak": 7.16
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.8179,
+                "p50": 0.8024,
+                "p95": 0.9411,
+                "max": 1.1867
+              }
+            }
+          },
+          {
+            "sweep": 4,
+            "completed": true,
+            "duration_seconds": 8.965,
+            "checks": 40,
+            "peak_active_contexts": 2,
+            "queue_depth": {
+              "average": 6.32,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.14,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 3.11,
+              "peak": 7.45
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.8459,
+                "p50": 0.813,
+                "p95": 1.0139,
+                "max": 1.3811
+              }
+            }
+          },
+          {
+            "sweep": 5,
+            "completed": true,
+            "duration_seconds": 8.862,
+            "checks": 40,
+            "peak_active_contexts": 2,
+            "queue_depth": {
+              "average": 6.46,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.38,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 3.06,
+              "peak": 7.36
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.8444,
+                "p50": 0.8205,
+                "p95": 1.0344,
+                "max": 1.1685
+              }
+            }
+          }
+        ],
+        "browser_restarts": 0
+      },
+      "notes": []
+    },
+    {
+      "key": "full_browser_restart_camoufox",
+      "title": "Close every browser process, relaunch, restore parked sessions",
+      "evidence": "real browser processes fully stopped and relaunched",
+      "outcome": "PASS",
+      "checks": {
+        "cycle_1_launched_configured_processes": true,
+        "cycle_1_every_expected_queue_id_verified": true,
+        "cycle_1_zero_contexts_after": true,
+        "cycle_1_processes_closed": true,
+        "cycle_2_launched_configured_processes": true,
+        "cycle_2_every_expected_queue_id_verified": true,
+        "cycle_2_zero_contexts_after": true,
+        "cycle_2_processes_closed": true,
+        "cycle_3_launched_configured_processes": true,
+        "cycle_3_every_expected_queue_id_verified": true,
+        "cycle_3_zero_contexts_after": true,
+        "cycle_3_processes_closed": true,
+        "queue_ids_unchanged": true,
+        "no_new_identities": true
+      },
+      "measurements": {
+        "cycles": [
+          {
+            "cycle": 1,
+            "launch_seconds": 1.028,
+            "new_main_processes": 2,
+            "restore_all_seconds": 7.676,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.379,
+                "p50": 0.3645,
+                "p95": 0.3986,
+                "max": 0.7621
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          },
+          {
+            "cycle": 2,
+            "launch_seconds": 1.046,
+            "new_main_processes": 2,
+            "restore_all_seconds": 7.778,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.3841,
+                "p50": 0.3678,
+                "p95": 0.4149,
+                "max": 0.7212
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          },
+          {
+            "cycle": 3,
+            "launch_seconds": 1.042,
+            "new_main_processes": 2,
+            "restore_all_seconds": 7.758,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.3836,
+                "p50": 0.3667,
+                "p95": 0.4201,
+                "max": 0.7434
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          }
+        ]
+      },
+      "notes": []
+    },
+    {
+      "key": "application_restart_camoufox",
+      "title": "Application restart with stranded leases and foreign-backend rows",
+      "evidence": "repository/state/browser fully stopped; new objects on the same files",
+      "outcome": "PASS",
+      "checks": {
+        "stranded_leases_detected_as_expired": true,
+        "stranded_leases_recovered_by_scheduler": true,
+        "sweep_completed": true,
+        "every_same_backend_session_verified": true,
+        "persisted_queue_ids_unchanged": true,
+        "no_accidental_replacement_identities": true,
+        "foreign_backend_row_rejected_before_browser": true,
+        "foreign_backend_row_keeps_queue_id_and_provenance": true,
+        "foreign_backend_state_never_loaded_or_rewritten": true,
+        "zero_leases_and_contexts_after": true,
+        "reverse_backend_restore_rejected_without_browser_launch": true,
+        "reverse_backend_state_not_touched_and_queue_id_kept": true
+      },
+      "measurements": {
+        "startup_to_browser_ready_seconds": 1.081,
+        "expired_leases_at_restart": 5,
+        "valid_queue_ids_at_restart": 41,
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 8.862,
+          "checks": 41,
+          "peak_active_contexts": 2,
+          "queue_depth": {
+            "average": 6.53,
+            "peak": 8.0
+          },
+          "due_backlog": {
+            "average": 11.64,
+            "peak": 29.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 3.14,
+            "peak": 7.46
+          },
+          "contexts_after": 0,
+          "leases_after": 0
+        },
+        "restoration": {
+          "restores": 43,
+          "successes": 40,
+          "identity_mismatches": 0,
+          "failures": {
+            "BACKEND_MISMATCH": 3
+          },
+          "attempt_failures": {
+            "TRANSFER:BACKEND_MISMATCH": 3
+          },
+          "methods": {
+            "TRANSFER": 40
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 43,
+            "mean": 0.786,
+            "p50": 0.8018,
+            "p95": 1.1547,
+            "max": 1.3073
+          }
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "browser_process_failure_camoufox",
+      "title": "SIGKILL one managed browser process with 0 / 1 / many active contexts",
+      "evidence": "real SIGKILL of the top-level browser process",
+      "outcome": "PASS",
+      "checks": {
+        "zero_active_disconnect_detected": true,
+        "zero_active_lost_contexts_accounted": true,
+        "zero_active_capacity_released": true,
+        "zero_active_failed_slot_replaced": true,
+        "zero_active_process_count_not_multiplied": true,
+        "zero_active_queue_id_restores_after_recovery": true,
+        "one_active_disconnect_detected": true,
+        "one_active_lost_contexts_accounted": true,
+        "one_active_capacity_released": true,
+        "one_active_failed_slot_replaced": true,
+        "one_active_process_count_not_multiplied": true,
+        "one_active_queue_id_restores_after_recovery": true,
+        "multiple_active_unserialized_disconnect_detected": true,
+        "multiple_active_unserialized_lost_contexts_accounted": true,
+        "multiple_active_unserialized_capacity_released": true,
+        "multiple_active_unserialized_failed_slot_replaced": true,
+        "multiple_active_unserialized_process_count_not_multiplied": true,
+        "multiple_active_unserialized_queue_id_restores_after_recovery": true,
+        "persisted_queue_ids_unchanged": true
+      },
+      "measurements": {
+        "cases": [
+          {
+            "case": "zero_active",
+            "serialized_contexts": true,
+            "active_contexts_at_kill": 0,
+            "disconnect_detected_seconds": 0.052,
+            "kill_to_replaced_seconds": 0.5,
+            "restart_seconds": [
+              0.447
+            ],
+            "lost_contexts_counted": 0,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          },
+          {
+            "case": "one_active",
+            "serialized_contexts": true,
+            "active_contexts_at_kill": 1,
+            "disconnect_detected_seconds": 0.052,
+            "kill_to_replaced_seconds": 0.494,
+            "restart_seconds": [
+              0.441
+            ],
+            "lost_contexts_counted": 1,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          },
+          {
+            "case": "multiple_active_unserialized",
+            "serialized_contexts": false,
+            "active_contexts_at_kill": 3,
+            "disconnect_detected_seconds": 0.052,
+            "kill_to_replaced_seconds": 0.495,
+            "restart_seconds": [
+              0.443
+            ],
+            "lost_contexts_counted": 3,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          }
+        ]
+      },
+      "notes": []
+    },
+    {
+      "key": "multi_slot_failure_camoufox",
+      "title": "Two managed processes: kill one, the healthy one keeps serving",
+      "evidence": "real SIGKILL of one of two top-level browser processes",
+      "outcome": "PASS",
+      "checks": {
+        "exactly_one_slot_failed": true,
+        "healthy_slot_remains_usable_during_failure": true,
+        "only_failed_slot_replaced": true,
+        "healthy_process_survives_and_count_stays_bounded": true,
+        "lost_contexts_only_from_failed_slot": true,
+        "queue_id_restores_after_recovery": true
+      },
+      "measurements": {
+        "restart_seconds": [
+          0.464
+        ],
+        "managed_main_processes_after": 2
+      },
+      "notes": []
+    },
+    {
+      "key": "repeated_failure_camoufox",
+      "title": "Kill and recover one managed browser slot 10 times",
+      "evidence": "repeated real SIGKILL of the top-level browser process",
+      "outcome": "PASS",
+      "checks": {
+        "every_kill_recovered": true,
+        "zero_restart_failures": true,
+        "no_process_leaks": true,
+        "no_context_leaks": true,
+        "sampled_restores_verified_expected_queue_id": true,
+        "queue_id_changes_zero": true,
+        "zero_processes_after_shutdown": true
+      },
+      "measurements": {
+        "cycles": 10,
+        "restart_seconds": {
+          "count": 10,
+          "mean": 0.4467,
+          "p50": 0.444,
+          "p95": 0.46,
+          "max": 0.4659
+        },
+        "restart_failures": 0,
+        "lost_contexts": 10,
+        "managed_main_processes_per_cycle": {
+          "1": 10
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "failure_during_monitoring_camoufox",
+      "title": "SIGKILL a managed browser while restores/checks are in flight",
+      "evidence": "slowed local pages keep contexts live; real SIGKILL mid-check",
+      "outcome": "PASS",
+      "checks": {
+        "browser_killed_during_checks": true,
+        "sweep_completed": true,
+        "every_restore_attempt_ended_within_deadline": true,
+        "killed_slot_replaced": true,
+        "leases_released_after_failure": true,
+        "transient_failures_left_retryable_not_failed": true,
+        "retry_after_failure_verifies_identity": true,
+        "expected_queue_ids_unchanged": true,
+        "no_replacement_identity_created": true,
+        "zero_contexts_after": true
+      },
+      "measurements": {
+        "kills_at_seconds": [
+          1.53,
+          3.062
+        ],
+        "restore_attempt_deadline_seconds": 23.0,
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 34.267,
+          "checks": 40,
+          "peak_active_contexts": 2,
+          "queue_depth": {
+            "average": 6.68,
+            "peak": 8.0
+          },
+          "due_backlog": {
+            "average": 12.96,
+            "peak": 28.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 10.65,
+            "peak": 26.95
+          },
+          "contexts_after": 0,
+          "leases_after": 0
+        },
+        "restoration": {
+          "restores": 40,
+          "successes": 40,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {
+            "TRANSFER:TRANSFER_UNAVAILABLE": 1
+          },
+          "methods": {
+            "TRANSFER": 39,
+            "STORAGE_STATE": 1
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 40,
+            "mean": 3.2804,
+            "p50": 2.7424,
+            "p95": 6.8612,
+            "max": 9.5552
+          }
+        },
+        "sessions_retried_after_kill": 0,
+        "retry_sweep": {},
+        "browser_restarts": 2,
+        "lost_contexts": 0
+      },
+      "notes": []
+    },
+    {
+      "key": "restoration_failures_camoufox",
+      "title": "Transfer, state, provenance, navigation, and identity failures",
+      "evidence": "dedicated synthetic sessions; faults injected by the local simulator",
+      "outcome": "PASS",
+      "checks": {
+        "transfer_failure_hybrid_storage_fallback_expected_queue_id_preserved": true,
+        "transfer_failure_falls_back_to_same_backend_storage_state": true,
+        "missing_storage_state_expected_queue_id_preserved": true,
+        "missing_state_fails_without_new_identity": true,
+        "corrupt_storage_state_expected_queue_id_preserved": true,
+        "corrupt_state_fails_as_corrupt": true,
+        "backend_provenance_mismatch_expected_queue_id_preserved": true,
+        "provenance_mismatch_rejected_before_any_context": true,
+        "navigation_failure_expected_queue_id_preserved": true,
+        "navigation_failure_is_transient_failure": true,
+        "identity_mismatch_expected_queue_id_preserved": true,
+        "identity_mismatch_detected": true,
+        "no_new_identities_created": true,
+        "zero_contexts_after": true
+      },
+      "measurements": {
+        "cases": {
+          "transfer_failure_hybrid_storage_fallback": {
+            "success": true,
+            "method": "STORAGE_STATE",
+            "failure": null,
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": null
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "missing_storage_state": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_MISSING",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_MISSING"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "corrupt_storage_state": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_CORRUPT",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_CORRUPT"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "backend_provenance_mismatch": {
+            "success": false,
+            "method": "TRANSFER",
+            "failure": "BACKEND_MISMATCH",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "BACKEND_MISMATCH"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "navigation_failure": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_CONTEXT_FAILED",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "NAVIGATION_FAILED"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_CONTEXT_FAILED"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "identity_mismatch": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "IDENTITY_MISMATCH",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "IDENTITY_MISMATCH"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "IDENTITY_MISMATCH"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          }
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "manual_failure_camoufox",
+      "title": "Headed Open: Close, window close, process kill, app shutdown, reopen",
+      "evidence": "real operator runtime; visible headed manual browser pool",
+      "outcome": "PASS",
+      "checks": {
+        "acquisition_reached_target": true,
+        "open_restores_persisted_identity": true,
+        "explicit_close_releases_ownership": true,
+        "window_close_releases_ownership": true,
+        "process_kill_releases_ownership": true,
+        "process_kill_keeps_queue_id_and_retryable_status": true,
+        "next_open_after_kill_reconstructs_journey": true,
+        "shutdown_with_open_window_releases_everything": true,
+        "open_after_restart_reconstructs_same_queue_id": true,
+        "two_concurrent_manual_opens_both_verified": true,
+        "two_concurrent_manual_closes_release_ownership": true,
+        "manual_pool_churn_opens_verified_and_closes_bounded": true,
+        "manual_paths_created_no_identities": true,
+        "queue_ids_unchanged": true
+      },
+      "measurements": {
+        "headed_pool_processes_at_kill": 2,
+        "manual_pool_churn": {
+          "cycles": 10,
+          "open_failures": 0,
+          "stalled_closes": 0,
+          "concurrent_open_seconds": {
+            "count": 10,
+            "mean": 0.5088,
+            "p50": 0.5033,
+            "p95": 0.5485,
+            "max": 0.5633
+          },
+          "concurrent_close_seconds": {
+            "count": 10,
+            "mean": 0.0591,
+            "p50": 0.0568,
+            "p95": 0.0728,
+            "max": 0.08
+          }
+        },
+        "shutdown_with_open_window_seconds": 0.691
+      },
+      "notes": []
+    },
+    {
+      "key": "pause_under_failure_camoufox",
+      "title": "Paused monitoring with a killed automatic browser",
+      "evidence": "real operator runtime; SIGKILL of the automatic browser process",
+      "outcome": "PASS",
+      "checks": {
+        "automatic_browser_killed_while_paused": true,
+        "no_new_automatic_claims_while_paused": true,
+        "no_rows_checked_while_paused": true,
+        "refresh_now_works_while_paused_after_browser_kill": true,
+        "manual_open_works_while_paused": true,
+        "resume_continues_due_work": true,
+        "queue_ids_unchanged": true
+      },
+      "measurements": {
+        "resume_to_all_checked_seconds": 2.262
+      },
+      "notes": []
+    },
+    {
+      "key": "shutdown_under_load_camoufox",
+      "title": "Shutdown with automatic, queued/active operator, and headed work",
+      "evidence": "real operator runtime; slowed local pages keep work in flight",
+      "outcome": "PASS",
+      "checks": {
+        "headed_session_open_before_shutdown": true,
+        "automatic_and_operator_work_in_flight_before_shutdown": true,
+        "operator_work_both_running_and_queued": true,
+        "shutdown_bounded": true,
+        "zero_automatic_leases_and_manual_owners": true,
+        "zero_unintended_browser_processes": true,
+        "persisted_queue_identities_intact": true,
+        "shutdown_created_no_identities": true
+      },
+      "measurements": {
+        "in_flight_at_shutdown": {
+          "automatic_checks": 2,
+          "operator_actions_running": 1,
+          "operator_actions_queued": 2,
+          "manual_open": 1
+        },
+        "shutdown_seconds": 13.789
+      },
+      "notes": []
+    },
+    {
+      "key": "park_reopen_chrome",
+      "title": "chrome park/reopen sweeps over 40 persisted sessions",
+      "evidence": "real browser + LocalQueueSimulator + SQLite + state files",
+      "outcome": "PASS",
+      "checks": {
+        "population_created": true,
+        "unique_queue_ids": true,
+        "hybrid_state_saved_for_every_session": true,
+        "contexts_closed_after_creation": true,
+        "sweep_1_completed": true,
+        "sweep_1_every_session_verified": true,
+        "sweep_1_queue_ids_unchanged": true,
+        "sweep_1_zero_contexts_and_leases_after": true,
+        "sweep_1_no_state_refresh_failures": true,
+        "sweep_2_completed": true,
+        "sweep_2_every_session_verified": true,
+        "sweep_2_queue_ids_unchanged": true,
+        "sweep_2_zero_contexts_and_leases_after": true,
+        "sweep_2_no_state_refresh_failures": true,
+        "sweep_3_completed": true,
+        "sweep_3_every_session_verified": true,
+        "sweep_3_queue_ids_unchanged": true,
+        "sweep_3_zero_contexts_and_leases_after": true,
+        "sweep_3_no_state_refresh_failures": true,
+        "sweep_4_completed": true,
+        "sweep_4_every_session_verified": true,
+        "sweep_4_queue_ids_unchanged": true,
+        "sweep_4_zero_contexts_and_leases_after": true,
+        "sweep_4_no_state_refresh_failures": true,
+        "sweep_5_completed": true,
+        "sweep_5_every_session_verified": true,
+        "sweep_5_queue_ids_unchanged": true,
+        "sweep_5_zero_contexts_and_leases_after": true,
+        "sweep_5_no_state_refresh_failures": true,
+        "no_new_identities_during_sweeps": true
+      },
+      "measurements": {
+        "creation": {
+          "requested": 40,
+          "outcomes": {
+            "SUCCESS": 40
+          },
+          "created": 40,
+          "duration_seconds": 2.94,
+          "creation_latency_seconds": {
+            "count": 40,
+            "mean": 0.2845,
+            "p50": 0.2808,
+            "p95": 0.333,
+            "max": 0.3342
+          }
+        },
+        "sweeps": [
+          {
+            "sweep": 1,
+            "completed": true,
+            "duration_seconds": 3.054,
+            "checks": 40,
+            "peak_active_contexts": 4,
+            "queue_depth": {
+              "average": 6.37,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.43,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 1.46,
+              "peak": 3.07
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.2906,
+                "p50": 0.2921,
+                "p95": 0.3082,
+                "max": 0.3153
+              }
+            }
+          },
+          {
+            "sweep": 2,
+            "completed": true,
+            "duration_seconds": 2.856,
+            "checks": 40,
+            "peak_active_contexts": 4,
+            "queue_depth": {
+              "average": 6.43,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 11.07,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 1.45,
+              "peak": 2.97
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.2768,
+                "p50": 0.2739,
+                "p95": 0.3014,
+                "max": 0.3072
+              }
+            }
+          },
+          {
+            "sweep": 3,
+            "completed": true,
+            "duration_seconds": 2.855,
+            "checks": 40,
+            "peak_active_contexts": 4,
+            "queue_depth": {
+              "average": 6.25,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.68,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 1.45,
+              "peak": 2.97
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.2733,
+                "p50": 0.273,
+                "p95": 0.2893,
+                "max": 0.2933
+              }
+            }
+          },
+          {
+            "sweep": 4,
+            "completed": true,
+            "duration_seconds": 2.852,
+            "checks": 40,
+            "peak_active_contexts": 4,
+            "queue_depth": {
+              "average": 6.11,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 11.29,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 1.45,
+              "peak": 2.97
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.2761,
+                "p50": 0.2739,
+                "p95": 0.3008,
+                "max": 0.3032
+              }
+            }
+          },
+          {
+            "sweep": 5,
+            "completed": true,
+            "duration_seconds": 2.749,
+            "checks": 40,
+            "peak_active_contexts": 4,
+            "queue_depth": {
+              "average": 6.3,
+              "peak": 8.0
+            },
+            "due_backlog": {
+              "average": 10.74,
+              "peak": 28.0
+            },
+            "oldest_overdue_seconds": {
+              "average": 1.4,
+              "peak": 2.87
+            },
+            "contexts_after": 0,
+            "leases_after": 0,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.2661,
+                "p50": 0.2666,
+                "p95": 0.2788,
+                "max": 0.2852
+              }
+            }
+          }
+        ],
+        "browser_restarts": 0
+      },
+      "notes": []
+    },
+    {
+      "key": "full_browser_restart_chrome",
+      "title": "Close every browser process, relaunch, restore parked sessions",
+      "evidence": "real browser processes fully stopped and relaunched",
+      "outcome": "PASS",
+      "checks": {
+        "cycle_1_launched_configured_processes": true,
+        "cycle_1_every_expected_queue_id_verified": true,
+        "cycle_1_zero_contexts_after": true,
+        "cycle_1_processes_closed": true,
+        "cycle_2_launched_configured_processes": true,
+        "cycle_2_every_expected_queue_id_verified": true,
+        "cycle_2_zero_contexts_after": true,
+        "cycle_2_processes_closed": true,
+        "cycle_3_launched_configured_processes": true,
+        "cycle_3_every_expected_queue_id_verified": true,
+        "cycle_3_zero_contexts_after": true,
+        "cycle_3_processes_closed": true,
+        "queue_ids_unchanged": true,
+        "no_new_identities": true
+      },
+      "measurements": {
+        "cycles": [
+          {
+            "cycle": 1,
+            "launch_seconds": 0.409,
+            "new_main_processes": 2,
+            "restore_all_seconds": 3.076,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.1527,
+                "p50": 0.1478,
+                "p95": 0.1836,
+                "max": 0.2218
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          },
+          {
+            "cycle": 2,
+            "launch_seconds": 0.419,
+            "new_main_processes": 2,
+            "restore_all_seconds": 3.02,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.1496,
+                "p50": 0.1455,
+                "p95": 0.1565,
+                "max": 0.2194
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          },
+          {
+            "cycle": 3,
+            "launch_seconds": 0.419,
+            "new_main_processes": 2,
+            "restore_all_seconds": 3.023,
+            "restoration": {
+              "restores": 40,
+              "successes": 40,
+              "identity_mismatches": 0,
+              "failures": {},
+              "attempt_failures": {},
+              "methods": {
+                "TRANSFER": 40
+              },
+              "hybrid_state_refresh_failures": 0,
+              "latency_seconds": {
+                "count": 40,
+                "mean": 0.1499,
+                "p50": 0.1467,
+                "p95": 0.1604,
+                "max": 0.2183
+              }
+            },
+            "contexts_after": 0,
+            "main_processes_after_shutdown": 0
+          }
+        ]
+      },
+      "notes": []
+    },
+    {
+      "key": "application_restart_chrome",
+      "title": "Application restart with stranded leases and foreign-backend rows",
+      "evidence": "repository/state/browser fully stopped; new objects on the same files",
+      "outcome": "PASS",
+      "checks": {
+        "stranded_leases_detected_as_expired": true,
+        "stranded_leases_recovered_by_scheduler": true,
+        "sweep_completed": true,
+        "every_same_backend_session_verified": true,
+        "persisted_queue_ids_unchanged": true,
+        "no_accidental_replacement_identities": true,
+        "foreign_backend_row_rejected_before_browser": true,
+        "foreign_backend_row_keeps_queue_id_and_provenance": true,
+        "foreign_backend_state_never_loaded_or_rewritten": true,
+        "zero_leases_and_contexts_after": true,
+        "reverse_backend_restore_rejected_without_browser_launch": true,
+        "reverse_backend_state_not_touched_and_queue_id_kept": true
+      },
+      "measurements": {
+        "startup_to_browser_ready_seconds": 0.434,
+        "expired_leases_at_restart": 5,
+        "valid_queue_ids_at_restart": 41,
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 3.64,
+          "checks": 41,
+          "peak_active_contexts": 4,
+          "queue_depth": {
+            "average": 5.39,
+            "peak": 8.0
+          },
+          "due_backlog": {
+            "average": 9.97,
+            "peak": 29.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 1.49,
+            "peak": 3.39
+          },
+          "contexts_after": 0,
+          "leases_after": 0
+        },
+        "restoration": {
+          "restores": 43,
+          "successes": 40,
+          "identity_mismatches": 0,
+          "failures": {
+            "BACKEND_MISMATCH": 3
+          },
+          "attempt_failures": {
+            "TRANSFER:BACKEND_MISMATCH": 3
+          },
+          "methods": {
+            "TRANSFER": 40
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 43,
+            "mean": 0.2698,
+            "p50": 0.2814,
+            "p95": 0.3419,
+            "max": 0.3585
+          }
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "browser_process_failure_chrome",
+      "title": "SIGKILL one managed browser process with 0 / 1 / many active contexts",
+      "evidence": "real SIGKILL of the top-level browser process",
+      "outcome": "PASS",
+      "checks": {
+        "zero_active_disconnect_detected": true,
+        "zero_active_lost_contexts_accounted": true,
+        "zero_active_capacity_released": true,
+        "zero_active_failed_slot_replaced": true,
+        "zero_active_process_count_not_multiplied": true,
+        "zero_active_queue_id_restores_after_recovery": true,
+        "one_active_disconnect_detected": true,
+        "one_active_lost_contexts_accounted": true,
+        "one_active_capacity_released": true,
+        "one_active_failed_slot_replaced": true,
+        "one_active_process_count_not_multiplied": true,
+        "one_active_queue_id_restores_after_recovery": true,
+        "multiple_active_unserialized_disconnect_detected": true,
+        "multiple_active_unserialized_lost_contexts_accounted": true,
+        "multiple_active_unserialized_capacity_released": true,
+        "multiple_active_unserialized_failed_slot_replaced": true,
+        "multiple_active_unserialized_process_count_not_multiplied": true,
+        "multiple_active_unserialized_queue_id_restores_after_recovery": true,
+        "persisted_queue_ids_unchanged": true
+      },
+      "measurements": {
+        "cases": [
+          {
+            "case": "zero_active",
+            "serialized_contexts": true,
+            "active_contexts_at_kill": 0,
+            "disconnect_detected_seconds": 0.051,
+            "kill_to_replaced_seconds": 0.201,
+            "restart_seconds": [
+              0.15
+            ],
+            "lost_contexts_counted": 0,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          },
+          {
+            "case": "one_active",
+            "serialized_contexts": true,
+            "active_contexts_at_kill": 1,
+            "disconnect_detected_seconds": 0.051,
+            "kill_to_replaced_seconds": 0.197,
+            "restart_seconds": [
+              0.146
+            ],
+            "lost_contexts_counted": 1,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          },
+          {
+            "case": "multiple_active_unserialized",
+            "serialized_contexts": false,
+            "active_contexts_at_kill": 3,
+            "disconnect_detected_seconds": 0.051,
+            "kill_to_replaced_seconds": 0.198,
+            "restart_seconds": [
+              0.147
+            ],
+            "lost_contexts_counted": 3,
+            "active_contexts_after": 0,
+            "shared_capacity_active_after": 0,
+            "connected_processes_after": 1,
+            "managed_main_processes_after": 1,
+            "restore_after_recovery_verified": true
+          }
+        ]
+      },
+      "notes": []
+    },
+    {
+      "key": "multi_slot_failure_chrome",
+      "title": "Two managed processes: kill one, the healthy one keeps serving",
+      "evidence": "real SIGKILL of one of two top-level browser processes",
+      "outcome": "PASS",
+      "checks": {
+        "exactly_one_slot_failed": true,
+        "healthy_slot_remains_usable_during_failure": true,
+        "only_failed_slot_replaced": true,
+        "healthy_process_survives_and_count_stays_bounded": true,
+        "lost_contexts_only_from_failed_slot": true,
+        "queue_id_restores_after_recovery": true
+      },
+      "measurements": {
+        "restart_seconds": [
+          0.141
+        ],
+        "managed_main_processes_after": 2
+      },
+      "notes": []
+    },
+    {
+      "key": "repeated_failure_chrome",
+      "title": "Kill and recover one managed browser slot 10 times",
+      "evidence": "repeated real SIGKILL of the top-level browser process",
+      "outcome": "PASS",
+      "checks": {
+        "every_kill_recovered": true,
+        "zero_restart_failures": true,
+        "no_process_leaks": true,
+        "no_context_leaks": true,
+        "sampled_restores_verified_expected_queue_id": true,
+        "queue_id_changes_zero": true,
+        "zero_processes_after_shutdown": true
+      },
+      "measurements": {
+        "cycles": 10,
+        "restart_seconds": {
+          "count": 10,
+          "mean": 0.1494,
+          "p50": 0.1475,
+          "p95": 0.1604,
+          "max": 0.1604
+        },
+        "restart_failures": 0,
+        "lost_contexts": 10,
+        "managed_main_processes_per_cycle": {
+          "1": 10
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "failure_during_monitoring_chrome",
+      "title": "SIGKILL a managed browser while restores/checks are in flight",
+      "evidence": "slowed local pages keep contexts live; real SIGKILL mid-check",
+      "outcome": "PASS",
+      "checks": {
+        "browser_killed_during_checks": true,
+        "sweep_completed": true,
+        "every_restore_attempt_ended_within_deadline": true,
+        "killed_slot_replaced": true,
+        "leases_released_after_failure": true,
+        "transient_failures_left_retryable_not_failed": true,
+        "retry_after_failure_verifies_identity": true,
+        "expected_queue_ids_unchanged": true,
+        "no_replacement_identity_created": true,
+        "zero_contexts_after": true
+      },
+      "measurements": {
+        "kills_at_seconds": [
+          1.514,
+          3.038
+        ],
+        "restore_attempt_deadline_seconds": 23.0,
+        "sweep": {
+          "completed": true,
+          "duration_seconds": 12.457,
+          "checks": 40,
+          "peak_active_contexts": 4,
+          "queue_depth": {
+            "average": 6.62,
+            "peak": 8.0
+          },
+          "due_backlog": {
+            "average": 11.48,
+            "peak": 28.0
+          },
+          "oldest_overdue_seconds": {
+            "average": 4.0,
+            "peak": 10.0
+          },
+          "contexts_after": 0,
+          "leases_after": 0
+        },
+        "restoration": {
+          "restores": 40,
+          "successes": 40,
+          "identity_mismatches": 0,
+          "failures": {},
+          "attempt_failures": {
+            "TRANSFER:NAVIGATION_FAILED": 4
+          },
+          "methods": {
+            "TRANSFER": 36,
+            "STORAGE_STATE": 4
+          },
+          "hybrid_state_refresh_failures": 0,
+          "latency_seconds": {
+            "count": 40,
+            "mean": 1.2124,
+            "p50": 1.1604,
+            "p95": 1.4367,
+            "max": 1.5097
+          }
+        },
+        "sessions_retried_after_kill": 0,
+        "retry_sweep": {},
+        "browser_restarts": 2,
+        "lost_contexts": 0
+      },
+      "notes": []
+    },
+    {
+      "key": "restoration_failures_chrome",
+      "title": "Transfer, state, provenance, navigation, and identity failures",
+      "evidence": "dedicated synthetic sessions; faults injected by the local simulator",
+      "outcome": "PASS",
+      "checks": {
+        "transfer_failure_hybrid_storage_fallback_expected_queue_id_preserved": true,
+        "transfer_failure_falls_back_to_same_backend_storage_state": true,
+        "missing_storage_state_expected_queue_id_preserved": true,
+        "missing_state_fails_without_new_identity": true,
+        "corrupt_storage_state_expected_queue_id_preserved": true,
+        "corrupt_state_fails_as_corrupt": true,
+        "backend_provenance_mismatch_expected_queue_id_preserved": true,
+        "provenance_mismatch_rejected_before_any_context": true,
+        "navigation_failure_expected_queue_id_preserved": true,
+        "navigation_failure_is_transient_failure": true,
+        "identity_mismatch_expected_queue_id_preserved": true,
+        "identity_mismatch_detected": true,
+        "no_new_identities_created": true,
+        "zero_contexts_after": true
+      },
+      "measurements": {
+        "cases": {
+          "transfer_failure_hybrid_storage_fallback": {
+            "success": true,
+            "method": "STORAGE_STATE",
+            "failure": null,
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": null
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "missing_storage_state": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_MISSING",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_MISSING"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "corrupt_storage_state": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_CORRUPT",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "HTTP_FAILURE"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_CORRUPT"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "backend_provenance_mismatch": {
+            "success": false,
+            "method": "TRANSFER",
+            "failure": "BACKEND_MISMATCH",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "BACKEND_MISMATCH"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "navigation_failure": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "STATE_CONTEXT_FAILED",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "NAVIGATION_FAILED"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "STATE_CONTEXT_FAILED"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          },
+          "identity_mismatch": {
+            "success": false,
+            "method": "STORAGE_STATE",
+            "failure": "IDENTITY_MISMATCH",
+            "attempts": [
+              {
+                "method": "TRANSFER",
+                "failure": "IDENTITY_MISMATCH"
+              },
+              {
+                "method": "STORAGE_STATE",
+                "failure": "IDENTITY_MISMATCH"
+              }
+            ],
+            "expected_queue_id_preserved": true
+          }
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "manual_failure_chrome",
+      "title": "Headed Open: Close, window close, process kill, app shutdown, reopen",
+      "evidence": "real operator runtime; visible headed manual browser pool",
+      "outcome": "PASS",
+      "checks": {
+        "acquisition_reached_target": true,
+        "open_restores_persisted_identity": true,
+        "explicit_close_releases_ownership": true,
+        "window_close_releases_ownership": true,
+        "process_kill_releases_ownership": true,
+        "process_kill_keeps_queue_id_and_retryable_status": true,
+        "next_open_after_kill_reconstructs_journey": true,
+        "shutdown_with_open_window_releases_everything": true,
+        "open_after_restart_reconstructs_same_queue_id": true,
+        "two_concurrent_manual_opens_both_verified": true,
+        "two_concurrent_manual_closes_release_ownership": true,
+        "manual_pool_churn_opens_verified_and_closes_bounded": true,
+        "manual_paths_created_no_identities": true,
+        "queue_ids_unchanged": true
+      },
+      "measurements": {
+        "headed_pool_processes_at_kill": 1,
+        "manual_pool_churn": {
+          "cycles": 10,
+          "open_failures": 0,
+          "stalled_closes": 0,
+          "concurrent_open_seconds": {
+            "count": 10,
+            "mean": 0.2384,
+            "p50": 0.2358,
+            "p95": 0.2579,
+            "max": 0.2609
+          },
+          "concurrent_close_seconds": {
+            "count": 10,
+            "mean": 0.0362,
+            "p50": 0.0314,
+            "p95": 0.0549,
+            "max": 0.0594
+          }
+        },
+        "shutdown_with_open_window_seconds": 0.125
+      },
+      "notes": []
+    },
+    {
+      "key": "pause_under_failure_chrome",
+      "title": "Paused monitoring with a killed automatic browser",
+      "evidence": "real operator runtime; SIGKILL of the automatic browser process",
+      "outcome": "PASS",
+      "checks": {
+        "automatic_browser_killed_while_paused": true,
+        "no_new_automatic_claims_while_paused": true,
+        "no_rows_checked_while_paused": true,
+        "refresh_now_works_while_paused_after_browser_kill": true,
+        "manual_open_works_while_paused": true,
+        "resume_continues_due_work": true,
+        "queue_ids_unchanged": true
+      },
+      "measurements": {
+        "resume_to_all_checked_seconds": 2.013
+      },
+      "notes": []
+    },
+    {
+      "key": "shutdown_under_load_chrome",
+      "title": "Shutdown with automatic, queued/active operator, and headed work",
+      "evidence": "real operator runtime; slowed local pages keep work in flight",
+      "outcome": "PASS",
+      "checks": {
+        "headed_session_open_before_shutdown": true,
+        "automatic_and_operator_work_in_flight_before_shutdown": true,
+        "operator_work_both_running_and_queued": true,
+        "shutdown_bounded": true,
+        "zero_automatic_leases_and_manual_owners": true,
+        "zero_unintended_browser_processes": true,
+        "persisted_queue_identities_intact": true,
+        "shutdown_created_no_identities": true
+      },
+      "measurements": {
+        "in_flight_at_shutdown": {
+          "automatic_checks": 1,
+          "operator_actions_running": 1,
+          "operator_actions_queued": 2,
+          "manual_open": 1
+        },
+        "shutdown_seconds": 3.351
+      },
+      "notes": []
+    }
+  ],
+  "summary": {
+    "scenarios_passed": 22,
+    "scenarios_failed": 0,
+    "checks_passed": 282,
+    "checks_failed": 0
+  },
+  "duration_seconds": 468.4,
+  "leftover_browser_main_processes": {
+    "camoufox": 0,
+    "chrome": 0
+  }
+}

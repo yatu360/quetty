@@ -3837,3 +3837,85 @@ after Codex ran out of usage.
 
 Camoufox remains opt-in and non-default. Exact next task: **Phase 6 Prompt 5 — Camoufox
 Queue-Session Recovery and Capacity Benchmark.**
+
+## 2026-09-27 — Phase 6 Prompt 5 — Camoufox Queue-session recovery and capacity benchmark
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Measure Camoufox under Quetty's bounded architecture, and prove that persisted Queue
+sessions survive disposable-context reconstruction and browser failures without
+Queue ID replacement. Local simulator only; fingerprint continuity is not an
+acceptance criterion.
+
+### Changes made
+
+- Added `queue-load-test-phase6-camoufox-benchmark`
+  (`harness/phase6_camoufox_benchmark.py`). It covers:
+  - capacity families: serialized per-process, unserialized/shared, and the Chrome
+    comparison, with an objective stop rule;
+  - park/reopen sweeps through the real scheduler and monitor;
+  - full browser restart, and application restart with stranded leases and a
+    foreign-backend row;
+  - `SIGKILL` with 0/1/3 contexts, multi-slot and repeated kills, and kills during
+    monitoring;
+  - restoration fault cases;
+  - the real operator runtime for headed manual failure, pause under failure, and
+    shutdown under mixed load.
+
+  Reports are aggregate only. A SIGUSR1 handler prints task stacks for a stalled run.
+- `PsutilProcessResourceProbe` is now backend-aware:
+  - the Camoufox tree is the `camoufox` root plus its `plugin-container` children;
+  - top-level process counts are reported;
+  - browser-neutral `browser_*` properties were added;
+  - historical `chrome_*` fields are kept and documented.
+- **Defect fixed:** `QueueSessionRestorer.inspect_open` and `adopt_open` are now bounded
+  by the restore attempt deadline. A controlled run had hung application shutdown
+  forever inside the final live-page inspection. On timeout the result is a transient
+  failure, and the expected Queue ID is preserved.
+- **Defect fixed (Prompt 4 regression):** the unserialized manual Camoufox pool failed
+  concurrent-Open churn in 3/5 runs.
+  - `manual_pool_topology` now gives each manual Camoufox window its own bounded
+    process: `MAX_MANUAL_OPEN_SESSIONS` × 1. Chrome keeps 1 × N.
+  - The unused `create_browser_backend(..., long_lived_contexts=)` flag was removed.
+  - After the fix, 5/5 loop runs (50 churn cycles) and the final run had 0 failures.
+- Added `docs/phase6_camoufox_benchmark.md` and
+  `docs/results/phase6_camoufox_benchmark_result.json`. Added unit tests for probe
+  topology, capacity families, stop and churn rules, bounded inspection and adoption,
+  and manual topology. Added a Camoufox recovery integration test.
+- Updated README, PROJECT_CONTEXT, PHASE_PLAN, and the Phase 6 runtime and strategy
+  docs. This corrects the Prompt 4 statement that the manual pool is unserialized, and
+  inserts Prompt 6 "Camoufox Default Migration and Operational Polish" before staging
+  acceptance.
+
+### Results (local simulator, macOS arm64, 15 CPUs, 24 GiB)
+
+- **Overall:** 22/22 scenarios, 282/282 checks, 0 Queue ID changes, 0 replacement
+  identities, 0 leftover browser processes.
+- **Park/reopen:** Camoufox 200/200 verified restores (p50 about 0.8 s), and Chrome
+  200/200 (about 0.28 s).
+- **Browser failure:** Camoufox restarts took 0.44 s median over 10 kills with 0
+  failures, and only the failed slot was replaced.
+- **Serialized Camoufox, 1–4 processes:** 0 failures.
+- **Unserialized Camoufox:**
+  - churn at 5 contexts: 0/30 restores, with the process wedged but still connected;
+  - a 30-context hold: 75/90 navigation timeouts.
+
+  The family stopped on this evidence; 40/50 were not run.
+- **Chrome, 5–50 contexts:** 0 failures.
+
+### Validation
+
+- Phase 5 controlled workflow after the manual-pool change: Chrome 61/61, Camoufox
+  61/61.
+- Full non-staging suite: **495 passed, 4 staging tests deselected**.
+- `ruff check src tests` and `mypy src` pass.
+- Staging: **NOT RUN**. No Queue-it traffic was sent.
+
+### Next task
+
+Camoufox remains opt-in. Exact next task: **Phase 6 Prompt 6 — Camoufox Default
+Migration and Operational Polish.**

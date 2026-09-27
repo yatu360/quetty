@@ -9,10 +9,43 @@ Camoufox backend for live monitoring.
 
 ## Current Status
 
-- Phase 6 Prompt 4 runtime integration is complete. Camoufox is supported as an
-  **opt-in backend for new runs** and remains non-default pending Prompt 5 recovery and
-  capacity evidence. See `docs/phase6_camoufox_context_strategy.md` and
-  `docs/phase6_runtime_integration.md`.
+- Phase 6 Prompt 5 (Camoufox Queue-session recovery and capacity benchmark) is
+  complete. Camoufox is an **opt-in backend for new runs**, still non-default, and the
+  default decision belongs to Prompt 6. See `docs/phase6_camoufox_benchmark.md` and
+  `docs/results/phase6_camoufox_benchmark_result.json`. All results are local
+  simulator only.
+  - **Result:** 22/22 scenarios and 282/282 checks passed across Camoufox and a
+    same-host Chrome comparison, with 0 Queue ID changes or replacements.
+  - **Queue ID continuity:** held across 200 park/reopen restores, 3 full
+    browser-process restarts, an application restart with stranded leases, 10+ real
+    `SIGKILL`s including kills mid-sweep, and every restoration fault case.
+  - **Headed manual:** Close, window loss, process kill, shutdown, and reopen all pass.
+    So do pause under failure and shutdown with automatic, running and queued
+    operator, and headed work in flight.
+  - **Serialization is required.** Serialized Camoufox (one live context per process,
+    1–4 processes) had 0 failures. Without serialization:
+    - create/navigate/close churn wedged a Camoufox process at 5 contexts (0/30
+      restores), while it still reported connected;
+    - a 30-context hold across 2 processes lost 75/90 navigations.
+
+    That family stopped on this evidence; 40/50 were not run. Chrome passed every level
+    to 50 contexts.
+  - **Capacity consequence:** automatic Camoufox concurrency equals
+    `CHROME_PROCESS_COUNT` (≤ 4). Locally, Camoufox restores took about 2.5–3× Chrome's
+    latency, with higher per-context process-tree CPU and RSS.
+  - **Prompt 5 fixes:**
+    - process accounting is now browser-neutral;
+    - manual `inspect_open`/`adopt_open` are deadline-bounded (an observed hang had
+      blocked shutdown indefinitely);
+    - the manual Camoufox pool uses one bounded process per window
+      (`manual_pool_topology`). The unserialized manual pool from Prompt 4 failed
+      concurrent-Open churn in 3/5 runs.
+  - **Open for Prompt 6:**
+    - there is no health watchdog for a wedged-but-connected Camoufox process;
+    - Camoufox shutdown under load took 13.8 s against a 10 s per-stage timeout;
+    - staging behavior is UNKNOWN.
+- Phase 6 Prompt 4 runtime integration is complete. See
+  `docs/phase6_camoufox_context_strategy.md` and `docs/phase6_runtime_integration.md`.
   - The current released package is Camoufox 0.5.6 (`Python >=3.10,<4.0`) and it
     requires `playwright<1.63`. The project deliberately changed its prior Playwright
     1.63.0 environment/declaration to exact Playwright 1.62.0 and added exact Camoufox
@@ -60,8 +93,8 @@ Camoufox backend for live monitoring.
     full Camoufox process and repository restart. An intentional mismatch preserved the
     expected Queue ID.
   - Camoufox 0.5.6 repeated concurrent navigation waves on one process were unreliable
-    locally. `CamoufoxBackend` therefore serializes live contexts per managed process
-    for automatic/creation pools (the retained manual Open pool is not serialized);
+    locally. `CamoufoxBackend` therefore serializes live contexts per managed process,
+    and the manual Camoufox pool uses one process per window (Prompt 5);
     fixed workers, the shared global coordinator, bounded processes, and all operation
     deadlines remain in force.
   - The complete controlled local application workflow passes on both Chrome and
@@ -200,9 +233,13 @@ Camoufox backend for live monitoring.
 - Browser ownership is represented by `BrowserRuntimeState` (`PARKED`, `CHECKING`, and
   `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Manual opens use persisted
   renewable ownership leases that atomically exclude automatic scheduler claims.
-- Manual sessions share one lazily started headed installed-Google-Chrome pool, are
-  capped by `MAX_MANUAL_OPEN_SESSIONS` (default 5), and share the existing global
-  context budget with headless automatic work. They never launch one process per row.
+- Manual sessions use one lazily started headed pool, capped by
+  `MAX_MANUAL_OPEN_SESSIONS` (default 5), and share the existing global context budget
+  with headless automatic work.
+  - Chrome shares one headed process between windows.
+  - Camoufox uses a fixed pool of up to `MAX_MANUAL_OPEN_SESSIONS` processes with one
+    window each (Phase 6 Prompt 5).
+  - Neither launches one process per persisted row.
 - Page/context/window closure, Chrome loss, explicit Close, and application shutdown
   release ownership. A still-live page is inspected through the existing extractor and
   lifecycle evaluator, with progress/scheduling and HYBRID state refreshed where
@@ -218,8 +255,8 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 Prompt 5 — Camoufox Queue-Session Recovery and Capacity
-  Benchmark.**
+- Exact next task: **Phase 6 Prompt 6 — Camoufox Default Migration and Operational
+  Polish.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1094,7 +1131,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 Prompt 5 — Camoufox Queue-Session Recovery and Capacity Benchmark.
+Phase 6 Prompt 6 — Camoufox Default Migration and Operational Polish.
 
 ## Instructions for Future AI Sessions
 

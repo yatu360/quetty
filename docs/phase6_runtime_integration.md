@@ -122,10 +122,13 @@ observed-ID mismatch then failed and left the persisted expected Queue ID unchan
    *all* processes on a manager, a hung context close stranded the lease, and a second
    retained manual window would have blocked every allocation on the manual pool until
    the operation deadline and then failed. The lease is now keyed per managed process,
-   released as soon as a close starts, dropped with its process, and the long-lived
-   manual Open pool (`create_browser_backend(..., long_lived_contexts=True)`) does not
-   serialize. Unit tests cover per-process independence, release under a hung close,
-   and concurrent operator contexts.
+   released as soon as a close starts, and dropped with its process. Unit tests cover
+   per-process independence and release under a hung close. *Corrected in Prompt 5:*
+   this fix originally left the manual Open pool unserialized. Prompt 5 showed that
+   concurrent manual Opens on one unserialized Camoufox process are unreliable. The
+   manual Camoufox pool now gives each window its own bounded process slot
+   (`manual_pool_topology`), and the unused `long_lived_contexts` flag was removed. See
+   `docs/phase6_camoufox_benchmark.md`.
 6. Acceptance checks assumed Chrome's concurrent monitor timing. They now wait for all
    expected persisted observations and correctly allow already-in-flight work to drain
    after pause.
@@ -156,10 +159,10 @@ run observed one automatic parent process; a second bounded process existed only
 the separate manual pool was live. Shutdown and reset returned parent-process count,
 active contexts, and persisted ownership to zero.
 
-Camoufox's per-process context serialization for the automatic and creation pools is a
-conservative 0.5.6 reliability constraint; the manual Open pool is bounded by
-`MAX_MANUAL_OPEN_SESSIONS` instead, because its contexts are retained for the operator. Its sustainable throughput and recovery behavior are deliberately left for
-Prompt 5 rather than guessed here.
+Camoufox's per-process context serialization is a conservative 0.5.6 reliability
+constraint. Prompt 5 measured it and confirmed it is required. The manual Open pool
+uses one process per window, up to `MAX_MANUAL_OPEN_SESSIONS`. Throughput, capacity,
+and recovery results are in `docs/phase6_camoufox_benchmark.md`.
 
 ## Known limitations / UNKNOWN
 
@@ -172,10 +175,10 @@ Prompt 5 rather than guessed here.
 - Camoufox fingerprint continuity remains **FAIL**, intentionally not required.
 - Cross-engine Queue-it storage compatibility remains **UNKNOWN** and is disabled by
   provenance checks.
-- Concurrent navigation reliability of several simultaneously open manual Camoufox
-  windows on one process remains **UNKNOWN**; each is bounded by navigation deadlines.
-- Capacity beyond the conservative serialized per-process profile and deliberate
-  Camoufox crash/restart pressure remain Prompt 5 work.
+- Several manual Camoufox windows sharing one process proved unreliable in Prompt 5.
+  That topology is no longer used.
+- Capacity and crash/restart pressure were measured in Prompt 5
+  (`docs/phase6_camoufox_benchmark.md`).
 
 ## Validation
 

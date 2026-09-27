@@ -18,6 +18,7 @@ from queue_load_test.browser import BrowserCapacity, BrowserManager
 from queue_load_test.config import Settings
 from queue_load_test.harness.restore_benchmark import percentile
 from queue_load_test.metrics import PrometheusMetrics
+from queue_load_test.models import BrowserBackendName
 
 logger = logging.getLogger(__name__)
 _HISTOGRAM_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
@@ -25,7 +26,13 @@ _HISTOGRAM_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 
 @dataclass(frozen=True, slots=True)
 class ProcessResourceSnapshot:
-    """Optional host observations; unavailable values remain explicit."""
+    """Optional host observations; unavailable values remain explicit.
+
+    The ``chrome_*`` field names are historical (Phases 2-5 only ran Chrome) and
+    are kept so existing reports stay comparable. They describe the managed
+    browser process tree of whichever backend the probe was built for; new code
+    should read the browser-neutral ``browser_*`` properties.
+    """
 
     application_cpu_percent: float | None = None
     application_ram_bytes: int | None = None
@@ -33,6 +40,38 @@ class ProcessResourceSnapshot:
     chrome_ram_bytes: int | None = None
     observed_chrome_processes: int | None = None
     open_file_descriptors: int | None = None
+    observed_browser_main_processes: int | None = None
+
+    @property
+    def browser_cpu_percent(self) -> float | None:
+        return self.chrome_cpu_percent
+
+    @property
+    def browser_ram_bytes(self) -> int | None:
+        return self.chrome_ram_bytes
+
+    @property
+    def observed_browser_processes(self) -> int | None:
+        return self.observed_chrome_processes
+
+
+def is_browser_main_process(backend: BrowserBackendName, arguments: Sequence[str]) -> bool:
+    """Return whether a command line is a managed browser's top-level process.
+
+    Chrome's browser process is the ``--remote-debugging-pipe`` process without a
+    ``--type=`` (renderer/GPU/utility) argument. Camoufox's top-level process is
+    the ``camoufox`` executable; its ``plugin-container`` content processes are
+    children of it and are part of the tree, not separate browsers.
+    """
+
+    if not arguments:
+        return False
+    if backend is BrowserBackendName.CHROME:
+        return "--remote-debugging-pipe" in arguments and not any(
+            argument.startswith("--type=") for argument in arguments
+        )
+    executable = Path(arguments[0]).name.casefold()
+    return executable in {"camoufox", "camoufox-bin", "camoufox.exe"}
 
 
 class ProcessResourceProbe(Protocol):
@@ -42,7 +81,13 @@ class ProcessResourceProbe(Protocol):
 class PsutilProcessResourceProbe:
     """Best-effort process-tree probe that remains usable without psutil."""
 
-    def __init__(self, psutil_module: Any | None = None) -> None:
+    def __init__(
+        self,
+        psutil_module: Any | None = None,
+        *,
+        backend: BrowserBackendName = BrowserBackendName.CHROME,
+    ) -> None:
+        self._backend = backend
         try:
             self._psutil = psutil_module or importlib.import_module("psutil")
             self._application = self._psutil.Process(os.getpid())
@@ -77,15 +122,15 @@ class PsutilProcessResourceProbe:
         chrome_cpu = 0.0
         chrome_ram = 0
         chrome_count = 0
+        main_count = 0
         try:
             children = self._application.children(recursive=True)
         except Exception:  # noqa: BLE001 - child enumeration is optional
             children = []
+        tree = self._browser_tree(children)
         live_pids: set[int] = set()
-        for child in children:
+        for child, is_main in tree:
             try:
-                if "chrome" not in child.name().casefold():
-                    continue
                 pid = int(child.pid)
                 live_pids.add(pid)
                 tracked = self._known_chrome.get(pid)
@@ -99,8 +144,9 @@ class PsutilProcessResourceProbe:
                 chrome_cpu += cpu
                 chrome_ram += int(tracked.memory_info().rss)
                 chrome_count += 1
+                main_count += int(is_main)
             except Exception:
-                logger.debug("Chrome process disappeared during resource sample", exc_info=True)
+                logger.debug("Browser process disappeared during resource sample", exc_info=True)
                 continue
         self._known_chrome = {
             pid: process for pid, process in self._known_chrome.items() if pid in live_pids
@@ -112,7 +158,38 @@ class PsutilProcessResourceProbe:
             chrome_ram_bytes=chrome_ram,
             observed_chrome_processes=chrome_count,
             open_file_descriptors=open_descriptors,
+            observed_browser_main_processes=main_count,
         )
+
+    def _browser_tree(self, children: Sequence[Any]) -> list[tuple[Any, bool]]:
+        """Select the backend's browser processes among application descendants."""
+
+        selected: list[tuple[Any, bool]] = []
+        seen: set[int] = set()
+        for child in children:
+            try:
+                is_main = _main(self._backend, child)
+                if self._backend is BrowserBackendName.CHROME:
+                    # Every Chrome tree member carries "chrome" in its name.
+                    members = [child] if "chrome" in child.name().casefold() else []
+                else:
+                    # Camoufox content processes are unnamed helpers of the root.
+                    members = [child, *child.children(recursive=True)] if is_main else []
+                for member in members:
+                    pid = int(member.pid)
+                    if pid not in seen:
+                        seen.add(pid)
+                        selected.append((member, member is child and is_main))
+            except Exception:
+                logger.debug("Browser process disappeared during tree walk", exc_info=True)
+        return selected
+
+
+def _main(backend: BrowserBackendName, process: Any) -> bool:
+    try:
+        return is_browser_main_process(backend, process.cmdline())
+    except Exception:  # noqa: BLE001 - command line may be unavailable
+        return False
 
 
 @dataclass(frozen=True, slots=True)

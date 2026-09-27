@@ -15,6 +15,7 @@ from queue_load_test.browser import (
     BrowserContextCapacity,
     BrowserManager,
     create_browser_backend,
+    manual_pool_topology,
 )
 from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
@@ -185,16 +186,17 @@ class ApplicationRunRuntime:
                 retry_policy=MonitoringRetryPolicy.from_settings(settings),
                 observability=metrics,
             )
+            manual_processes, manual_contexts_per_process = manual_pool_topology(
+                settings.browser_backend, settings.max_manual_open_sessions
+            )
             headed_manager = BrowserManager(
-                chrome_process_count=1,
-                max_contexts_per_browser=settings.max_manual_open_sessions,
+                chrome_process_count=manual_processes,
+                max_contexts_per_browser=manual_contexts_per_process,
                 max_active_contexts=settings.max_manual_open_sessions,
                 headless=self._manual_headless,
                 observability=metrics,
                 shared_capacity=shared_capacity,
-                backend=create_browser_backend(
-                    settings.browser_backend, long_lived_contexts=True
-                ),
+                backend=create_browser_backend(settings.browser_backend),
             )
             headed_restorer = QueueSessionRestorer(
                 browser_manager=headed_manager,

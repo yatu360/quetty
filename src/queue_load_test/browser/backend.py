@@ -103,9 +103,10 @@ class CamoufoxBackend:
     boundary: when ``serialize_contexts`` is set, one context is live per
     managed Camoufox process, while the application's fixed workers and global
     capacity coordinator stay bounded.  The lease is released as soon as a close
-    starts so a hung close or a lost process cannot strand the slot.  Pools whose
-    contexts are long-lived (headed manual Open) disable serialization, because a
-    retained operator window would otherwise block every other allocation.
+    starts so a hung close or a lost process cannot strand the slot.
+    ``serialize_contexts=False`` exists only for controlled capacity measurement;
+    Phase 6 evidence shows overlapping create/navigate/close churn on one
+    unserialized process can wedge it while it still reports connected.
     """
 
     def __init__(self, *, serialize_contexts: bool = True) -> None:
@@ -176,19 +177,28 @@ class CamoufoxBackend:
         )
 
 
-def create_browser_backend(
-    name: BrowserBackendName,
-    *,
-    long_lived_contexts: bool = False,
-) -> BrowserBackend:
-    """Construct the configured backend without starting any browser process.
-
-    ``long_lived_contexts`` marks a pool whose contexts stay open for an operator
-    (manual Open); backends may then relax short-lived-context constraints.
-    """
+def create_browser_backend(name: BrowserBackendName) -> BrowserBackend:
+    """Construct the configured backend without starting any browser process."""
 
     if name is BrowserBackendName.CHROME:
         return ChromeBackend()
     if name is BrowserBackendName.CAMOUFOX:
-        return CamoufoxBackend(serialize_contexts=not long_lived_contexts)
+        return CamoufoxBackend()
     raise ValueError(f"Unsupported browser backend: {name!r}")
+
+
+def manual_pool_topology(name: BrowserBackendName, capacity: int) -> tuple[int, int]:
+    """Return ``(processes, contexts_per_process)`` for the headed manual Open pool.
+
+    Chrome shares one headed process between operator windows. Camoufox 0.5.6
+    allows one live context per process, and a retained operator window must not
+    make a second Open wait on that lease, so each manual window gets its own
+    bounded process slot (at most ``MAX_MANUAL_OPEN_SESSIONS``). The pool is still
+    fixed-size: never one process per persisted Queue session.
+    """
+
+    if capacity < 1:
+        raise ValueError("manual pool capacity must be at least 1")
+    if BrowserBackendName.parse(name) is BrowserBackendName.CAMOUFOX:
+        return capacity, 1
+    return 1, capacity

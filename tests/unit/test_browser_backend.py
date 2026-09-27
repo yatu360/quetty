@@ -10,6 +10,7 @@ from queue_load_test.browser import (
     CamoufoxBackend,
     ChromeBackend,
     create_browser_backend,
+    manual_pool_topology,
 )
 from queue_load_test.browser import backend as backend_module
 from queue_load_test.browser.manager import PlaywrightStarter
@@ -200,14 +201,21 @@ async def test_camoufox_context_lease_is_per_process_and_released_when_close_sta
     await backend.close_context(replacement)
 
 
-async def test_camoufox_long_lived_pool_does_not_serialize_operator_contexts(
+def test_manual_pool_gives_each_camoufox_window_its_own_bounded_process() -> None:
+    assert manual_pool_topology(BrowserBackendName.CHROME, 5) == (1, 5)
+    assert manual_pool_topology(BrowserBackendName.CAMOUFOX, 5) == (5, 1)
+    with pytest.raises(ValueError):
+        manual_pool_topology(BrowserBackendName.CAMOUFOX, 0)
+
+
+async def test_unserialized_camoufox_measurement_backend_allows_concurrent_contexts(
     monkeypatch: Any,
 ) -> None:
     async def fake_new_context(*args: object, **kwargs: object) -> object:
         return FakeContext()
 
     monkeypatch.setattr(backend_module, "AsyncNewContext", fake_new_context)
-    backend = create_browser_backend(BrowserBackendName.CAMOUFOX, long_lived_contexts=True)
+    backend = CamoufoxBackend(serialize_contexts=False)
     browser = FakeBrowser()
 
     first = await backend.new_context(cast(Any, browser))

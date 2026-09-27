@@ -390,8 +390,26 @@ class QueueSessionRestorer:
 
         Returns ``None`` while no live queue with a transfer identity is visible.
         The session is updated in memory only; the caller persists the result.
+        A live page that stops answering is bounded and reported as "nothing seen".
         """
 
+        original = (session.queue_id, session.transfer_url, session.last_error)
+        try:
+            async with asyncio.timeout(self._attempt_timeout_seconds):
+                return await self._adopt_open(session, context=context, page=page)
+        except TimeoutError:
+            if self._observability is not None:
+                self._observability.record_browser_operation_timeout()
+            session.queue_id, session.transfer_url, session.last_error = original
+            return None
+
+    async def _adopt_open(
+        self,
+        session: QueueSession,
+        *,
+        context: BrowserContext,
+        page: Page,
+    ) -> SessionRestoreResult | None:
         progress = await self._live_extractor.extract(page, session_id=session.session_id)
         if progress.pre_queue is not True and progress.active_queue is not True:
             return None
@@ -427,11 +445,27 @@ class QueueSessionRestorer:
         context: BrowserContext,
         page: Page,
     ) -> SessionRestoreResult:
-        """Inspect and refresh a still-open verified manual session."""
+        """Inspect and refresh a still-open verified manual session.
 
-        attempt = await self._observe(page, session, RestoreMethod.TRANSFER)
-        if attempt.success and session.mode is SessionMode.HYBRID:
-            attempt = await self._refresh_state(session, context, attempt)
+        Bounded like every restore attempt: a live page whose browser has stopped
+        answering (for example a wedged Camoufox process that still reports
+        connected) must not block Close or application shutdown indefinitely. A
+        timeout is a transient observation failure; the expected Queue ID is kept.
+        """
+
+        try:
+            async with asyncio.timeout(self._attempt_timeout_seconds):
+                attempt = await self._observe(page, session, RestoreMethod.TRANSFER)
+                if attempt.success and session.mode is SessionMode.HYBRID:
+                    attempt = await self._refresh_state(session, context, attempt)
+        except TimeoutError:
+            if self._observability is not None:
+                self._observability.record_browser_operation_timeout()
+            attempt = RestoreAttempt(
+                method=RestoreMethod.TRANSFER,
+                success=False,
+                failure=RestoreFailure.NAVIGATION_FAILED,
+            )
         return self._result(attempt, session.queue_id)
 
     def _observe_restore_result(

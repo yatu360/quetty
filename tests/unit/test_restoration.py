@@ -728,3 +728,54 @@ async def test_adopt_open_captures_identity_only_once_queue_is_live(tmp_path: Pa
     assert not manager.contexts[0].closed
     await opened.owned_context.close()
     await repository.close()
+
+
+class HangingExtractor:
+    """A live page whose browser stopped answering (e.g. a wedged process)."""
+
+    async def extract(self, _: object, *, session_id: str) -> QueueProgress:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+async def test_manual_final_inspection_is_bounded_and_keeps_identity(tmp_path: Path) -> None:
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+    )
+    restorer._live_extractor = cast(Any, HangingExtractor())
+    restorer._attempt_timeout_seconds = 0.05
+    context = FakeContext()
+
+    result = await restorer.inspect_open(
+        expected,
+        context=cast(Any, context),
+        page=cast(Any, context.page),
+    )
+
+    assert not result.success
+    assert result.failure is RestoreFailure.NAVIGATION_FAILED
+    assert result.expected_queue_id == expected.queue_id
+    await repository.close()
+
+
+async def test_adopt_open_is_bounded_and_leaves_session_unidentified(tmp_path: Path) -> None:
+    restorer, _, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [adopted_result()],
+        storage_navigation_url="https://staging.test/",
+    )
+    unidentified = await unidentified_session(repository, SessionMode.HYBRID)
+    restorer._live_extractor = cast(Any, HangingExtractor())
+    restorer._attempt_timeout_seconds = 0.05
+    context = FakeContext()
+
+    result = await restorer.adopt_open(
+        unidentified, context=cast(Any, context), page=cast(Any, context.page)
+    )
+
+    assert result is None
+    assert unidentified.queue_id is None
+    await repository.close()

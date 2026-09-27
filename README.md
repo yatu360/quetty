@@ -65,6 +65,20 @@ provenance is persisted on the run and session, so legacy records remain Chrome 
 cross-backend restoration fails closed. Neither backend adds proxy rotation, CAPTCHA
 solving, WAF-specific behavior, or traffic interception.
 
+Camoufox 0.5.6 runs one live context per managed process. This means:
+- automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4);
+- `MONITOR_WORKERS` beyond that number wait for a free process;
+- the headed manual pool gives each open window its own process, up to
+  `MAX_MANUAL_OPEN_SESSIONS`, while Chrome shares one headed process.
+
+The local recovery and capacity benchmark, run against the simulator only, is:
+
+```powershell
+queue-load-test-phase6-camoufox-benchmark --headed --output docs/results/phase6_camoufox_benchmark_result.json
+```
+
+Results and limits are in `docs/phase6_camoufox_benchmark.md`.
+
 The application is configured through environment variables. Start from:
 
 ```powershell
@@ -302,9 +316,11 @@ Prometheus at `/metrics` and import the file, or read `/status` directly.
 python -m pytest
 ```
 
-The ordinary suite includes controlled Chrome and Camoufox application workflows plus
-a 20-cycle Camoufox park/reopen and process/repository restart run against a local
-Queue-it-shaped simulator. It does not contact staging. Tests
+The ordinary suite runs against a local Queue-it-shaped simulator. It includes:
+- controlled Chrome and Camoufox application workflows;
+- a 20-cycle Camoufox park/reopen and process/repository restart run;
+- Camoufox recovery scenarios: browser kills, multi-slot failure, and restoration
+  faults. It does not contact staging. Tests
 marked `staging` are excluded by default even if staging configuration is
 present.
 

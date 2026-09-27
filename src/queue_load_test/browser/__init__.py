@@ -8,6 +8,7 @@ from queue_load_test.browser.backend import (
     CamoufoxBackend,
     ChromeBackend,
     create_browser_backend,
+    manual_pool_topology,
 )
 from queue_load_test.browser.manager import (
     BrowserCapacity,
@@ -36,4 +37,5 @@ __all__ = [
     "ChromeBackend",
     "OwnedBrowserContext",
     "create_browser_backend",
+    "manual_pool_topology",
 ]
