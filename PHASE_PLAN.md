@@ -523,7 +523,8 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 3 — Stable Camoufox Session Identity and Park/Reopen.
+**Next:** Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and Manual
+Open. Prompt 3's stable public identity failure blocks runtime enablement.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -531,9 +532,9 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 2 dependency/backend implementation completed on 2026-09-27.
-Camoufox is NOT READY to become the default.** See
-`docs/phase6_camoufox_readiness.md`.
+**Status: Prompt 3 stable identity/park-reopen investigation completed on 2026-09-27
+with a FAIL gate. Camoufox is NOT READY for persisted Queue sessions or to become the
+default.** See `docs/phase6_camoufox_context_strategy.md`.
 
 The intended Phase 6 architecture remains:
 
@@ -594,19 +595,30 @@ or one browser process/profile per persisted session.
    - Stable per-session identity and provenance were deliberately not implemented.
      Do not use the Camoufox option for Queue-it runs before Prompt 3.
 
-3. **Stable Camoufox Session Identity and Park/Reopen** — **next.** Add immutable run
-   backend selection and per-session backend/engine/package/browser/artifact
-   provenance. Migrate every existing run/session to Chrome/Chromium without changing
-   Queue IDs, transfer URLs, storage state, progress, schedules, leases, or ownership.
-   Define an identity payload only from a supported public Camoufox contract, then prove
-   same-identity context close/reopen and application restart before enabling Queue-it
-   use.
+3. **Stable Camoufox Session Identity and Park/Reopen** — **completed on 2026-09-27;
+   FAIL / blocked by the Camoufox 0.5.6 public API.**
+   - Twenty local contexts using the same public preset retained core preset fields but
+     changed observable canvas identity. JSON persistence plus a full
+     Playwright/Camoufox runtime restart also changed the complete observation. A preset
+     is not a complete stable identity.
+   - Normal contexts share one process identity. Fresh `AsyncNewContext` identities
+     change every time. Public launch-option replay is deterministic but process-scoped,
+     contains implementation-owned configuration, and would require a keyed process per
+     active session, so it is not the required per-context descriptor.
+   - No production descriptor/provenance format was fabricated or persisted. Legacy
+     unprovenanced state remains Chrome/Chromium based on repository history.
+   - Local meaningful storage-state results are Camoufox→Camoufox PASS,
+     Chrome→Camoufox PASS, Camoufox→Chrome FAIL, and Chrome→Chrome PASS. Queue-it
+     cross-engine behavior is still UNKNOWN.
+   - See `docs/phase6_camoufox_context_strategy.md` and the four local evidence tests.
 
-4. **Camoufox Context Lifecycle and Restoration** — blocked pending the stable public
-   identity descriptor gate. When unblocked, implement disposable context creation,
-   transfer-first HYBRID restoration, TRANSFER_ONLY support, expected Queue ID
-   verification, refreshed artifact persistence, and browser-process restart using the
-   same per-session descriptor.
+4. **Camoufox Creation, Restoration, Monitoring, and Manual Open** — **next, but
+   implementation remains blocked by Prompt 3's stable public identity failure.** Do
+   not enable persisted Camoufox Queue sessions unless a released public per-context
+   identity contract resolves the gate. Once unblocked, implement disposable context
+   creation, transfer-first HYBRID restoration, TRANSFER_ONLY identity retention,
+   expected Queue ID verification, refreshed artifact persistence, monitoring, and
+   manual open using the same descriptor.
 
 5. **Camoufox Headed Open and Recovery** — planned after context lifecycle evidence.
    Preserve manual ownership fencing, heartbeat, Close/window-close/crash release,

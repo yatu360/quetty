@@ -3699,3 +3699,82 @@ session identity semantics or making Camoufox the default.
   unresolved. Camoufox remains non-default and should not be used for Queue-it runs.
 - Exact next task: **Phase 6 Prompt 3 — Stable Camoufox Session Identity and
   Park/Reopen.**
+
+## 2026-09-27 — Phase 6 Prompt 3 — Stable Camoufox identity and park/reopen
+
+### Agent / Model
+
+OpenAI Codex / GPT-5
+
+### Goal
+
+Prove and implement one stable supported Camoufox identity descriptor per persisted
+Queue session, including repeated context reconstruction, process/application restart,
+provenance, and actual local cross-engine storage-state behavior.
+
+### Public API and identity findings
+
+- Rechecked the installed and declared runtime: Camoufox 0.5.6, Playwright 1.62.0, and
+  exact Camoufox browser 152.0.4-beta.30. The checkout's `.venv` was stale (no
+  Camoufox, Playwright 1.63.0) and was repaired normally with `pip install -e
+  ".[test]"`; `pip check` passes.
+- `AsyncNewContext()` returns only a context and exposes no generated identity export.
+  With no preset it draws a new identity. With the same public `preset=` input it still
+  redraws canvas/audio/font-spacing/font/voice identity components.
+- A controlled 20-context test using one preset kept core navigator/screen/WebGL fields
+  stable but changed observable canvas identity. JSON persistence plus a complete
+  Playwright/Camoufox runtime restart also changed the complete identity. The preset is
+  not a supported complete stable descriptor.
+- Normal `browser.new_context()` repeated the launch identity across contexts, which
+  correlates unrelated Queue sessions and is not one identity per session.
+- Public `launch_options(env={})` replay through `AsyncNewBrowser(from_options=...)`
+  reproduced the same observed identity across browser launches. It was rejected: the
+  identity is browser-process-scoped, requires a keyed process per active identity,
+  includes installation-specific launch data and implementation-owned
+  `CAMOU_CONFIG_*` values, and default generation copies the whole process environment.
+- No private generated config, init script, environment chunk, or manually fabricated
+  fingerprint was persisted. No production identity/provenance format was added,
+  because versioning the partial preset would falsely claim continuity.
+
+### Storage-state matrix
+
+- Camoufox state → Camoufox: **PASS** for local cookie and local storage.
+- Chrome state → Camoufox: **PASS** for local cookie and local storage.
+- Camoufox state → Chrome: **FAIL**; local storage restored, but Chrome rejected the
+  insecure `SameSite=None` cookie emitted by Camoufox.
+- Chrome state → Chrome: **PASS**.
+- Session storage was absent in every restore, consistent with storage state not being
+  a complete browser snapshot. All cross-engine Queue-it behavior remains **UNKNOWN**.
+- Existing unprovenanced records remain Chrome/Chromium based on actual repository
+  history and must never be silently migrated.
+
+### Changes made
+
+- Added `docs/phase6_camoufox_context_strategy.md` with the API comparison, rejected
+  process-scoped alternative, lifecycle/provenance design, storage matrix, restart
+  evidence, legacy rule, TRANSFER_ONLY/HYBRID implications, and explicit
+  PASS/FAIL/UNKNOWN conclusions.
+- Added `tests/integration/test_camoufox_identity_evidence.py`: four local-only tests
+  covering 20-cycle preset reuse, preset disk/runtime restart, clean launch replay, and
+  the four storage-state directions.
+- Updated `PROJECT_CONTEXT.md` and `PHASE_PLAN.md`. Chrome remains the default and the
+  only supported backend for persisted Queue sessions.
+
+### Validation
+
+- Focused Camoufox identity evidence: **4 passed**.
+- Final full non-staging suite: **475 passed, 4 staging tests deselected**. The first
+  run hit the previously documented manual-ownership timing flake; it passed alone and
+  the final full rerun was clean.
+- `ruff check src tests`: passed.
+- `mypy src`: passed, 68 source files.
+- `pip check`: no broken requirements.
+- Staging: **NOT RUN**. No Queue-it traffic was sent.
+
+### Decision and next task
+
+- Stable per-session Camoufox context identity: **FAIL / blocked by the 0.5.6 public
+  API**. Camoufox remains non-default and must not be used for persisted Queue sessions.
+- Exact next task: **Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and
+  Manual Open.** Its implementation remains blocked until a released supported
+  per-context identity contract resolves this gate.

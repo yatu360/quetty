@@ -9,9 +9,9 @@ live monitoring.
 
 ## Current Status
 
-- Phase 6 Prompt 2 browser-backend/dependency work is complete. The decision remains
-  **PARTIAL / NOT READY to make Camoufox the default**. See
-  `docs/phase6_camoufox_readiness.md`.
+- Phase 6 Prompt 3 stable identity/park-reopen investigation is complete. The decision
+  is **FAIL / NOT READY to use Camoufox for persisted Queue sessions or make it the
+  default**. See `docs/phase6_camoufox_context_strategy.md`.
   - The current released package is Camoufox 0.5.6 (`Python >=3.10,<4.0`) and it
     requires `playwright<1.63`. The project deliberately changed its prior Playwright
     1.63.0 environment/declaration to exact Playwright 1.62.0 and added exact Camoufox
@@ -24,14 +24,23 @@ live monitoring.
   - `AsyncNewBrowser` can use the existing async Playwright controller, and one
     Camoufox `Browser` can own multiple isolated disposable contexts. The bounded
     parked-session architecture is therefore viable without one process per session.
-  - The preferred one-stable-identity-descriptor-per-session design is blocked on
-    current public evidence. Camoufox 0.5.6 `AsyncNewContext(preset=...)` regenerates
-    identity components when reusing a preset, so the preset is not a proven complete
-    deterministic descriptor. Private/generated Camoufox config and init scripts must
-    not become persisted project contracts.
-  - Chrome-created state in Camoufox and Camoufox-created state in Chrome are both
-    **UNKNOWN** for Queue-it continuity. Existing runs must remain Chrome/Chromium and
-    must never be silently migrated.
+  - The preferred one-stable-identity-descriptor-per-session design is now locally
+    disproved for the installed public context API. Across 20
+    `AsyncNewContext(preset=same_dict)` cycles, core preset fields stayed fixed but
+    observable canvas identity changed; a disk JSON round trip and full
+    Playwright/Camoufox runtime restart also changed identity. Generated config/init
+    scripts remain rejected persistence inputs.
+  - Public `launch_options(env={})` replay through `from_options=` was deterministic
+    across browser launches, but is process-scoped, installation-specific, and encodes
+    identity in Camoufox-owned environment values. It would require a keyed browser
+    process per concurrently active identity and is rejected as the persisted context
+    strategy.
+  - The actual local storage-state matrix is Camoufox→Camoufox PASS,
+    Chrome→Camoufox PASS, Camoufox→Chrome FAIL (local storage restored but its insecure
+    `SameSite=None` cookie was rejected), and Chrome→Chrome PASS. Queue-it
+    cross-engine continuity remains UNKNOWN because no staging traffic was sent.
+    Existing/legacy unprovenanced state remains Chrome/Chromium and is never silently
+    migrated.
   - The minimum seam is implemented: `BrowserManager` keeps slots, capacity, shared
     headed/automatic limits, bounded restart tasks, cleanup, and metrics;
     `ChromeBackend`/`CamoufoxBackend` delegate launch, context, connectivity, close,
@@ -41,9 +50,11 @@ live monitoring.
     `data:` URL and passed with package 0.5.6, Playwright 1.62.0, browser beta.30, one
     context, zero contexts after close, zero managed processes after shutdown, and no
     residual Camoufox OS process.
-  - Stable per-session Camoufox identity, park/reopen, provenance persistence, and
-    cross-engine state migration remain Prompt 3 work. Do not use Camoufox for
-    Queue-it runs yet. Chrome remains the operational default.
+  - No production identity/provenance schema was added: versioning an incomplete
+    preset would create a false compatibility contract. Four local evidence tests cover
+    20-cycle preset reuse, runtime restart after JSON persistence, launch replay, and the
+    four-way storage matrix. Do not use Camoufox for Queue-it runs. Chrome remains
+    the operational default.
 - Phase 5 remains complete. `docs/phase5_acceptance.md` records
   **PARTIAL: 108 PASS, 0 FAIL, 0 UNKNOWN** on local evidence. Eight separately listed
   Queue-it staging items (S1–S8) are **NOT RUN / UNKNOWN**; no Queue-it traffic was
@@ -104,9 +115,10 @@ live monitoring.
   (`docs/results/phase5_workflow_result.json`). The real CLI was checked for default
   localhost bind, a Playwright double-click, SIGKILL-with-headed-window recovery, a
   refused second instance, and clean SIGTERM.
-- **Current checks:** 468 passed, 2 skipped, and 4 staging tests deselected with
-  Playwright 1.62.0; Ruff and strict mypy pass on darwin. The Camoufox local preflight
-  passes and `pip check` reports no broken requirements. Earlier win32 mypy evidence
+- **Current checks:** Prompt 3 focused local Camoufox evidence is 4 passed; the final
+  full run is 475 passed with 4 staging tests deselected. Ruff and strict mypy pass
+  with Playwright 1.62.0 and Camoufox 0.5.6, and `pip check` reports no broken
+  requirements. Earlier win32 mypy evidence
   reported 2
   pre-existing `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
 - **Known limitations:**
@@ -194,8 +206,8 @@ live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 Prompt 3 — Stable Camoufox Session Identity and
-  Park/Reopen.**
+- Exact next task: **Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and
+  Manual Open.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1070,7 +1082,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 Prompt 3 — Stable Camoufox Session Identity and Park/Reopen.
+Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and Manual Open.
 
 ## Instructions for Future AI Sessions
 
