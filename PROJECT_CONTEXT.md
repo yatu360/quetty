@@ -9,10 +9,16 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4; Prompts 1–7 are implemented. Both the authorised 10,000-ID
-  acquisition and browser-backed 10,000-session Queue-it monitoring run are **NOT RUN**.
-- Last completed work: Phase 4 Prompt 7 scale resilience, recovery, and observability,
-  `docs/phase4_recovery.md` and `docs/results/phase4_recovery_result.json`.
+- Current phase: Phase 4 is complete through the final acceptance report. Both the
+  authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
+  monitoring run are **NOT RUN**.
+- Last completed work: the final Phase 4 acceptance report,
+  `docs/phase4_acceptance.md`.
+- Phase 4 acceptance is **PARTIAL: 24 PASS, 0 FAIL, 16 UNKNOWN**. The bounded
+  10,000-row persistence/scheduler architecture, local installed-Chrome recovery,
+  SQLite, state storage, leasing, restart, and observability mechanisms passed. The
+  end-to-end target remains UNKNOWN because 10,000 real Queue-it identities were not
+  acquired or monitored.
 - Phase 4 recovery: 15 controlled scenarios over 10,000 persisted sessions **all PASS as
   local evidence** (real SQLite/state files, SIGKILLed Chrome and worker processes,
   installed Chrome against a local simulator, no staging traffic). Distributed
@@ -85,9 +91,9 @@ live monitoring.
   25 contexts per process, 50 globally, and 10 creation workers/queue slots, and emits
   aggregate JSON with post-run identity count, context, lease, and state-consistency
   verification. Transfer URLs and Queue IDs are absent from the report.
-- Next planned work: **Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report**. A
-  real Queue-it monitoring sweep remains blocked until an authorised 10,000-session
-  population exists.
+- Next work is evidence collection rather than new scaling architecture: run the gated
+  authorised acquisition, restoration, lifecycle, and monitoring benchmarks to close
+  the acceptance report's 16 UNKNOWN results.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -464,12 +470,11 @@ generated intervals.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-27 (macOS): `python -m pytest -q` reported **364 passed and 4 gated staging
-  tests deselected in 30.16 seconds**, including the checked-in recovery result audit.
-  Ruff and strict mypy pass. The earlier Windows run reported 325 passed, 2 skipped,
-  and 4 gated staging tests deselected in 355.93 seconds. The focused monitoring/
-  repository/metrics suite reported 47 passed in 58.18 seconds; its 10,000-row test was
-  included. Ruff and strict mypy pass for 52 source files.
+- Latest result on 2026-09-27 (Windows): `python -m pytest -q` reported **362 passed,
+  2 platform-specific skips, and 4 gated staging tests deselected in 383.87 seconds**.
+  Ruff passes. Strict mypy currently reports two Windows-only `signal.SIGKILL`
+  attribute errors in the Phase 4 recovery harness. The preceding macOS validation
+  reported 364 passed, 4 deselected, and clean mypy.
 
 ## Phase 1 Acceptance Results
 
@@ -662,6 +667,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   controlled 10,000-session recovery scenarios, defects fixed, measurements, and
   UNKNOWN boundary; `src/queue_load_test/harness/phase4_recovery.py` and
   `local_queue_simulator.py` are the harness and local page server.
+- `docs/phase4_acceptance.md` — final Phase 4 matrix: 24 PASS, 0 FAIL, 16 UNKNOWN,
+  with the bounded local evidence separated from unrun Queue-it staging claims.
 - `docs/dashboards/queue_load_test_phase4.json` — Grafana dashboard definition.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
@@ -832,9 +839,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report.** Consolidate Phase 4
-evidence into PASS/FAIL/UNKNOWN answers, preserve the single-machine deployment, and
-retain real Queue-it outcomes as UNKNOWN unless an authorised population is exercised.
+Phase 4 reporting is complete. The next justified work is an authorised controlled
+staging acquisition and monitoring run to close the 16 UNKNOWN acceptance items; do
+not add PostgreSQL, shared storage, or distributed workers without measured need.
 
 ## Instructions for Future AI Sessions
 

@@ -2642,3 +2642,85 @@ Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
+## 2026-09-27 — Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Consolidate all measured Phase 4 evidence into a final PASS/FAIL/UNKNOWN acceptance
+report without adding architecture or promoting synthetic/local-simulator results to
+Queue-it staging claims.
+
+### Changes Made
+
+- Added the final Phase 4 acceptance report with the implemented architecture, exact
+  tested profiles, controlled populations, creation/monitoring/restore/browser/
+  persistence/resource/recovery evidence, remaining risks, and recommended bounded
+  configuration.
+- Answered all 40 requested acceptance questions in a traceable matrix: 24 PASS,
+  0 FAIL, and 16 UNKNOWN.
+- Kept the end-to-end target UNKNOWN because the authorised 10,000-ID acquisition and
+  real Queue-it monitoring run did not occur.
+- Updated project context and the phase plan to mark Phase 4 reporting complete with
+  PARTIAL acceptance.
+
+### Files Added
+
+- `docs/phase4_acceptance.md`
+
+### Files Modified
+
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest -q` — 362 passed, 2 Windows/platform-specific skips, and 4 gated
+  staging tests deselected in 383.87 seconds.
+- `python -m ruff check src tests` — passed.
+- `python -m mypy src` — failed with two existing Windows-only errors at
+  `phase4_recovery.py:978` and `:1478`: the Windows type stubs do not expose
+  `signal.SIGKILL`. The same recovery source previously passed strict mypy on macOS.
+
+### Staging Tests
+
+- NOT RUN. The repository still has no configured authorised staging population, so
+  the final report retains real acquisition, restore, lifecycle, and cadence outcomes
+  as UNKNOWN.
+
+### Important Decisions
+
+- Phase 4 acceptance is PARTIAL, not PASS: 24 PASS, 0 FAIL, 16 UNKNOWN.
+- Synthetic 10,000-row scheduler results and installed-Chrome/local-simulator recovery
+  results are accepted only for their respective application layers.
+- PostgreSQL, shared/object storage, and distributed workers remain deferred because no
+  measured evidence requires them.
+- No application behavior was changed during this documentation-only prompt.
+
+### Known Issues
+
+- The 16 UNKNOWN results require authorised Queue-it evidence, including the final
+  unique count, creation performance, restore reliability, lifecycle behavior, and
+  sustainable live monitoring cadence.
+- Strict mypy is not cross-platform clean on Windows because the macOS/Linux recovery
+  process-kill path references `signal.SIGKILL` directly.
+- Existing documented operational risks remain: lease-expiry delay after hard kills,
+  deadline/commit collision, single-writer SQLite limits, local last-writer-wins state,
+  log-sink backpressure, and untested power/disk/soak failures.
+
+### Follow-Up
+
+Run the authorised controlled 10,000-session acquisition and monitoring evidence flow
+to close the acceptance report's UNKNOWN items. Do not add scaling architecture without
+measured need.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: final Phase 4 acceptance report and handoff documentation

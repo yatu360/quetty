@@ -375,8 +375,9 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–7 implemented; 10,000-session staging acquisition and monitoring
-NOT RUN.**
+**Status: Phase 4 implementation and final acceptance report complete. Acceptance is
+PARTIAL (24 PASS, 0 FAIL, 16 UNKNOWN); 10,000-session staging acquisition and
+monitoring were NOT RUN.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -453,8 +454,14 @@ Planned prompt breakdown:
    death on database errors) and a mass-replacement guard was added. Low-cardinality
    metrics, a Grafana dashboard definition, and URL-redacted logs were added. See
    `docs/phase4_recovery.md`.
-8. **Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report (next)** — produce the
-   full PASS/FAIL/UNKNOWN scale report.
+8. **Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report** — **completed on
+   2026-09-27 with PARTIAL acceptance.** `docs/phase4_acceptance.md` records 24 PASS,
+   0 FAIL, and 16 UNKNOWN. Local evidence proves bounded 10,000-row persistence,
+   scheduling, state storage, leasing, restart, installed-Chrome/local-simulator
+   recovery, and observability. It does not prove acquisition or monitoring of 10,000
+   real Queue-it identities, representative restore reliability, lifecycle completion,
+   or sustainable live cadence. The single-machine SQLite/local-state architecture is
+   retained; PostgreSQL and distribution remain deferred pending measured need.
 
 ## Scaling Gates
 
