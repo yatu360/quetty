@@ -348,9 +348,20 @@ class PrometheusMetrics:
             "Browser attempts abandoned because a Playwright call exceeded its deadline.",
             registry=self.registry,
         )
+        self.browser_backend_info = Gauge(
+            "browser_backend_info",
+            "Constant 1 labelled with the running browser backend and browser build.",
+            labelnames=("backend", "browser_build"),
+            registry=self.registry,
+        )
+        self.browser_unresponsive_restarts_total = Counter(
+            "browser_unresponsive_restarts_total",
+            "Connected browser processes restarted after consecutive navigation timeouts.",
+            registry=self.registry,
+        )
         self.browser_contexts_lost_total = Counter(
             "browser_contexts_lost_total",
-            "BrowserContexts invalidated because their Chrome process disconnected.",
+            "BrowserContexts invalidated because their browser process disconnected.",
             registry=self.registry,
         )
         self.startup_recovery_duration_seconds = Gauge(
@@ -619,6 +630,15 @@ class PrometheusMetrics:
 
     def record_browser_operation_timeout(self) -> None:
         self.browser_operation_timeouts_total.inc()
+
+    def set_browser_backend(self, backend: str, *, browser_build: str) -> None:
+        """Expose which backend/build this process runs (one low-cardinality series)."""
+
+        self.browser_backend_info.clear()
+        self.browser_backend_info.labels(backend=backend, browser_build=browser_build).set(1)
+
+    def record_browser_unresponsive(self) -> None:
+        self.browser_unresponsive_restarts_total.inc()
 
     def set_worker_configuration(self, *, monitoring_workers: int, creation_workers: int) -> None:
         self.monitoring_workers_configured.set(monitoring_workers)

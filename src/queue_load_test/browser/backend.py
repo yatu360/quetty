@@ -18,6 +18,10 @@ type ContextStorageState = str | Path | StorageState
 # The selector is deliberately exact. Passing it to AsyncNewBrowser uses an installed
 # browser or raises; unlike Camoufox's implicit active-version path, it cannot fetch.
 CAMOUFOX_BROWSER_VERSION = "152.0.4-beta.30"
+# Exact supported Python package pins (mirrored in pyproject.toml). Changing any of the
+# three requires the documented upgrade and validation procedure.
+CAMOUFOX_PACKAGE_VERSION = "0.5.6"
+PLAYWRIGHT_VERSION = "1.62.0"
 
 
 class BrowserBackendSetupError(RuntimeError):
@@ -59,6 +63,10 @@ class BrowserBackend(Protocol):
 
 class ChromeBackend:
     """Installed Google Chrome driven through Playwright Chromium."""
+
+    # One Chrome process hosts up to 25 contexts; restarting it because a slow target
+    # timed out would discard healthy in-flight work, so Chrome relies on disconnects.
+    unresponsive_restart_threshold: int | None = None
 
     @property
     def name(self) -> BrowserBackendName:
@@ -108,6 +116,12 @@ class CamoufoxBackend:
     Phase 6 evidence shows overlapping create/navigate/close churn on one
     unserialized process can wedge it while it still reports connected.
     """
+
+    # Consecutive navigation timeouts on one connected process before the manager
+    # restarts it. Phase 6 observed a Camoufox process that stopped completing
+    # navigations while still reporting connected; with one live context per process,
+    # a restart can only discard the context that reported the timeout.
+    unresponsive_restart_threshold: int | None = 3
 
     def __init__(self, *, serialize_contexts: bool = True) -> None:
         self._serialize_contexts = serialize_contexts

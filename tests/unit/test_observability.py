@@ -30,6 +30,9 @@ def session(session_id: str, status: QueueStatus) -> QueueSession:
 
 
 class FakeBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     async def capacity(self) -> BrowserCapacity:
         return BrowserCapacity(
             chrome_processes=1,

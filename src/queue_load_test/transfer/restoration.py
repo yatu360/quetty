@@ -743,7 +743,9 @@ class QueueSessionRestorer:
                     wait_until="domcontentloaded",
                     timeout=self._navigation_timeout_ms,
                 )
+                self._browser_manager.report_navigation(context, responsive=True)
             except PlaywrightTimeoutError:
+                self._browser_manager.report_navigation(context, responsive=False)
                 if self._observability is not None:
                     self._observability.record_navigation_failure(timed_out=True)
                 failure = (
@@ -864,7 +866,9 @@ class QueueSessionRestorer:
                         wait_until="domcontentloaded",
                         timeout=self._navigation_timeout_ms,
                     )
+                    self._browser_manager.report_navigation(context, responsive=True)
                 except PlaywrightTimeoutError:
+                    self._browser_manager.report_navigation(context, responsive=False)
                     if self._observability is not None:
                         self._observability.record_navigation_failure(timed_out=True)
                     failure = (

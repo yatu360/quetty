@@ -676,6 +676,7 @@ async def test_browser_backend_provenance_round_trips_and_legacy_defaults_to_chr
         requested_sessions=1,
         created_at=NOW,
         browser_backend=BrowserBackendName.CAMOUFOX,
+        browser_build="152.0.4-beta.30",
     )
     item = make_session("camoufox-session", queue_id="camoufox-queue")
     item.browser_backend = BrowserBackendName.CAMOUFOX
@@ -685,6 +686,7 @@ async def test_browser_backend_provenance_round_trips_and_legacy_defaults_to_chr
 
     reopened = SQLiteSessionRepository(database)
     assert (await reopened.get_active_run()).browser_backend is BrowserBackendName.CAMOUFOX  # type: ignore[union-attr]
+    assert (await reopened.get_active_run()).browser_build == "152.0.4-beta.30"  # type: ignore[union-attr]
     assert (await reopened.get(item.session_id)).browser_backend is BrowserBackendName.CAMOUFOX  # type: ignore[union-attr]
     await reopened.close()
 
@@ -731,5 +733,6 @@ async def test_browser_backend_provenance_round_trips_and_legacy_defaults_to_chr
 
     legacy = SQLiteSessionRepository(legacy_database)
     assert (await legacy.get_active_run()).browser_backend is BrowserBackendName.CHROME  # type: ignore[union-attr]
+    assert (await legacy.get_active_run()).browser_build is None  # type: ignore[union-attr]
     assert (await legacy.get("legacy-session")).browser_backend is BrowserBackendName.CHROME  # type: ignore[union-attr]
     await legacy.close()

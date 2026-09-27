@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 6 — Camoufox Default Migration and Operational Polish.
+**Next:** Phase 6 Prompt 7 — Phase 6 Acceptance.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -531,11 +531,11 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 5 recovery and capacity benchmark completed on 2026-09-27. Camoufox
-supports the complete local Queue-session workflow as an opt-in backend. It is not yet
-the default.**
+**Status: Prompt 6 completed on 2026-09-27. Camoufox is the default backend for NEW
+runs on local evidence. Chrome remains a supported fallback, and existing runs keep
+their persisted backend.**
 See `docs/phase6_camoufox_context_strategy.md`, `docs/phase6_runtime_integration.md`,
-and `docs/phase6_camoufox_benchmark.md`.
+`docs/phase6_camoufox_benchmark.md`, and `docs/phase6_operational_migration.md`.
 
 The Phase 6 identity architecture is:
 
@@ -659,16 +659,22 @@ or one browser process/profile per persisted session.
        hang);
      - a per-window process pool for manual Camoufox windows.
 
-6. **Camoufox Default Migration and Operational Polish** — next.
-   - Decide whether new runs default to Camoufox, and set the Camoufox process-ceiling
-     and worker defaults.
-   - Address:
-     - wedged-but-connected process detection;
-     - shutdown-stage timeout composition;
-     - operator-facing documentation.
-   - Keep existing Chrome runs fail-closed.
+6. **Camoufox Default Migration and Operational Polish** — **completed on 2026-09-27**
+   (`docs/phase6_operational_migration.md`).
+   - `BROWSER_BACKEND` now defaults to `camoufox` for new runs, and every default gate
+     passed locally. Chrome is kept and regression-tested. Existing runs restart with
+     their persisted backend, and legacy rows are Chrome.
+   - A new-run Camoufox preflight blocks setup (nothing persisted) when packages or the
+     pinned build are wrong or missing. Runtime never downloads.
+   - Build provenance is recorded per run; a change is logged and displayed.
+   - Camoufox-only restart after 3 consecutive navigation timeouts on a connected
+     process. It is proven on the Prompt 5 wedge case.
+   - Added the `browser_backend_info` series and a browser-crash step in the Phase 5
+     workflow. Existing process defaults are unchanged (`CHROME_PROCESS_COUNT=2`,
+     Camoufox concurrency = processes). Shutdown stages remain separately bounded;
+     their composition is documented.
 
-7. **Phase 6 Compatibility and Staging Acceptance** — planned. Require bounded
+7. **Phase 6 Acceptance** — next. Require bounded
    multi-context/process evidence, app/process restart identity round trips, local
    HYBRID and TRANSFER_ONLY workflows, headed behavior on supported hosts, provenance
    fail-closed tests, exact packaging/fetch evidence, and authorised Queue-it staging

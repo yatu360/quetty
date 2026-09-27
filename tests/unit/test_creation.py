@@ -636,6 +636,9 @@ class FakeContext:
 
 
 class FakeBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     def __init__(self, statuses: list[int]) -> None:
         self.statuses = deque(statuses)
         self.contexts: list[FakeContext] = []

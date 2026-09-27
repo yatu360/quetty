@@ -603,6 +603,9 @@ class FailingCloseRepository(SQLiteSessionRepository):
 
 
 class TrackingBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     def __init__(self) -> None:
         self.stopped = False
 
@@ -660,6 +663,9 @@ async def test_runtime_closes_browser_even_when_database_steps_fail(tmp_path: Pa
 
 
 class FakeBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     async def capacity(self) -> BrowserCapacity:
         return BrowserCapacity(
             chrome_processes=2,

@@ -28,48 +28,66 @@ post-admission workflows.
 
 ## Install
 
+Camoufox is the default browser backend for new runs. Chrome remains a supported
+fallback.
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[test]"
-python -m playwright install chrome
+python -m pip install -e ".[test]"           # pins camoufox==0.5.6, playwright==1.62.0
+camoufox fetch official/stable/152.0.4-beta.30 # exact pinned Camoufox browser build
+queue-load-test-camoufox-preflight            # local-only readiness check
+python -m playwright install chrome           # Chrome fallback and Chrome regression tests
 ```
 
-The supported dependency set is Python 3.12+, Camoufox 0.5.6, and Playwright 1.62.0.
-Chrome remains the default backend. The browser manager uses Playwright's async API to
-launch installed Google Chrome with `channel="chrome"` and shares each process across
-isolated contexts.
+The supported dependency set is Python 3.12+, Camoufox 0.5.6 (Python package),
+Playwright 1.62.0, and the Camoufox browser build `official/stable/152.0.4-beta.30`.
+The application launches that exact installed build and never downloads or updates a
+browser, at startup or at any other time.
 
-Camoufox's browser is a separate explicit installation. To install the exact locally
-validated build (never done automatically by application startup), run:
+The preflight launches one Camoufox process, opens one context, loads only an in-memory
+`data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
+It also runs automatically before a **new** Camoufox run is created. If it fails, no run
+is persisted and the setup page shows the exact next step, such as the
+`camoufox fetch` command. The newer beta.31 build is visible upstream, but beta.30 is
+pinned: upstream recorded Playwright 1.61/1.62 compatibility for it, and this project
+validated it. See `docs/phase6_operational_migration.md` for the upgrade, validation,
+and rollback procedure.
 
-```powershell
-camoufox fetch official/stable/152.0.4-beta.30
-queue-load-test-camoufox-preflight
-queue-load-test-camoufox-preflight --format json
-```
+### Browser backend
 
-The preflight launches one asynchronous Camoufox process, opens one context, navigates
-only to an in-memory `data:` page, and verifies complete cleanup. It sends no Queue-it
-or staging traffic. A missing build produces the exact `camoufox fetch` instruction.
-The newer beta.31 is visible in the current official stable channel, but beta.30 is
-intentionally pinned because upstream explicitly recorded Playwright 1.61/1.62
-compatibility for that build and this project locally validated it.
+`BROWSER_BACKEND=camoufox|chrome` selects the backend for **new** runs:
+- **Recorded per run and session.** The backend is persisted on the immutable run and
+  on every session. An existing run always restarts with the backend it was created
+  with; changing `BROWSER_BACKEND` never migrates it. To switch backends, use **Stop &
+  Reset Run** and start a new run.
+- **Legacy runs are Chrome.** Runs and sessions from before Phase 6 have no recorded
+  provenance and are treated as Chrome.
+- **No cross-engine fallback.** Cross-backend storage-state restoration is refused
+  before any browser work.
+- **Build shown and logged.** Camoufox runs also record the pinned build. A changed
+  build is shown in run info and logged (`run_browser_build_changed`), never applied
+  silently.
 
-`BROWSER_BACKEND=chrome|camoufox` is typed and defaults to `chrome`. The Camoufox path
-is opt-in for new runs and supports the same Queue-session workflow. Queue ID is the
-authoritative persisted identity; transfer URL and same-backend HYBRID storage state
-restore it in a fresh disposable context. Camoufox fingerprint continuity is neither
-available in 0.5.6 nor required, and no fingerprint data is persisted. Backend
-provenance is persisted on the run and session, so legacy records remain Chrome and
-cross-backend restoration fails closed. Neither backend adds proxy rotation, CAPTCHA
-solving, WAF-specific behavior, or traffic interception.
+**Chrome fallback:** set `BROWSER_BACKEND=chrome` before creating a run. Chrome uses
+installed Google Chrome (`channel="chrome"`) and remains covered by the regression
+workflow.
+
+Queue ID is the authoritative persisted identity. Transfer URL and same-backend HYBRID
+storage state restore it in a fresh, disposable context. Fresh Camoufox contexts may
+present different fingerprint characteristics, and that is expected. Fingerprint
+continuity is neither available in 0.5.6 nor required, and no fingerprint data is
+persisted. Neither backend adds proxy rotation, CAPTCHA solving, WAF-specific
+behavior, or traffic interception.
 
 Camoufox 0.5.6 runs one live context per managed process. This means:
-- automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4);
+- automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4; the name is
+  historical and applies to either backend);
 - `MONITOR_WORKERS` beyond that number wait for a free process;
 - the headed manual pool gives each open window its own process, up to
-  `MAX_MANUAL_OPEN_SESSIONS`, while Chrome shares one headed process.
+  `MAX_MANUAL_OPEN_SESSIONS`, while Chrome shares one headed process;
+- a connected Camoufox process whose navigations time out 3 times in a row is
+  restarted automatically.
 
 The local recovery and capacity benchmark, run against the simulator only, is:
 

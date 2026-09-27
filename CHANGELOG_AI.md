@@ -3919,3 +3919,72 @@ acceptance criterion.
 
 Camoufox remains opt-in. Exact next task: **Phase 6 Prompt 6 — Camoufox Default
 Migration and Operational Polish.**
+
+## 2026-09-27 — Phase 6 Prompt 6 — Camoufox default migration and operational polish
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Decision
+
+**Camoufox became the default browser backend for NEW runs** (`BROWSER_BACKEND=camoufox`).
+Chrome remains supported (`BROWSER_BACKEND=chrome`) and regression-tested.
+- Every default gate passed on local simulator evidence
+  (`docs/phase6_operational_migration.md`).
+- Stable fingerprint replay was explicitly not a gate. Queue ID continuity is the
+  requirement, and it held with 0 changes or replacements across all Phase 6 evidence.
+- Staging remains **UNKNOWN**.
+
+### Changes made
+
+- **Default:** `Settings.browser_backend` now defaults to `camoufox`. The Phase 5
+  workflow CLI default follows it.
+- **Existing runs:** they always restart with the persisted `run_config.browser_backend`,
+  which is test-covered. Legacy unprovenanced rows remain backfilled as Chrome.
+- **Preflight:** added `queue_load_test/browser/preflight.py` (`run_camoufox_preflight`,
+  exact `CAMOUFOX_PACKAGE_VERSION` / `PLAYWRIGHT_VERSION` / `CAMOUFOX_BROWSER_VERSION`
+  checks, and an actionable remedy). The CLI preflight is now a thin wrapper.
+  `POST /setup` runs it before persisting a Camoufox run: on failure it returns HTTP
+  503, persists nothing, and names the `camoufox fetch` command and the Chrome
+  fallback. Chrome runs skip it.
+- **Build provenance:** added nullable `run_config.browser_build` with an additive
+  migration. It records the pinned Camoufox build. A changed build is logged
+  (`run_browser_build_changed`) and shown as "Browser build" in run info.
+- **Unresponsive-process restart:** `BrowserManager.report_navigation()` is fed by the
+  restorer and the creator. With the backend attribute `unresponsive_restart_threshold`
+  (Camoufox 3, Chrome None), 3 consecutive navigation timeouts on one connected
+  Camoufox process restart that slot through the existing bounded restart path. This
+  adds `browser_unresponsive_restarts_total` and the `browser_process_unresponsive`
+  log event. On the real Prompt 5 wedge case (unserialized, 5 contexts), restores went
+  from 0/30 to 10/10 sessions verified, with 2 restarts and 0 leaked processes.
+- **Diagnostics:** added `browser_backend_info{backend,browser_build}` (one series) and
+  backend/version fields on `browser_manager_started`, all through allow-listed log
+  fields. Diagnostics can never fail startup.
+- **Phase 5 workflow:** added a browser-crash step (`SIGKILL` every browser during
+  monitoring). The headed acquisition process bound now counts the separate headed
+  creation pool, fixing a harness assumption.
+- **Phase 6 benchmark:** the shutdown-under-load setup queues operator work while
+  paused and then resumes automatic work, removing a claim race seen with Chrome.
+- **Tests:** added setup preflight pass/fail, Chrome skip, existing-Chrome-run restart
+  after the default change, build label, build round-trip and legacy NULL, preflight
+  failure paths, the backend info metric, and the unresponsive-restart and
+  Chrome-ignore detector cases.
+- **Docs:** added `docs/phase6_operational_migration.md`, and updated README,
+  `.env.example`, PROJECT_CONTEXT, and PHASE_PLAN.
+
+### Validation
+
+- Camoufox controlled workflow, headed (`queue-load-test-phase5-workflow --headed`,
+  default backend): **63/63 PASS**.
+- Chrome regression workflow (`--backend chrome`): **63/63 PASS**.
+- Prompt 5 recovery scenarios re-run: Camoufox 11/11. For Chrome, the only failures
+  were the shutdown precondition checks, caused by a harness race. After the fix, both
+  backends passed the manual/pause/shutdown group twice (29/29 each).
+- Full non-staging suite: **505 passed, 4 staging deselected**.
+- `ruff check src tests`, `mypy src`, and `pip check` pass.
+- Staging: **NOT RUN**.
+
+### Next task
+
+**Phase 6 Prompt 7 — Phase 6 Acceptance.**

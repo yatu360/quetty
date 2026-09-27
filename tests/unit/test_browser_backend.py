@@ -223,3 +223,79 @@ async def test_unserialized_camoufox_measurement_backend_allows_concurrent_conte
 
     await backend.close_context(first)
     await backend.close_context(second)
+
+
+async def _fake_camoufox_manager(monkeypatch: Any, backend: Any) -> tuple[BrowserManager, list[Any]]:
+    launched: list[Any] = []
+
+    async def fake_new_browser(*args: object, **kwargs: object) -> object:
+        browser = FakeBrowser()
+        launched.append(browser)
+        return browser
+
+    async def fake_new_context(*args: object, **kwargs: object) -> object:
+        return FakeContext()
+
+    class FakePlaywright:
+        async def stop(self) -> None:
+            return None
+
+        chromium = type("Chromium", (), {"launch": staticmethod(fake_new_browser)})()
+
+    async def starter() -> Any:
+        return FakePlaywright()
+
+    monkeypatch.setattr(backend_module, "AsyncNewBrowser", fake_new_browser)
+    monkeypatch.setattr(backend_module, "AsyncNewContext", fake_new_context)
+    monkeypatch.setattr(ChromeBackend, "new_context", lambda self, browser, **_: fake_new_context())
+    manager = BrowserManager(
+        chrome_process_count=1,
+        max_contexts_per_browser=1,
+        max_active_contexts=1,
+        playwright_starter=cast(PlaywrightStarter, starter),
+        backend=backend,
+    )
+    await manager.start()
+    return manager, launched
+
+
+async def test_unresponsive_camoufox_process_is_restarted_after_threshold(
+    monkeypatch: Any,
+) -> None:
+    manager, launched = await _fake_camoufox_manager(monkeypatch, CamoufoxBackend())
+    owned = await manager.create_context()
+    # A successful navigation resets the streak.
+    manager.report_navigation(owned.context, responsive=False)
+    manager.report_navigation(owned.context, responsive=False)
+    manager.report_navigation(owned.context, responsive=True)
+    manager.report_navigation(owned.context, responsive=False)
+    assert manager.unresponsive_restart_count == 0
+    manager.report_navigation(owned.context, responsive=False)
+    manager.report_navigation(owned.context, responsive=False)
+    assert manager.unresponsive_restart_count == 1
+
+    capacity = await manager.capacity()
+
+    assert manager.restart_count == 1
+    assert len(launched) == 2 and launched[0].closed
+    assert owned.closed and capacity.active_contexts == 0
+    assert capacity.connected_processes == 1
+    replacement = await manager.create_context()
+    assert replacement.context is not owned.context
+    await replacement.close()
+    await manager.shutdown()
+
+
+async def test_chrome_ignores_navigation_timeouts_for_restart(monkeypatch: Any) -> None:
+    manager, launched = await _fake_camoufox_manager(monkeypatch, ChromeBackend())
+    owned = await manager.create_context()
+    for _ in range(10):
+        manager.report_navigation(owned.context, responsive=False)
+
+    await manager.capacity()
+
+    assert manager.unresponsive_restart_count == 0
+    assert manager.restart_count == 0
+    assert len(launched) == 1 and not owned.closed
+    await owned.close()
+    await manager.shutdown()

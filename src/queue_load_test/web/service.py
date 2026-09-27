@@ -12,6 +12,7 @@ from typing import Protocol
 from pydantic import HttpUrl, TypeAdapter
 
 from queue_load_test.browser import (
+    CAMOUFOX_BROWSER_VERSION,
     BrowserContextCapacity,
     BrowserManager,
     create_browser_backend,
@@ -21,7 +22,7 @@ from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import log_event
-from queue_load_test.models import RunConfig
+from queue_load_test.models import BrowserBackendName, RunConfig
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
@@ -115,6 +116,22 @@ class ApplicationRunRuntime:
         async with self._lock:
             if self._task is not None:
                 return
+            if (
+                run.browser_backend is BrowserBackendName.CAMOUFOX
+                and run.browser_build is not None
+                and run.browser_build != CAMOUFOX_BROWSER_VERSION
+            ):
+                # Never silent: the run keeps its backend, and Queue ID verification
+                # still guards every restore, but the operator must know the pinned
+                # build changed underneath a persisted run.
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "run_browser_build_changed",
+                    browser_backend=run.browser_backend.value,
+                    recorded_build=run.browser_build,
+                    installed_build=CAMOUFOX_BROWSER_VERSION,
+                )
             validated_url = TypeAdapter(HttpUrl).validate_python(run.target_url)
             settings = self._base_settings.model_copy(
                 update={
@@ -406,11 +423,24 @@ class ApplicationRunRuntime:
         log_event(logger, logging.INFO, "run_reset_completed", count=removed)
 
 
+def browser_build_label(run: RunConfig) -> str:
+    """Operator-facing build provenance; a changed pinned build is shown, never hidden."""
+
+    if run.browser_backend is not BrowserBackendName.CAMOUFOX:
+        return "installed Google Chrome"
+    if run.browser_build is None:
+        return f"{CAMOUFOX_BROWSER_VERSION} (run build not recorded)"
+    if run.browser_build != CAMOUFOX_BROWSER_VERSION:
+        return f"{CAMOUFOX_BROWSER_VERSION} (run created with {run.browser_build})"
+    return run.browser_build
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardSummary:
     target_url: str
     requested_sessions: int
     browser_backend: str
+    browser_build: str
     valid_managed_sessions: int
     remaining_to_initial_target: int
     creation: str
@@ -448,6 +478,7 @@ class DashboardService:
             target_url=run.target_url,
             requested_sessions=run.requested_sessions,
             browser_backend=run.browser_backend.value,
+            browser_build=browser_build_label(run),
             valid_managed_sessions=recovery.valid_queue_ids,
             remaining_to_initial_target=max(
                 0, run.requested_sessions - recovery.valid_queue_ids

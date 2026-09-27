@@ -30,6 +30,11 @@ _CONTEXT_FIELDS = (
     "terminal_sessions",
     "missing_state_files",
     "corrupt_state_files",
+    "browser_backend",
+    "browser_version",
+    "package_version",
+    "recorded_build",
+    "installed_build",
 )
 
 REDACTED_URL = "<redacted-url>"

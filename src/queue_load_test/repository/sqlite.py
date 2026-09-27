@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS run_config (
     target_url TEXT NOT NULL,
     requested_sessions INTEGER NOT NULL CHECK (requested_sessions > 0),
     browser_backend TEXT NOT NULL DEFAULT 'chrome',
+    browser_build TEXT,
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
@@ -355,7 +356,7 @@ class SQLiteSessionRepository:
             row = self._connect().execute(
                 """
                 SELECT run_id, target_url, requested_sessions, browser_backend,
-                       created_at, status
+                       browser_build, created_at, status
                 FROM run_config WHERE current_run = 1
                 """
             ).fetchone()
@@ -369,6 +370,9 @@ class SQLiteSessionRepository:
                 target_url=str(row["target_url"]),
                 requested_sessions=int(row["requested_sessions"]),
                 browser_backend=BrowserBackendName.parse(row["browser_backend"]),
+                browser_build=(
+                    str(row["browser_build"]) if row["browser_build"] is not None else None
+                ),
                 created_at=created_at,
                 status=RunStatus(str(row["status"])),
             )
@@ -392,14 +396,15 @@ class SQLiteSessionRepository:
                     """
                     INSERT INTO run_config (
                         run_id, target_url, requested_sessions, browser_backend,
-                        created_at, status, current_run
-                    ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                        browser_build, created_at, status, current_run
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         run.run_id,
                         run.target_url,
                         run.requested_sessions,
                         run.browser_backend.value,
+                        run.browser_build,
                         _to_storage(run.created_at),
                         run.status.value,
                     ),
@@ -863,6 +868,9 @@ class SQLiteSessionRepository:
                 "ALTER TABLE run_config ADD COLUMN "
                 "browser_backend TEXT NOT NULL DEFAULT 'chrome'"
             )
+        if "browser_build" not in columns:
+            # Unknown for runs created before build provenance was recorded.
+            connection.execute("ALTER TABLE run_config ADD COLUMN browser_build TEXT")
 
     @staticmethod
     def _migrate_runtime_control_columns(connection: sqlite3.Connection) -> None:

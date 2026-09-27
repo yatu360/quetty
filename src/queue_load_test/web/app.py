@@ -18,9 +18,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
+from queue_load_test.browser import CAMOUFOX_BROWSER_VERSION
+from queue_load_test.browser.preflight import CamoufoxPreflight, run_camoufox_preflight
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
-from queue_load_test.models import BrowserRuntimeState, QueueStatus, RunConfig, SessionSummaryPage
+from queue_load_test.models import (
+    BrowserBackendName,
+    BrowserRuntimeState,
+    QueueStatus,
+    RunConfig,
+    SessionSummaryPage,
+)
 from queue_load_test.repository import RepositoryError, SessionRepository
 from queue_load_test.utils.instance_lock import InstanceLock
 from queue_load_test.web.actions import OperatorActionKind, OperatorActionStatus
@@ -43,13 +51,20 @@ def create_app(
     repository: SessionRepository,
     runtime: RunRuntime | None = None,
     instance_lock: InstanceLock | None = None,
+    camoufox_preflight: CamoufoxPreflight | None = None,
 ) -> FastAPI:
     """Build the operator UI.
 
     ``instance_lock`` proves this is the only UI process for the database; startup
     then clears every persisted browser owner (all belong to dead processes).
     Without it only expired ownership is recovered.
+
+    ``camoufox_preflight`` checks the pinned Camoufox runtime before a new Camoufox
+    run is persisted; it is injectable for tests and defaults to the real local check.
+    Existing runs never re-run it: they restart with their persisted backend.
     """
+
+    preflight = camoufox_preflight or run_camoufox_preflight
 
     run_runtime = runtime or ApplicationRunRuntime(settings=settings, repository=repository)
     dashboard = DashboardService(repository, run_runtime)
@@ -191,12 +206,40 @@ def create_app(
                 },
                 status_code=422,
             )
+        if settings.browser_backend is BrowserBackendName.CAMOUFOX:
+            readiness = await preflight()
+            if not readiness.passed:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "camoufox_preflight_failed",
+                    error_type=readiness.error.split(":", 1)[0] if readiness.error else None,
+                )
+                return templates.TemplateResponse(
+                    request,
+                    "setup.html",
+                    {
+                        "error": (
+                            f"Camoufox is not ready, so no run was created. {readiness.remedy} "
+                            "To use Chrome instead, set BROWSER_BACKEND=chrome and restart."
+                        ),
+                        "target_url": raw_url,
+                        "requested_sessions": raw_count,
+                        "browser_backend": settings.browser_backend.value,
+                    },
+                    status_code=503,
+                )
         run = RunConfig(
             run_id=str(uuid4()),
             target_url=target_url,
             requested_sessions=requested_sessions,
             created_at=datetime.now(UTC),
             browser_backend=settings.browser_backend,
+            browser_build=(
+                CAMOUFOX_BROWSER_VERSION
+                if settings.browser_backend is BrowserBackendName.CAMOUFOX
+                else None
+            ),
         )
         try:
             await repository.create_run(run)

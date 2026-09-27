@@ -103,6 +103,9 @@ class FakeOwnedContext:
 
 
 class FakeBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     def __init__(self, world: World, *, headless: bool = True, **_: object) -> None:
         self.world = world
         self.headless = headless
@@ -848,3 +851,13 @@ def _read_progress(database: Path, session_id: str) -> float | None:
             (session_id,),
         ).fetchone()
     return None if row is None else float(row[0])
+
+
+@pytest.fixture(autouse=True)
+def _passing_camoufox_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests never launch a real browser for the new-run preflight."""
+
+    async def ready() -> object:
+        return type("Ready", (), {"passed": True, "error": None, "remedy": ""})()
+
+    monkeypatch.setattr("queue_load_test.web.app.run_camoufox_preflight", ready)

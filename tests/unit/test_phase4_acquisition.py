@@ -55,6 +55,9 @@ class _OwnedContext:
 
 
 class _FakeBrowserManager:
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        """Navigation health reports are irrelevant to this fake."""
+
     def __init__(self) -> None:
         self.started = False
         self.active_contexts = 0

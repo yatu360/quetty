@@ -2,12 +2,17 @@ import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from queue_load_test.browser import CAMOUFOX_BROWSER_VERSION
+from queue_load_test.browser.preflight import CAMOUFOX_FETCH_COMMAND
 from queue_load_test.config import Settings
 from queue_load_test.models import (
+    BrowserBackendName,
     BrowserRuntimeState,
     QueueProgress,
     QueueSession,
@@ -23,7 +28,7 @@ from queue_load_test.web.actions import (
     OperatorActionStatus,
 )
 from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
-from queue_load_test.web.service import RuntimeCapacity
+from queue_load_test.web.service import RuntimeCapacity, browser_build_label
 
 
 class FakeRuntime:
@@ -608,3 +613,153 @@ def test_failed_dashboard_reset_keeps_run_and_accepts_later_actions(tmp_path: Pa
         paused = client.post("/monitoring/pause")
         assert paused.status_code == 200
         assert runtime.pause_calls == 1
+
+
+@pytest.fixture(autouse=True)
+def passing_camoufox_preflight(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Unit tests never launch a real browser; setup sees a passing preflight."""
+
+    calls: list[int] = []
+
+    async def ready() -> Any:
+        calls.append(1)
+        return SimpleNamespace(passed=True, error=None, remedy="")
+
+    monkeypatch.setattr("queue_load_test.web.app.run_camoufox_preflight", ready)
+    return calls
+
+
+def _run_rows(database: Path) -> list[tuple[object, ...]]:
+    with sqlite3.connect(database) as connection:
+        return list(connection.execute("SELECT browser_backend, browser_build FROM run_config"))
+
+
+def test_new_run_defaults_to_camoufox_with_pinned_build_after_preflight(
+    tmp_path: Path, passing_camoufox_preflight: list[int]
+) -> None:
+    database = tmp_path / "default.sqlite3"
+    runtime = FakeRuntime()
+    app = create_app(
+        settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert passing_camoufox_preflight == [1]
+    assert _run_rows(database) == [("camoufox", CAMOUFOX_BROWSER_VERSION)]
+    assert runtime.started[0].browser_backend is BrowserBackendName.CAMOUFOX
+
+
+def test_failed_camoufox_preflight_creates_no_run_and_explains_the_fix(tmp_path: Path) -> None:
+    database = tmp_path / "preflight.sqlite3"
+    runtime = FakeRuntime()
+
+    async def missing_build() -> Any:
+        return SimpleNamespace(
+            passed=False,
+            error="BrowserBackendSetupError: missing",
+            remedy=f"Install the pinned Camoufox browser with: {CAMOUFOX_FETCH_COMMAND}",
+        )
+
+    app = create_app(
+        settings=settings(database),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        camoufox_preflight=missing_build,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 503
+    assert CAMOUFOX_FETCH_COMMAND in response.text
+    assert "BROWSER_BACKEND=chrome" in response.text
+    assert _run_rows(database) == []
+    assert runtime.started == []
+
+
+def test_chrome_fallback_skips_camoufox_preflight_and_records_no_build(tmp_path: Path) -> None:
+    database = tmp_path / "chrome.sqlite3"
+    runtime = FakeRuntime()
+
+    async def must_not_run() -> Any:
+        raise AssertionError("Chrome runs never run the Camoufox preflight")
+
+    chrome_settings = settings(database).model_copy(
+        update={"browser_backend": BrowserBackendName.CHROME}
+    )
+    app = create_app(
+        settings=chrome_settings,
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        camoufox_preflight=must_not_run,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert _run_rows(database) == [("chrome", None)]
+
+
+async def test_existing_chrome_run_restarts_as_chrome_after_default_change(
+    tmp_path: Path, passing_camoufox_preflight: list[int]
+) -> None:
+    database = tmp_path / "existing.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await repository.create_run(
+        RunConfig(
+            run_id="chrome-run",
+            target_url="https://staging.example.test/",
+            requested_sessions=1,
+            created_at=datetime.now(UTC),
+            browser_backend=BrowserBackendName.CHROME,
+        )
+    )
+    await repository.close()
+    runtime = FakeRuntime()
+    app = create_app(
+        settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
+    )
+    assert settings(database).browser_backend is BrowserBackendName.CAMOUFOX
+
+    with TestClient(app) as client:
+        summary = client.get("/partials/summary").text
+
+    assert [run.browser_backend for run in runtime.started] == [BrowserBackendName.CHROME]
+    assert passing_camoufox_preflight == []
+    assert "installed Google Chrome" in summary
+    assert _run_rows(database) == [("chrome", None)]
+
+
+def test_browser_build_label_never_hides_a_changed_pinned_build() -> None:
+    def run(backend: BrowserBackendName, build: str | None) -> RunConfig:
+        return RunConfig(
+            run_id="r",
+            target_url="https://staging.example.test/",
+            requested_sessions=1,
+            created_at=datetime.now(UTC),
+            browser_backend=backend,
+            browser_build=build,
+        )
+
+    assert browser_build_label(run(BrowserBackendName.CHROME, None)) == "installed Google Chrome"
+    assert (
+        browser_build_label(run(BrowserBackendName.CAMOUFOX, CAMOUFOX_BROWSER_VERSION))
+        == CAMOUFOX_BROWSER_VERSION
+    )
+    assert "run created with 1.0-old" in browser_build_label(
+        run(BrowserBackendName.CAMOUFOX, "1.0-old")
+    )
+    assert "not recorded" in browser_build_label(run(BrowserBackendName.CAMOUFOX, None))

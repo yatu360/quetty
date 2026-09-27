@@ -105,6 +105,8 @@ class _BrowserSlot:
     browser: Browser
     contexts: set[OwnedBrowserContext] = field(default_factory=set)
     restart_task: asyncio.Task[bool] | None = None
+    consecutive_navigation_timeouts: int = 0
+    unresponsive: bool = False
 
 
 class OwnedBrowserContext:
@@ -234,6 +236,10 @@ class BrowserManager:
         self._close_timeout_seconds = close_timeout_seconds
         self._shared_capacity = shared_capacity
         self._backend = backend or ChromeBackend()
+        self._unresponsive_threshold: int | None = getattr(
+            self._backend, "unresponsive_restart_threshold", None
+        )
+        self._unresponsive_restarts = 0
 
     @classmethod
     def from_settings(
@@ -270,6 +276,52 @@ class BrowserManager:
         """Seconds spent on each completed slot replacement, in completion order."""
 
         return tuple(self._restart_durations)
+
+    @property
+    def unresponsive_restart_count(self) -> int:
+        """Connected processes marked for restart after consecutive navigation timeouts."""
+
+        return self._unresponsive_restarts
+
+    def report_navigation(self, context: BrowserContext, *, responsive: bool) -> None:
+        """Record whether a navigation in ``context`` completed or timed out.
+
+        Only backends with an ``unresponsive_restart_threshold`` act on this. A slot
+        reaching the threshold is treated like a disconnected one: the next
+        allocation or capacity check replaces it through the ordinary bounded restart
+        path. Synchronous, so it cannot be interrupted between check and mark.
+        """
+
+        threshold = self._unresponsive_threshold
+        if threshold is None:
+            return
+        slot = next(
+            (
+                candidate
+                for candidate in self._slots
+                if any(owned.context is context for owned in candidate.contexts)
+            ),
+            None,
+        )
+        if slot is None or slot.restart_task is not None or slot.unresponsive:
+            return
+        if responsive:
+            slot.consecutive_navigation_timeouts = 0
+            return
+        slot.consecutive_navigation_timeouts += 1
+        if slot.consecutive_navigation_timeouts < threshold:
+            return
+        slot.unresponsive = True
+        self._unresponsive_restarts += 1
+        if self._observability is not None:
+            self._observability.record_browser_unresponsive()
+        log_event(
+            logger,
+            logging.WARNING,
+            "browser_process_unresponsive",
+            browser_id=slot.index,
+            count=slot.consecutive_navigation_timeouts,
+        )
 
     @property
     def backend_name(self) -> str:
@@ -312,7 +364,26 @@ class BrowserManager:
                 raise
             self._running = True
             self._update_capacity_metrics()
-            log_event(logger, logging.INFO, "browser_manager_started")
+            try:
+                diagnostics: BrowserBackendDiagnostics | None = self._backend.diagnostics(
+                    self._slots[0].browser
+                )
+            except Exception:  # noqa: BLE001 - diagnostics must never fail startup
+                diagnostics = None
+            browser_version = diagnostics.browser_version if diagnostics else None
+            if self._observability is not None:
+                self._observability.set_browser_backend(
+                    self._backend.name.value,
+                    browser_build=browser_version or "unknown",
+                )
+            log_event(
+                logger,
+                logging.INFO,
+                "browser_manager_started",
+                browser_backend=self._backend.name.value,
+                browser_version=browser_version,
+                package_version=diagnostics.package_version if diagnostics else None,
+            )
 
     async def _launch_browser(self) -> Browser:
         if self._playwright is None:
@@ -370,6 +441,7 @@ class BrowserManager:
                     slot
                     for slot in self._slots
                     if slot.restart_task is None
+                    and not slot.unresponsive
                     and self._backend.is_connected(slot.browser)
                     and len(slot.contexts) < self._max_contexts_per_browser
                 ]
@@ -540,7 +612,7 @@ class BrowserManager:
     def _schedule_failed_restarts_locked(self) -> tuple[asyncio.Task[bool], ...]:
         restart_tasks: list[asyncio.Task[bool]] = []
         for slot in self._slots:
-            if self._backend.is_connected(slot.browser):
+            if self._backend.is_connected(slot.browser) and not slot.unresponsive:
                 continue
             if slot.restart_task is None:
                 lost_contexts = tuple(slot.contexts)
@@ -613,6 +685,8 @@ class BrowserManager:
                 slot_is_managed = any(candidate is slot for candidate in self._slots)
                 if replacement is not None and self._running and slot_is_managed:
                     slot.browser = replacement
+                    slot.unresponsive = False
+                    slot.consecutive_navigation_timeouts = 0
                     installed = True
                 self._update_capacity_metrics()
 

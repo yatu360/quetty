@@ -2,6 +2,8 @@
 
 from queue_load_test.browser.backend import (
     CAMOUFOX_BROWSER_VERSION,
+    CAMOUFOX_PACKAGE_VERSION,
+    PLAYWRIGHT_VERSION,
     BrowserBackend,
     BrowserBackendDiagnostics,
     BrowserBackendSetupError,
@@ -23,6 +25,8 @@ from queue_load_test.browser.manager import (
 
 __all__ = [
     "CAMOUFOX_BROWSER_VERSION",
+    "CAMOUFOX_PACKAGE_VERSION",
+    "PLAYWRIGHT_VERSION",
     "BrowserBackend",
     "BrowserBackendDiagnostics",
     "BrowserBackendSetupError",

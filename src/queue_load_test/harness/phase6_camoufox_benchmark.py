@@ -2116,12 +2116,20 @@ async def scenario_manual_and_shutdown(
         shutdown.check("headed_session_open_before_shutdown", opened.message == "Opened in browser")
         simulator.slow_seconds = 3.0
         simulator.slow_ids.update(str(qid) for qid in identities.values())
-        mark_all_due(app.database, [fifth, sixth])
-        automatic_busy = await until(lambda: scheduler_or_zero(runtime) > 0, timeout=10)
+        # Queue operator work on idle rows first (Refresh is allowed while paused) so
+        # automatic claims cannot race the requests, then resume automatic work.
+        await runtime.pause_monitoring()
+        await until(
+            lambda: all(app.row(sid).get("worker_id") is None for sid in (first, second, third)),
+            timeout=15,
+        )
         for session_id in (first, second, third):
             with contextlib.suppress(Exception):
                 await runtime.request_action(OperatorActionKind.REFRESH, session_id)
         operator_busy = await until(lambda: len(runtime_actions(runtime)) >= 3, timeout=10)
+        mark_all_due(app.database, [fifth, sixth])
+        await runtime.resume_monitoring()
+        automatic_busy = await until(lambda: scheduler_or_zero(runtime) > 0, timeout=10)
         active_actions = runtime_actions(runtime)
         statuses = Counter(action.status.value for action in active_actions)
         shutdown.measurements["in_flight_at_shutdown"] = {

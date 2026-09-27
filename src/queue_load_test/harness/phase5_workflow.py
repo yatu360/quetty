@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib
 import json
 import os
 import re
+import signal
 import sqlite3
 import tempfile
 import time
@@ -31,6 +33,7 @@ import httpx
 
 from queue_load_test.config import Settings
 from queue_load_test.harness.local_queue_simulator import LocalQueueSimulator
+from queue_load_test.harness.resource_benchmark import is_browser_main_process
 from queue_load_test.models import (
     BrowserBackendName,
     QueueSession,
@@ -265,6 +268,7 @@ async def run_workflow(
                     backend=backend,
                 )
                 await _refresh(ui, record, db, simulator, evidence)
+                await _browser_crash(record, db, simulator, backend)
                 await _add_replace_delete(ui, record, db, directory, evidence)
                 await _no_id_open_and_window_loss(
                     ui,
@@ -558,10 +562,14 @@ async def _first_boot(
         len(evidence["dashboard_rows_seen"]) >= 2,
         rows_seen=evidence["dashboard_rows_seen"],
     )
+    # One automatic process, plus one separate headed creation pool when acquisition
+    # windows are visible (CREATION_HEADLESS=false follows --headed).
+    process_bound = 1 + int(bool(evidence["headed_manual_browser"]))
     record.check(
         "browser_processes_bounded_during_acquisition",
-        0 <= _browser_processes(backend) <= 1,
+        0 <= _browser_processes(backend) <= process_bound,
         browser_processes=_browser_processes(backend),
+        bound=process_bound,
     )
 
 
@@ -795,6 +803,60 @@ async def _refresh(
     await ui.post("/monitoring/resume", headers={"HX-Request": "true"})
 
 
+def _browser_main_pids(backend: BrowserBackendName) -> set[int]:
+    try:
+        psutil: Any = importlib.import_module("psutil")
+    except ImportError:  # pragma: no cover - benchmark extra
+        return set()
+    found: set[int] = set()
+    for process in psutil.Process(os.getpid()).children(recursive=True):
+        try:
+            if is_browser_main_process(backend, process.cmdline()):
+                found.add(int(process.pid))
+        except psutil.Error:
+            continue
+    return found
+
+
+async def _browser_crash(
+    record: Recorder,
+    db: Database,
+    simulator: LocalQueueSimulator,
+    backend: BrowserBackendName,
+) -> None:
+    """SIGKILL every live browser process while automatic monitoring runs."""
+
+    identities = db.identities()
+    created_before = simulator.new_identities
+    victims = _browser_main_pids(backend)
+    checked = {session_id: db.checked_at(session_id) for session_id in identities}
+    for pid in victims:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+    elapsed = await until(
+        lambda: all(db.checked_at(sid) != checked[sid] for sid in identities),
+        timeout=30,
+        interval=0.25,
+    )
+    survivors = _browser_main_pids(backend) & victims
+    record.check(
+        "browser_crash_recovers_monitoring_without_replacement",
+        bool(victims)
+        and elapsed is not None
+        and not survivors
+        and db.identities() == identities
+        and simulator.new_identities == created_before,
+        killed_processes=len(victims),
+        seconds=elapsed,
+        browser_processes=_browser_processes(backend),
+    )
+    record.check(
+        "browser_processes_bounded_after_crash_recovery",
+        0 < _browser_processes(backend) <= 1 + 2,
+        browser_processes=_browser_processes(backend),
+    )
+
+
 async def _add_replace_delete(
     ui: httpx.AsyncClient,
     record: Recorder,
@@ -981,7 +1043,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--backend",
         choices=tuple(backend.value for backend in BrowserBackendName),
-        default=BrowserBackendName.CHROME.value,
+        # Matches the application default for new runs (Phase 6 Prompt 6).
+        default=BrowserBackendName.CAMOUFOX.value,
     )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)

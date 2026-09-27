@@ -9,9 +9,41 @@ Camoufox backend for live monitoring.
 
 ## Current Status
 
+- Phase 6 Prompt 6 (Camoufox default migration and operational polish) is complete.
+  **Camoufox is now the default browser backend for NEW runs**
+  (`BROWSER_BACKEND=camoufox`), and Chrome remains a supported, regression-tested
+  fallback (`BROWSER_BACKEND=chrome`). See `docs/phase6_operational_migration.md`.
+  - **Decision basis:** every default gate passed on local simulator evidence: creation,
+    park and repeated reopen, Queue ID verification, transfer and same-backend storage
+    restoration, monitoring, Refresh, Add, Replace, Delete, headed Open/Close,
+    pause/resume, restart, crash recovery, Stop & Reset, clean shutdown, bounded
+    resources, and zero silent Queue ID replacement. Fingerprint replay is explicitly
+    not a gate. Staging remains UNKNOWN.
+  - **Existing runs keep their backend.** Runs restart with the persisted
+    `run_config.browser_backend`; changing the default never migrates a run. Legacy
+    unprovenanced rows are backfilled as Chrome. Switching backends requires Stop &
+    Reset Run.
+  - **New-run preflight:** creating a Camoufox run runs `run_camoufox_preflight()`
+    (`browser/preflight.py`). It checks the exact package pins, the installed pinned
+    build, one launch/context/`data:` page, and cleanup. On failure nothing is
+    persisted, and HTTP 503 names `camoufox fetch official/stable/152.0.4-beta.30` or
+    the Chrome fallback. Runtime never downloads a browser.
+  - **Build provenance:** `run_config.browser_build` records the pinned build (NULL for
+    Chrome and legacy runs). A changed build is logged as `run_browser_build_changed`
+    and shown in run info, never applied silently.
+  - **Unresponsive-process restart:** 3 consecutive navigation timeouts on a connected
+    Camoufox process restart that slot (`browser_unresponsive_restarts_total`). This
+    recovered the Prompt 5 wedge case from 0/30 to 10/10 sessions verified with 0
+    leaked processes. Chrome keeps disconnect-only recovery.
+  - **Diagnostics:** `browser_backend_info{backend,browser_build}` is one series.
+  - **Validation:**
+    - Camoufox headed controlled workflow 63/63 (now including a `SIGKILL`
+      browser-crash step), and Chrome regression 63/63;
+    - Prompt 5 recovery scenarios re-run on both backends;
+    - 505 non-staging tests; Ruff and mypy pass.
 - Phase 6 Prompt 5 (Camoufox Queue-session recovery and capacity benchmark) is
-  complete. Camoufox is an **opt-in backend for new runs**, still non-default, and the
-  default decision belongs to Prompt 6. See `docs/phase6_camoufox_benchmark.md` and
+  complete. At that time Camoufox was an opt-in backend, and the default decision was
+  made in Prompt 6. See `docs/phase6_camoufox_benchmark.md` and
   `docs/results/phase6_camoufox_benchmark_result.json`. All results are local
   simulator only.
   - **Result:** 22/22 scenarios and 282/282 checks passed across Camoufox and a
@@ -255,8 +287,7 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 Prompt 6 — Camoufox Default Migration and Operational
-  Polish.**
+- Exact next task: **Phase 6 Prompt 7 — Phase 6 Acceptance.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1131,7 +1162,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 Prompt 6 — Camoufox Default Migration and Operational Polish.
+Phase 6 Prompt 7 — Phase 6 Acceptance.
 
 ## Instructions for Future AI Sessions
 
