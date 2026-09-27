@@ -511,12 +511,24 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
    - Setup now warns that the target URL is the protected destination.
    - No architecture changed.
 
+**Post-acceptance follow-ups (2026-09-27):**
+
+- **Open in Chrome without a Queue ID.** Rows that never got a Queue ID open a headed
+  window at the protected staging URL. They no longer fail with "Expected Identity
+  Missing". If a live Queue-it identity appears in that window, it is adopted through
+  `FAILED → CREATING → PARKED`. Unique `queue_id` rejects a duplicate and leaves the row
+  unchanged.
+- **Stop & Reset Run.** A confirmed dashboard action replaces the disabled
+  **Start New Run** placeholder. It runs the ordered runtime shutdown, deletes the run,
+  all sessions, progress and saved browser state, resets runtime controls, and returns
+  to setup. If the wipe fails, nothing is deleted and the run restarts.
+
 **Next:** Phase 5 complete — define Phase 6 only from the next operator/product
 requirement.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
-existing lifecycle/restoration logic. The disabled new-run placeholder remains; Prompt
-4 does not implement retargeting.
+existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
+Stop & Reset Run wipes the database and starts over.
 
 ## Scaling Gates
 

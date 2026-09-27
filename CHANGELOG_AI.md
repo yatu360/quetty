@@ -3355,3 +3355,103 @@ Confirm that the Phase 5 dashboard-order index does not regress the Phase 4
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
+## 2026-09-27 — Phase 5 follow-up — Headed open without Queue ID; Stop & Reset Run
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+- Let the operator open headed Chrome for a session that has no Queue ID. Previously
+  this failed with "Expected Identity Missing". If an identity appears in that window,
+  adopt it.
+- Add a dashboard control that stops everything and wipes the run, so the next load
+  starts fresh at setup.
+
+### Changes Made
+
+- **Opening without a Queue ID:**
+  - `QueueSessionRestorer.restore_open` now routes sessions with `queue_id is None` to
+    `_open_unidentified`. It navigates to the staging URL (or a valid transfer URL),
+    using HYBRID storage state when it loads. It retains the context with
+    `identity_pending=True` and records nothing.
+  - The new `adopt_open` returns an identity only when a live queue (`pre_queue` or
+    `active_queue`) and a successful transfer extraction are both observed.
+- **Adoption in the manual manager:** `ManualChromeSessionManager` tries adoption after
+  each successful lease renewal and at close.
+  - Persistence follows the creation path, because `FAILED` can only move to
+    `CREATING`: `FAILED → CREATING` (a duplicate raises `QueueIdConflictError`), then
+    `PARKED` and due with the observed progress.
+  - A `CREATING` row left by a failed second write is resumed on the next heartbeat.
+  - A duplicate is logged, blocks further attempts, and discards state saved only for
+    it.
+  - While no identity is adopted, the final inspection is skipped, so the row is never
+    overwritten as `CONNECTION_LOST` or `FAILED`.
+- **Stop & Reset Run:**
+  - `POST /run/reset` calls `ApplicationRunRuntime.reset()`. It runs the ordered
+    `close()`, clears the runtime components so `start_run` can build a fresh one,
+    then calls `SQLiteSessionRepository.reset_all()` (one transaction: delete run,
+    sessions and progress, reset `runtime_control`) and `FileSystemStateStore.clear()`.
+  - If the wipe fails, the existing run is restarted.
+  - The route refuses concurrent resets and mutations during a reset, and keeps
+    refusing if shutdown begins meanwhile. htmx is redirected to `/setup` with a 204
+    `HX-Redirect`.
+  - The disabled **Start New Run** button became the red, confirmed **Stop & Reset
+    Run**.
+
+### Files Added
+
+- None
+
+### Files Modified
+
+- `src/queue_load_test/transfer/restoration.py`
+- `src/queue_load_test/web/manual.py`, `web/service.py`, `web/app.py`
+- `src/queue_load_test/web/templates/dashboard.html`, `web/static/app.css`
+- `src/queue_load_test/repository/base.py`, `repository/sqlite.py`
+- `src/queue_load_test/state/filesystem.py`
+- `src/queue_load_test/harness/phase5_ui_benchmark.py`
+- `tests/unit/test_restoration.py`, `test_manual_open.py`, `test_repository.py`,
+  `test_state_store.py`, `test_web_ui.py`, `test_ui_reliability.py`
+- `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest`: 458 passed, 2 skipped, 4 gated staging tests deselected.
+- `ruff check src tests`: passed.
+- `mypy src`: no issues in 65 source files.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it staging configuration; no traffic was sent.
+- The headed open and reset were not driven manually in the real app with installed
+  Chrome. Coverage is unit tests and the fake-browser `ApplicationRunRuntime`
+  reliability tests.
+
+### Important Decisions
+
+- **Queue ID adoption goes through `CREATING`.** The lifecycle keeps `FAILED` terminal
+  except for re-creation, and unique `queue_id` stays the only duplicate authority.
+  Adoption leaves live status to the first verified inspection, not the adoption write.
+- **Reset reuses the existing ordered shutdown** and deletes rows only after every
+  owner has stopped. The schema is kept. The app stays up and goes to setup; it does
+  not exit.
+
+### Known Issues
+
+- Adoption against real Queue-it pages is unverified: the local simulator and the
+  real-Chrome workflow harness were not run for this path.
+- Reset does not cancel anything at Queue-it.
+
+### Follow-Up
+
+Optionally extend `queue-load-test-phase5-workflow` to cover opening a row without a
+Queue ID and Stop & Reset Run against the local simulator.
+
+### Git State
+
+- Commits: `c0c401f` (headed open without Queue ID), `c7f70b7` (Stop & Reset Run),
+  plus this documentation commit
+- Branch: `main`

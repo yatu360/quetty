@@ -21,8 +21,9 @@ live monitoring.
   single-instance `<database>.lock`.
 - **Startup/run config:** first boot shows setup (protected staging URL plus requested
   count), then persists one immutable `run_config` row. A restart skips setup and
-  resumes only the deficit to `requested + operator adjustment`. Retargeting is
-  unsupported (use a new, empty database). The setup page warns that the target URL is
+  resumes only the deficit to `requested + operator adjustment`. Existing identities
+  are never retargeted. **Stop & Reset Run** on the dashboard starts over instead (see
+  below). The setup page warns that the target URL is
   the protected destination: reaching it is `ADMITTED`, so the waiting-room URL must
   not be entered.
 - **Pause/resume:** a single persisted `runtime_control` flag gates automatic claims.
@@ -33,6 +34,29 @@ live monitoring.
   crash releases the lease, with a final evaluator pass when the page is still live.
   Restart clears stale ownership. `OPEN_IN_CHROME` is browser ownership, never
   `QueueStatus`.
+- **Manual Chrome without a Queue ID:** rows without a Queue ID (failed creations:
+  `FAILED`, empty transfer URL) now open at the run's protected staging URL, using
+  HYBRID state if any. They no longer fail with `EXPECTED_IDENTITY_MISSING`. Opening
+  records nothing.
+  - **Adoption:** on each heartbeat and at close, `QueueSessionRestorer.adopt_open`
+    looks for a live queue with a transfer identity. The manager then persists it the
+    same way creation does: `FAILED → CREATING`, where the unique `queue_id` rejects a
+    duplicate, then `PARKED` and due with the observed progress and HYBRID state. From
+    then on the normal verified inspection applies.
+  - **No ID or a duplicate:** closing before an ID appears leaves the row unchanged. A
+    duplicate ID is logged (`manual_identity_adoption_conflict`), the newly saved state
+    is discarded, and the row stays unchanged.
+- **Stop & Reset Run:** `POST /run/reset` (with a confirmation dialog) resets the app
+  to a fresh state.
+  - **Order:** `ApplicationRunRuntime.reset()` runs the existing ordered `close()`,
+    then discards the runtime components. Next, `SQLiteSessionRepository.reset_all()`
+    deletes `run_config`, `queue_sessions` and `queue_progress` and resets
+    `runtime_control` in one transaction. Finally `FileSystemStateStore.clear()`
+    deletes the state documents and abandoned temporary writes.
+  - **After a reset:** the UI stays up and redirects to `/setup` (`HX-Redirect`), and a
+    restart also opens on setup. Nothing is cancelled at Queue-it.
+  - **Failures and concurrency:** if the wipe fails, nothing is deleted and the run is
+    restarted. Other mutations and a second reset are refused while a reset runs.
 - **Operator actions:**
   - Refresh Now runs the existing monitor, including while paused.
   - Delete is local only (no Queue-it cancellation) and requires Close first.
@@ -45,8 +69,8 @@ live monitoring.
   (`docs/results/phase5_workflow_result.json`). The real CLI was checked for default
   localhost bind, a Playwright double-click, SIGKILL-with-headed-window recovery, a
   refused second instance, and clean SIGTERM.
-- **Final checks:** 448 passed (4 staging deselected), 13 integration passed, Ruff
-  clean, and mypy clean on darwin/linux. On win32, mypy reports 2 pre-existing
+- **Final checks:** 458 passed and 2 skipped (4 staging deselected) after the
+  follow-ups below. Ruff and mypy are clean on darwin/linux. On win32, mypy reports 2 pre-existing
   `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
 - **Known limitations:**
   - no staging validation;
@@ -54,7 +78,9 @@ live monitoring.
   - action banners are process-local;
   - automatic checks do not renew their lease;
   - Open is synchronous;
-  - no retargeting.
+  - no in-place retargeting (Stop & Reset Run wipes the database and starts over);
+  - adopting a Queue ID found in a window opened without one has only been exercised
+    against fakes, not a real Queue-it page.
 - Phase 5 Prompt 5 (history): the localhost operator UI was hardened for
   refresh/double-click/restart/Chrome-crash/database-failure/shutdown. See
   `docs/phase5_ui_reliability.md`.
@@ -100,6 +126,7 @@ live monitoring.
   and requested session count survive restart; the existing creation controller counts
   valid Queue IDs and resumes only the deficit. Setup refuses a database with legacy
   sessions but no run target, preventing unsafe identity retargeting.
+  `reset_all()` deletes the run and every session, so setup can start a new run.
 - Dashboard rows use a joined `LIMIT`/`OFFSET` projection of non-sensitive fields and a
   separate count query. The 50-row page works with 10,000 persisted sessions without
   calling `list()` or materializing the population. Search, lifecycle filtering,
