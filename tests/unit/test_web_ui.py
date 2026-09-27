@@ -74,7 +74,7 @@ class FakeRuntime:
                 lease_until=now + timedelta(seconds=30),
                 capacity=5,
             )
-        return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in Chrome")
+        return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in browser")
 
     async def close_session(self, session_id: str) -> bool:
         self.close_calls.append(session_id)
@@ -495,19 +495,19 @@ def test_dashboard_opens_and_closes_existing_session_in_chrome(tmp_path: Path) -
     app = create_app(settings=settings(database), repository=app_repository, runtime=runtime)
     with TestClient(app) as client:
         initial = client.get("/partials/sessions")
-        assert "Open in Chrome" in initial.text
+        assert ">Open<" in initial.text
 
         opened = client.post("/sessions/manual-session/open")
         assert opened.status_code == 200
-        assert "Opened in Chrome" in opened.text
-        assert "OPEN IN CHROME" in opened.text
+        assert "Opened in browser" in opened.text
+        assert "OPEN IN BROWSER" in opened.text
         assert ">Close<" in opened.text
         assert runtime.open_calls == ["manual-session"]
 
         closed = client.post("/sessions/manual-session/close")
         assert closed.status_code == 200
-        assert "Chrome session closed" in closed.text
-        assert "Open in Chrome" in closed.text
+        assert "Browser session closed" in closed.text
+        assert ">Open<" in closed.text
         assert runtime.close_calls == ["manual-session"]
 
 

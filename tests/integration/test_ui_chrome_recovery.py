@@ -121,7 +121,7 @@ async def test_chrome_kill_while_open_releases_ownership_and_reopens(tmp_path: P
     )
     try:
         opened = await manual.open(item.session_id)
-        assert opened.message == "Opened in Chrome"
+        assert opened.message == "Opened in browser"
         owned = await repository.get(item.session_id)
         assert owned is not None and owned.manual_owner_id is not None
         assert (await browser.capacity(repair=False)).active_contexts == 1
@@ -140,7 +140,7 @@ async def test_chrome_kill_while_open_releases_ownership_and_reopens(tmp_path: P
 
         # The next explicit Open relaunches the headed pool and restores the same identity.
         reopened = await manual.open(item.session_id)
-        assert reopened.message == "Opened in Chrome"
+        assert reopened.message == "Opened in browser"
         assert len(_chrome_main_processes()) == 1
     finally:
         await manual.close()  # app shutdown with the window open

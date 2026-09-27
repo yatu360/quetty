@@ -141,7 +141,12 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "setup.html",
-            {"error": None, "target_url": "", "requested_sessions": ""},
+            {
+                "error": None,
+                "target_url": "",
+                "requested_sessions": "",
+                "browser_backend": settings.browser_backend.value,
+            },
         )
 
     @app.post("/setup", response_class=HTMLResponse)
@@ -182,6 +187,7 @@ def create_app(
                     "error": error,
                     "target_url": raw_url,
                     "requested_sessions": raw_count,
+                    "browser_backend": settings.browser_backend.value,
                 },
                 status_code=422,
             )
@@ -190,6 +196,7 @@ def create_app(
             target_url=target_url,
             requested_sessions=requested_sessions,
             created_at=datetime.now(UTC),
+            browser_backend=settings.browser_backend,
         )
         try:
             await repository.create_run(run)
@@ -205,6 +212,7 @@ def create_app(
                     "error": str(exc),
                     "target_url": raw_url,
                     "requested_sessions": raw_count,
+                    "browser_backend": settings.browser_backend.value,
                 },
                 status_code=409,
             )
@@ -438,8 +446,8 @@ def create_app(
             search=search,
             status=status,
             runtime_state=runtime_state,
-            error=None if closed else "Session is not open in Chrome",
-            message="Chrome session closed" if closed else None,
+            error=None if closed else "Session is not open in a browser",
+            message="Browser session closed" if closed else None,
         )
 
     async def submit_operator_action(

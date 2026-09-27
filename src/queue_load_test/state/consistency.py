@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
-from queue_load_test.models import QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import BrowserBackendName, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository.base import RecoverySummary, SessionRepository
 from queue_load_test.state.base import (
     StateCorruptError,
@@ -73,8 +73,12 @@ class StateConsistencyChecker:
         self._state_store = state_store
 
     async def check(self) -> StateConsistencyReport:
-        sessions = await self._repository.list()
-        return await asyncio.to_thread(self._check_filesystem, sessions)
+        sessions, active_run = await asyncio.gather(
+            self._repository.list(),
+            self._repository.get_active_run(),
+        )
+        expected_backend = active_run.browser_backend if active_run is not None else None
+        return await asyncio.to_thread(self._check_filesystem, sessions, expected_backend)
 
     async def recovery_summary(self, *, now: datetime) -> RecoverySummary:
         """Add explicit filesystem findings to the aggregate database summary."""
@@ -94,6 +98,7 @@ class StateConsistencyChecker:
     def _check_filesystem(
         self,
         sessions: list[QueueSession],
+        expected_backend: BrowserBackendName | None,
     ) -> StateConsistencyReport:
         directory = self._state_store.directory
         normalize = _PathNormalizer()
@@ -110,6 +115,19 @@ class StateConsistencyChecker:
             if _requires_state(session):
                 required_paths.add(normalized)
                 required_session_count += 1
+
+            if expected_backend is not None and session.browser_backend is not expected_backend:
+                findings.append(
+                    StateConsistencyFinding(
+                        kind="backend_provenance_mismatch",
+                        state_path=str(session.state_path),
+                        session_ids=(session.session_id,),
+                        detail=(
+                            f"run backend is {expected_backend.value}; "
+                            f"session backend is {session.browser_backend.value}"
+                        ),
+                    )
+                )
 
             expected_path = self._state_store.path_for(session.session_id)
             if session.mode is SessionMode.HYBRID and normalized != normalize(expected_path):

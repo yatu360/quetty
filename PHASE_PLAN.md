@@ -523,8 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and Manual
-Open. Prompt 3's stable public identity failure blocks runtime enablement.
+**Next:** Phase 6 Prompt 5 — Camoufox Queue-Session Recovery and Capacity Benchmark.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -532,17 +531,19 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 3 stable identity/park-reopen investigation completed on 2026-09-27
-with a FAIL gate. Camoufox is NOT READY for persisted Queue sessions or to become the
-default.** See `docs/phase6_camoufox_context_strategy.md`.
+**Status: Prompt 4 runtime integration completed on 2026-09-27. Camoufox supports the
+complete local Queue-session workflow as an opt-in backend; it is not yet the default.**
+See `docs/phase6_camoufox_context_strategy.md` and
+`docs/phase6_runtime_integration.md`.
 
-The intended Phase 6 architecture remains:
+The Phase 6 identity architecture is:
 
-`one persisted Quetty session = one stable supported Camoufox identity descriptor`,
-while browser processes, contexts, workers, and tasks remain bounded and contexts stay
-temporary. Creation persists the Queue ID, transfer URL, storage state, identity
-descriptor, and browser provenance; restoration recreates a context with the same
-descriptor, verifies the expected Queue ID, refreshes state, and parks it again.
+`one persisted Quetty session = one authoritative Queue ID and Queue-it journey`, while
+browser processes, contexts, workers, and tasks remain bounded and contexts stay
+temporary. Creation persists Queue ID, transfer URL, same-backend HYBRID storage state,
+and backend provenance. Restoration creates a fresh context, verifies the expected
+Queue ID, refreshes state, and parks it again. Camoufox fingerprint continuity is
+unsupported but explicitly not required.
 
 This phase must not add proxy rotation, CAPTCHA solving, humanized-input tuning,
 WAF-specific bypass logic, traffic interception/evasion, undocumented Queue-it APIs,
@@ -561,8 +562,9 @@ or one browser process/profile per persisted session.
    - Public `AsyncNewContext` provides per-context fingerprints and accepts Playwright
      context options, including storage state. However, in 0.5.6 a reused preset still
      generates fresh identity components. There is no accepted complete, versioned,
-     deterministic per-context descriptor/export-import contract, so the preferred
-     identity strategy is blocked.
+     deterministic per-context descriptor/export-import contract. Prompt 4 clarified
+     that fingerprint continuity is not the Queue-session identity requirement, so this
+     unsupported capability does not block runtime integration.
    - Both directions of Chrome/Camoufox Queue-it storage-state compatibility are
      UNKNOWN. Existing runs remain Chrome unless a future explicit migration is
      separately evidenced.
@@ -596,7 +598,7 @@ or one browser process/profile per persisted session.
      Do not use the Camoufox option for Queue-it runs before Prompt 3.
 
 3. **Stable Camoufox Session Identity and Park/Reopen** — **completed on 2026-09-27;
-   FAIL / blocked by the Camoufox 0.5.6 public API.**
+   corrected during Prompt 4.**
    - Twenty local contexts using the same public preset retained core preset fields but
      changed observable canvas identity. JSON persistence plus a full
      Playwright/Camoufox runtime restart also changed the complete observation. A preset
@@ -605,24 +607,36 @@ or one browser process/profile per persisted session.
      change every time. Public launch-option replay is deterministic but process-scoped,
      contains implementation-owned configuration, and would require a keyed process per
      active session, so it is not the required per-context descriptor.
-   - No production descriptor/provenance format was fabricated or persisted. Legacy
-     unprovenanced state remains Chrome/Chromium based on repository history.
+   - Stable fingerprint reconstruction remains FAIL, but Queue ID—not fingerprint—is
+     the authoritative external identity. The fingerprint result is not a runtime gate.
+   - No descriptor was fabricated. Legacy unprovenanced state remains Chrome/Chromium
+     based on repository history.
    - Local meaningful storage-state results are Camoufox→Camoufox PASS,
      Chrome→Camoufox PASS, Camoufox→Chrome FAIL, and Chrome→Chrome PASS. Queue-it
      cross-engine behavior is still UNKNOWN.
    - See `docs/phase6_camoufox_context_strategy.md` and the four local evidence tests.
 
-4. **Camoufox Creation, Restoration, Monitoring, and Manual Open** — **next, but
-   implementation remains blocked by Prompt 3's stable public identity failure.** Do
-   not enable persisted Camoufox Queue sessions unless a released public per-context
-   identity contract resolves the gate. Once unblocked, implement disposable context
-   creation, transfer-first HYBRID restoration, TRANSFER_ONLY identity retention,
-   expected Queue ID verification, refreshed artifact persistence, monitoring, and
-   manual open using the same descriptor.
+4. **Camoufox Creation, Restoration, Monitoring, and Manual Open** — **completed on
+   2026-09-27.**
+   - Persisted `browser_backend` on immutable run configuration and every session;
+     legacy migrations default to Chrome, environment changes cannot migrate a run,
+     and run/session mismatches fail before opening a context.
+   - Routed setup/deficit creation, Add, create-first Replace, automatic monitoring,
+     Refresh Now, Delete, reset, restart, no-ID adoption, manual Open/Close, and window
+     loss through the selected backend without teaching orchestration layers Firefox.
+   - Every restore verifies the expected Queue ID. Mismatch evidence never overwrites
+     it or creates a replacement identity.
+   - Camoufox 0.5.6 repeated concurrent navigation waves proved unreliable locally, so
+     `CamoufoxBackend` serializes live contexts per process (not for the retained
+     manual Open pool). Fixed workers, global
+     capacity, shared processes, deadlines, and disposable contexts remain intact.
+   - Controlled local results: Camoufox application workflow 61/61, Chrome workflow
+     61/61, and 20/20 Camoufox park/reopen cycles including full process/repository
+     restart. No staging traffic was sent.
 
-5. **Camoufox Headed Open and Recovery** — planned after context lifecycle evidence.
-   Preserve manual ownership fencing, heartbeat, Close/window-close/crash release,
-   non-repairing liveness checks, final inspection, and shared global capacity.
+5. **Camoufox Queue-Session Recovery and Capacity Benchmark** — next. Quantify the
+   serialized Camoufox capacity profile, browser failure/restart recovery, sustained
+   park/reopen behavior, resource use, and safe operating bounds before default review.
 
 6. **Phase 6 Compatibility and Staging Acceptance** — planned. Require bounded
    multi-context/process evidence, app/process restart identity round trips, local

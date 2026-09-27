@@ -30,6 +30,7 @@ class LocalQueueSimulator:
     slow_ids: set[str] = field(default_factory=set)
     transfer_down_ids: set[str] = field(default_factory=set)
     mismatch_ids: set[str] = field(default_factory=set)
+    forced_new_ids: list[str] = field(default_factory=list)
     slow_seconds: float = 3.0
     new_identity_prefix: str = "sim-new"
     requests: int = 0
@@ -108,7 +109,11 @@ class LocalQueueSimulator:
             queue_id = query_id or cookie_id
             if queue_id is None:
                 self.new_identities += 1
-                queue_id = f"{self.new_identity_prefix}-{self.new_identities:05d}"
+                queue_id = (
+                    self.forced_new_ids.pop(0)
+                    if self.forced_new_ids
+                    else f"{self.new_identity_prefix}-{self.new_identities:05d}"
+                )
                 self.stages.setdefault(queue_id, STAGE_ACTIVE)
             if queue_id in self.empty_response_ids:
                 return  # close without a response: a genuine navigation failure

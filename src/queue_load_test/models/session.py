@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Self
 from uuid import uuid4
 
+from queue_load_test.models.browser import BrowserBackendName
+
 
 class ParseableStrEnum(StrEnum):
     """String enum with case-insensitive parsing."""
@@ -65,6 +67,7 @@ class QueueSession:
     state_path: Path = field(repr=False)
     queue_id: str | None = field(default=None, repr=False)
     session_id: str = field(default_factory=lambda: str(uuid4()))
+    browser_backend: BrowserBackendName = BrowserBackendName.CHROME
     status: QueueStatus = QueueStatus.NEW
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_checked_at: datetime | None = None
@@ -80,6 +83,7 @@ class QueueSession:
 
     def __post_init__(self) -> None:
         self.mode = SessionMode.parse(self.mode)
+        self.browser_backend = BrowserBackendName.parse(self.browser_backend)
         self.status = QueueStatus.parse(self.status)
         self.state_path = Path(self.state_path)
         if self.queue_id is not None and not self.queue_id.strip():

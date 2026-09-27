@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, cast
 
 import pytest
@@ -5,7 +6,6 @@ import pytest
 from queue_load_test.browser import (
     CAMOUFOX_BROWSER_VERSION,
     BrowserBackendSetupError,
-    BrowserCapacityError,
     BrowserManager,
     CamoufoxBackend,
     ChromeBackend,
@@ -115,7 +115,7 @@ async def test_missing_camoufox_build_has_actionable_error(monkeypatch: Any) -> 
         await CamoufoxBackend().launch(cast(Any, object()), headless=True)
 
 
-async def test_camoufox_manager_shares_one_bounded_process_across_contexts(
+async def test_camoufox_manager_serializes_contexts_on_one_bounded_process(
     monkeypatch: Any,
 ) -> None:
     browser = FakeBrowser()
@@ -152,15 +152,66 @@ async def test_camoufox_manager_shares_one_bounded_process_across_contexts(
 
     await manager.start()
     first = await manager.create_context()
-    second = await manager.create_context()
-    with pytest.raises(BrowserCapacityError):
-        await manager.create_context()
+    second_task = asyncio.create_task(manager.create_context())
+    await asyncio.sleep(0)
 
     assert launch_count == 1
     assert manager.managed_process_count == 1
-    assert manager.active_context_count == 2
+    assert manager.active_context_count == 1
+    assert not second_task.done()
     await first.close()
+    second = await second_task
+    assert manager.active_context_count == 1
     await second.close()
     await manager.shutdown()
     assert manager.managed_process_count == 0
     assert playwright.stopped
+
+
+class HangingCloseContext(FakeContext):
+    async def close(self) -> None:
+        await asyncio.Event().wait()
+
+
+async def test_camoufox_context_lease_is_per_process_and_released_when_close_starts(
+    monkeypatch: Any,
+) -> None:
+    contexts: list[FakeContext] = [HangingCloseContext(), FakeContext(), FakeContext()]
+
+    async def fake_new_context(*args: object, **kwargs: object) -> object:
+        return contexts.pop(0)
+
+    monkeypatch.setattr(backend_module, "AsyncNewContext", fake_new_context)
+    backend = CamoufoxBackend()
+    first_browser, second_browser = FakeBrowser(), FakeBrowser()
+
+    hanging = await backend.new_context(cast(Any, first_browser))
+    # A different managed process is not serialized behind the first one.
+    other = await asyncio.wait_for(backend.new_context(cast(Any, second_browser)), 1)
+
+    closing = asyncio.create_task(backend.close_context(hanging))
+    await asyncio.sleep(0)
+    # The close is still pending, but the process lease is already available.
+    replacement = await asyncio.wait_for(backend.new_context(cast(Any, first_browser)), 1)
+
+    assert not closing.done()
+    closing.cancel()
+    await backend.close_context(other)
+    await backend.close_context(replacement)
+
+
+async def test_camoufox_long_lived_pool_does_not_serialize_operator_contexts(
+    monkeypatch: Any,
+) -> None:
+    async def fake_new_context(*args: object, **kwargs: object) -> object:
+        return FakeContext()
+
+    monkeypatch.setattr(backend_module, "AsyncNewContext", fake_new_context)
+    backend = create_browser_backend(BrowserBackendName.CAMOUFOX, long_lived_contexts=True)
+    browser = FakeBrowser()
+
+    first = await backend.new_context(cast(Any, browser))
+    second = await asyncio.wait_for(backend.new_context(cast(Any, browser)), 1)
+
+    await backend.close_context(first)
+    await backend.close_context(second)

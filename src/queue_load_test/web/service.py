@@ -95,7 +95,7 @@ class ApplicationRunRuntime:
         repository: SessionRepository,
         manual_headless: bool = False,
     ) -> None:
-        """``manual_headless`` exists for local installed-Chrome tests only."""
+        """``manual_headless`` exists for controlled local browser tests only."""
 
         self._base_settings = settings
         self._manual_headless = manual_headless
@@ -119,6 +119,7 @@ class ApplicationRunRuntime:
                 update={
                     "staging_url": validated_url,
                     "target_queue_ids": run.requested_sessions,
+                    "browser_backend": run.browser_backend,
                 }
             )
             metrics = PrometheusMetrics()
@@ -130,7 +131,7 @@ class ApplicationRunRuntime:
                 shared_capacity=shared_capacity,
             )
             target_url = str(validated_url)
-            # Acquisition (setup, Add, Replace) may use its own visible Chrome while
+            # Acquisition (setup, Add, Replace) may use its own visible browser while
             # monitoring stays headless. The creator closes its context once the
             # Queue ID is persisted, so a session never moves between live browsers.
             creation_browser_manager = browser_manager
@@ -152,6 +153,7 @@ class ApplicationRunRuntime:
                 staging_url=target_url,
                 state_directory=settings.state_directory,
                 mode=settings.session_mode,
+                browser_backend=run.browser_backend,
                 observability=metrics,
             )
             population_adjustment = (
@@ -174,6 +176,7 @@ class ApplicationRunRuntime:
                 storage_navigation_url=target_url,
                 admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
                 observability=metrics,
+                browser_backend=run.browser_backend,
             )
             monitor = QueueSessionMonitor(
                 repository=self._repository,
@@ -189,7 +192,9 @@ class ApplicationRunRuntime:
                 headless=self._manual_headless,
                 observability=metrics,
                 shared_capacity=shared_capacity,
-                backend=create_browser_backend(settings.browser_backend),
+                backend=create_browser_backend(
+                    settings.browser_backend, long_lived_contexts=True
+                ),
             )
             headed_restorer = QueueSessionRestorer(
                 browser_manager=headed_manager,
@@ -199,6 +204,7 @@ class ApplicationRunRuntime:
                 storage_navigation_url=target_url,
                 admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
                 observability=metrics,
+                browser_backend=run.browser_backend,
             )
             manual_sessions = ManualChromeSessionManager(
                 repository=self._repository,
@@ -238,7 +244,7 @@ class ApplicationRunRuntime:
                 # calls close(); installing handlers here would stop the runtime
                 # while the web server kept running.
                 install_signal_handlers=False,
-                # After producers and automatic monitoring stop, but while Chrome is
+                # After producers and automatic monitoring stop, but while the browser is
                 # still usable: finish or cancel operator work, then persist and close
                 # headed sessions and release their ownership.
                 before_browser_shutdown=(
@@ -248,7 +254,7 @@ class ApplicationRunRuntime:
                             timeout_seconds=settings.shutdown_timeout_seconds
                         ),
                     ),
-                    ("manual_chrome", manual_sessions.close),
+                    ("manual_browser", manual_sessions.close),
                 ),
                 additional_browser_managers=(
                     (creation_browser_manager,)
@@ -350,7 +356,7 @@ class ApplicationRunRuntime:
         1. reject new operator/headed requests; 2. stop creation and automatic
         claims; 3. drain in-flight automatic checks and release queued leases;
         4. finish or cancel operator work; 5. persist and close headed sessions and
-        release their ownership; 6. close Chrome and the repository. Steps 3-6 run
+        release their ownership; 6. close browsers and the repository. Steps 3-6 run
         inside ``ApplicationRuntime.run`` so each is isolated from the others'
         failures.
         """
@@ -402,6 +408,7 @@ class ApplicationRunRuntime:
 class DashboardSummary:
     target_url: str
     requested_sessions: int
+    browser_backend: str
     valid_managed_sessions: int
     remaining_to_initial_target: int
     creation: str
@@ -438,6 +445,7 @@ class DashboardService:
         return DashboardSummary(
             target_url=run.target_url,
             requested_sessions=run.requested_sessions,
+            browser_backend=run.browser_backend.value,
             valid_managed_sessions=recovery.valid_queue_ids,
             remaining_to_initial_target=max(
                 0, run.requested_sessions - recovery.valid_queue_ids

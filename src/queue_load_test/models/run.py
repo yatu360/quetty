@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
+from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.session import QueueStatus
 
 
@@ -27,6 +28,7 @@ class RunConfig:
     target_url: str = field(repr=False)
     requested_sessions: int
     created_at: datetime
+    browser_backend: BrowserBackendName = BrowserBackendName.CHROME
     status: RunStatus = RunStatus.ACTIVE
 
 

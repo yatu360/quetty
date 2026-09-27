@@ -18,7 +18,7 @@ from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
-from queue_load_test.models import QueueProgress, QueueSession, SessionMode
+from queue_load_test.models import BrowserBackendName, QueueProgress, QueueSession, SessionMode
 from queue_load_test.queue_monitor import (
     AdmissionDetector,
     QueueItLiveStateExtractor,
@@ -65,6 +65,7 @@ class RestoreFailure(StrEnum):
     STATE_UNAVAILABLE = "STATE_UNAVAILABLE"
     STATE_CONTEXT_FAILED = "STATE_CONTEXT_FAILED"
     STATE_REFRESH_FAILED = "STATE_REFRESH_FAILED"
+    BACKEND_MISMATCH = "BACKEND_MISMATCH"
     INVALID_TRANSFER_URL = "INVALID_TRANSFER_URL"
     SESSION_EXPIRED = "SESSION_EXPIRED"
     EVENT_CLOSED = "EVENT_CLOSED"
@@ -159,6 +160,7 @@ class QueueSessionRestorer:
         sleep: Sleep = asyncio.sleep,
         observability: PrometheusMetrics | None = None,
         attempt_timeout_seconds: float | None = None,
+        browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
     ) -> None:
         if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
             raise ValueError("attempt_timeout_seconds must be positive")
@@ -185,6 +187,7 @@ class QueueSessionRestorer:
         self._observation_interval_seconds = observation_interval_seconds
         self._sleep = sleep
         self._observability = observability
+        self._browser_backend = BrowserBackendName.parse(browser_backend)
         # Bound the whole attempt: some Playwright calls (for example new_page after
         # the Chrome process is killed) never settle and have no timeout of their own.
         self._attempt_timeout_seconds = attempt_timeout_seconds or (
@@ -214,11 +217,14 @@ class QueueSessionRestorer:
             storage_navigation_url=settings.require_staging_url(),
             admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
             observability=observability,
+            browser_backend=settings.browser_backend,
         )
 
     async def restore(self, session: QueueSession) -> SessionRestoreResult:
         started = time.perf_counter()
-        result = await self._restore(session)
+        result = self._backend_mismatch_result(session) or await self._restore(session)
+        if result.failure is RestoreFailure.BACKEND_MISMATCH:
+            await self._record(session, result)
         self._observe_restore_result(session, result, time.perf_counter() - started)
         return result
 
@@ -231,7 +237,11 @@ class QueueSessionRestorer:
 
         method = RestoreMethod(method)
         started = time.perf_counter()
-        result = await self._restore_with_method(session, method)
+        result = self._backend_mismatch_result(session, method=method)
+        if result is None:
+            result = await self._restore_with_method(session, method)
+        else:
+            await self._record(session, result)
         self._observe_restore_result(session, result, time.perf_counter() - started)
         return result
 
@@ -239,6 +249,11 @@ class QueueSessionRestorer:
         """Restore a session while retaining only a verified live context."""
 
         started = time.perf_counter()
+        mismatch = self._backend_mismatch_result(session)
+        if mismatch is not None:
+            await self._record(session, mismatch)
+            self._observe_restore_result(session, mismatch, time.perf_counter() - started)
+            return OpenedSessionRestore(mismatch)
         expected_queue_id = session.queue_id
         if expected_queue_id is None:
             return await self._open_unidentified(session)
@@ -579,6 +594,8 @@ class QueueSessionRestorer:
     async def _load_storage_state(
         self, session: QueueSession
     ) -> tuple[ContextStorageState | None, RestoreFailure | None]:
+        if session.browser_backend is not self._browser_backend:
+            return None, RestoreFailure.BACKEND_MISMATCH
         try:
             state = await self._state_store.load(session.session_id)
         except (StateUnreadableError, OSError):
@@ -588,6 +605,25 @@ class QueueSessionRestorer:
         if state is None:
             return None, RestoreFailure.STATE_MISSING
         return cast(ContextStorageState, state), None
+
+    def _backend_mismatch_result(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod = RestoreMethod.TRANSFER,
+    ) -> SessionRestoreResult | None:
+        """Reject a session created by another backend without exposing state."""
+
+        if session.browser_backend is self._browser_backend:
+            return None
+        return self._result(
+            RestoreAttempt(
+                method=method,
+                success=False,
+                failure=RestoreFailure.BACKEND_MISMATCH,
+            ),
+            session.queue_id,
+        )
 
     async def _browser_attempt(
         self,

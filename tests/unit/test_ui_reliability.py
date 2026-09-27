@@ -449,10 +449,10 @@ async def test_restart_clears_stale_manual_and_lease_ownership_under_instance_lo
     async with running(app) as client:
         assert ownership_rows(database) == 0
         page = await client.get("/partials/sessions")
-        assert "OPEN IN CHROME" not in page.text
+        assert "OPEN IN BROWSER" not in page.text
         assert "CHECKING" not in page.text
         opened = await client.post("/sessions/persisted-0/open", headers={"HX-Request": "true"})
-        assert "Opened in Chrome" in opened.text
+        assert "Opened in browser" in opened.text
         refresh = await client.post("/sessions/persisted-1/refresh")
         assert "Refresh: requested" in refresh.text or "Refresh: running" in refresh.text
         await eventually(lambda: _progress_is(repository, "persisted-1", 64.0))
@@ -813,7 +813,7 @@ async def test_reset_whose_wipe_fails_restarts_the_existing_run(
         assert queue_ids(database) == before
         # The restarted runtime serves headed opens again.
         opened = await client.post("/sessions/persisted-0/open")
-        assert "Opened in Chrome" in opened.text
+        assert "Opened in browser" in opened.text
         assert world.open_contexts == 1
     assert ownership_rows(database) == 0
 
@@ -848,4 +848,3 @@ def _read_progress(database: Path, session_id: str) -> float | None:
             (session_id,),
         ).fetchone()
     return None if row is None else float(row[0])
-

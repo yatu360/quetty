@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from queue_load_test.models import (
+    BrowserBackendName,
     BrowserRuntimeState,
     QueueProgress,
     QueueSession,
@@ -40,7 +41,7 @@ from queue_load_test.utils.asyncio_tools import run_to_completion
 _T = TypeVar("_T")
 
 _SESSION_COLUMNS = """
-    session_id, queue_id, transfer_url, mode, status, state_path,
+    session_id, queue_id, transfer_url, mode, browser_backend, status, state_path,
     created_at, last_checked_at, last_queue_update, last_progress_change_at,
     next_check_at, attempt_count, last_error, worker_id, lease_until,
     manual_owner_id, manual_lease_until
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS run_config (
     run_id TEXT PRIMARY KEY,
     target_url TEXT NOT NULL,
     requested_sessions INTEGER NOT NULL CHECK (requested_sessions > 0),
+    browser_backend TEXT NOT NULL DEFAULT 'chrome',
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
@@ -92,6 +94,7 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     queue_id TEXT UNIQUE,
     transfer_url TEXT NOT NULL,
     mode TEXT NOT NULL,
+    browser_backend TEXT NOT NULL DEFAULT 'chrome',
     status TEXT NOT NULL,
     state_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -176,6 +179,7 @@ def _session_values(session: QueueSession) -> tuple[object, ...]:
         session.queue_id,
         session.transfer_url,
         session.mode.value,
+        session.browser_backend.value,
         session.status.value,
         str(session.state_path),
         _to_storage(session.created_at),
@@ -201,6 +205,7 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
         queue_id=row["queue_id"],
         transfer_url=row["transfer_url"],
         mode=SessionMode.parse(row["mode"]),
+        browser_backend=BrowserBackendName.parse(row["browser_backend"]),
         status=QueueStatus.parse(row["status"]),
         state_path=Path(row["state_path"]),
         created_at=created_at,
@@ -349,7 +354,8 @@ class SQLiteSessionRepository:
         def operation() -> RunConfig | None:
             row = self._connect().execute(
                 """
-                SELECT run_id, target_url, requested_sessions, created_at, status
+                SELECT run_id, target_url, requested_sessions, browser_backend,
+                       created_at, status
                 FROM run_config WHERE current_run = 1
                 """
             ).fetchone()
@@ -362,6 +368,7 @@ class SQLiteSessionRepository:
                 run_id=str(row["run_id"]),
                 target_url=str(row["target_url"]),
                 requested_sessions=int(row["requested_sessions"]),
+                browser_backend=BrowserBackendName.parse(row["browser_backend"]),
                 created_at=created_at,
                 status=RunStatus(str(row["status"])),
             )
@@ -384,13 +391,15 @@ class SQLiteSessionRepository:
                 connection.execute(
                     """
                     INSERT INTO run_config (
-                        run_id, target_url, requested_sessions, created_at, status, current_run
-                    ) VALUES (?, ?, ?, ?, ?, 1)
+                        run_id, target_url, requested_sessions, browser_backend,
+                        created_at, status, current_run
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         run.run_id,
                         run.target_url,
                         run.requested_sessions,
+                        run.browser_backend.value,
                         _to_storage(run.created_at),
                         run.status.value,
                     ),
@@ -518,7 +527,7 @@ class SQLiteSessionRepository:
                 if row["manual_owner_id"] is not None and (
                     manual_until is None or manual_until > now
                 ):
-                    raise ManualSessionBusyError("Close the Chrome session before continuing")
+                    raise ManualSessionBusyError("Close the browser session before continuing")
                 # An expired lease belongs to an owner that stopped renewing it; every
                 # later write from that owner is fenced by worker_id, exactly as for
                 # the scheduler's own expired-lease reclaim.
@@ -651,7 +660,7 @@ class SQLiteSessionRepository:
                 if row is None:
                     raise SessionNotFoundError(f"Session {session_id!r} does not exist")
                 if row["manual_owner_id"] is not None:
-                    raise ManualSessionBusyError("Session is already open in Chrome")
+                    raise ManualSessionBusyError("Session is already open in a browser")
                 # A live automatic/operator lease excludes headed ownership. An expired
                 # lease is abandoned (its owner stopped renewing it, or crashed) and
                 # is taken over with the same fencing the scheduler uses; otherwise
@@ -812,6 +821,7 @@ class SQLiteSessionRepository:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(_SCHEMA)
             self._migrate_session_columns(connection)
+            self._migrate_run_columns(connection)
             self._migrate_runtime_control_columns(connection)
             self._ensure_due_index(connection)
             connection.execute(_MANUAL_LEASE_INDEX_SQL)
@@ -836,6 +846,23 @@ class SQLiteSessionRepository:
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE queue_sessions ADD COLUMN {name} TEXT")
+        if "browser_backend" not in columns:
+            connection.execute(
+                "ALTER TABLE queue_sessions ADD COLUMN "
+                "browser_backend TEXT NOT NULL DEFAULT 'chrome'"
+            )
+
+    @staticmethod
+    def _migrate_run_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(run_config)").fetchall()
+        }
+        if "browser_backend" not in columns:
+            connection.execute(
+                "ALTER TABLE run_config ADD COLUMN "
+                "browser_backend TEXT NOT NULL DEFAULT 'chrome'"
+            )
 
     @staticmethod
     def _migrate_runtime_control_columns(connection: sqlite3.Connection) -> None:
@@ -912,7 +939,7 @@ class SQLiteSessionRepository:
             try:
                 connection.execute(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _session_values(session),
                 )
                 if progress is not None:
@@ -943,7 +970,7 @@ class SQLiteSessionRepository:
             try:
                 connection.executemany(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (_session_values(session) for session, _ in rows),
                 )
                 for _, progress in rows:
@@ -991,7 +1018,8 @@ class SQLiteSessionRepository:
                 cursor = connection.execute(
                     """
                     UPDATE queue_sessions SET
-                        queue_id = ?, transfer_url = ?, mode = ?, status = ?, state_path = ?,
+                        queue_id = ?, transfer_url = ?, mode = ?, browser_backend = ?,
+                        status = ?, state_path = ?,
                         last_checked_at = ?, last_queue_update = ?,
                         last_progress_change_at = ?, next_check_at = ?, attempt_count = ?,
                         last_error = ?, worker_id = ?, lease_until = ?,
@@ -999,7 +1027,7 @@ class SQLiteSessionRepository:
                     WHERE session_id = ?
                     """
                     + ownership_sql,
-                    values[1:6] + values[7:] + (session.session_id,) + ownership_parameters,
+                    values[1:7] + values[8:] + (session.session_id,) + ownership_parameters,
                 )
                 if cursor.rowcount != 1:
                     connection.rollback()

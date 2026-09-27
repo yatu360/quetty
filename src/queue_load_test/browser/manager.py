@@ -317,7 +317,10 @@ class BrowserManager:
     async def _launch_browser(self) -> Browser:
         if self._playwright is None:
             raise BrowserManagerNotStartedError("Playwright is not running")
-        return await self._backend.launch(self._playwright, headless=self._headless)
+        return await asyncio.wait_for(
+            self._backend.launch(self._playwright, headless=self._headless),
+            timeout=self._operation_timeout_seconds,
+        )
 
     def _active_context_count(self) -> int:
         return sum(len(slot.contexts) for slot in self._slots)
@@ -739,7 +742,10 @@ class BrowserManager:
         self._slots.clear()
         if self._playwright is not None:
             try:
-                await self._playwright.stop()
+                await asyncio.wait_for(
+                    self._playwright.stop(),
+                    timeout=self._close_timeout_seconds,
+                )
             except Exception as exc:  # noqa: BLE001
                 if self._observability is not None:
                     self._observability.record_browser_cleanup_failure()

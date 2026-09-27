@@ -7,6 +7,7 @@ import pytest
 
 from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
 from queue_load_test.models import (
+    BrowserBackendName,
     QueueProgress,
     QueueSession,
     QueueStatus,
@@ -662,3 +663,73 @@ async def test_reset_all_removes_run_sessions_progress_and_controls(tmp_path: Pa
     )
     await repository.create(make_session("three", queue_id="queue-one"))
     await repository.close()
+
+
+async def test_browser_backend_provenance_round_trips_and_legacy_defaults_to_chrome(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "backend.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    run = RunConfig(
+        run_id="camoufox-run",
+        target_url="https://staging.example.test/queue",
+        requested_sessions=1,
+        created_at=NOW,
+        browser_backend=BrowserBackendName.CAMOUFOX,
+    )
+    item = make_session("camoufox-session", queue_id="camoufox-queue")
+    item.browser_backend = BrowserBackendName.CAMOUFOX
+    await repository.create_run(run)
+    await repository.create(item)
+    await repository.close()
+
+    reopened = SQLiteSessionRepository(database)
+    assert (await reopened.get_active_run()).browser_backend is BrowserBackendName.CAMOUFOX  # type: ignore[union-attr]
+    assert (await reopened.get(item.session_id)).browser_backend is BrowserBackendName.CAMOUFOX  # type: ignore[union-attr]
+    await reopened.close()
+
+    legacy_database = tmp_path / "legacy-backend.sqlite3"
+    with sqlite3.connect(legacy_database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE run_config (
+                run_id TEXT PRIMARY KEY, target_url TEXT NOT NULL,
+                requested_sessions INTEGER NOT NULL, created_at TEXT NOT NULL,
+                status TEXT NOT NULL, current_run INTEGER NOT NULL UNIQUE
+            );
+            CREATE TABLE queue_sessions (
+                session_id TEXT PRIMARY KEY, queue_id TEXT UNIQUE,
+                transfer_url TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL,
+                state_path TEXT NOT NULL, created_at TEXT NOT NULL,
+                last_checked_at TEXT, next_check_at TEXT, attempt_count INTEGER NOT NULL,
+                last_error TEXT, worker_id TEXT, lease_until TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO run_config VALUES (?, ?, ?, ?, ?, 1)",
+            ("legacy", run.target_url, 1, NOW.isoformat(), "ACTIVE"),
+        )
+        connection.execute(
+            "INSERT INTO queue_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-session",
+                "legacy-queue",
+                "https://staging.example.test/transfer",
+                "HYBRID",
+                "PARKED",
+                ".browser-state/legacy-session.json",
+                NOW.isoformat(),
+                None,
+                NOW.isoformat(),
+                0,
+                None,
+                None,
+                None,
+            ),
+        )
+
+    legacy = SQLiteSessionRepository(legacy_database)
+    assert (await legacy.get_active_run()).browser_backend is BrowserBackendName.CHROME  # type: ignore[union-attr]
+    assert (await legacy.get("legacy-session")).browser_backend is BrowserBackendName.CHROME  # type: ignore[union-attr]
+    await legacy.close()

@@ -32,16 +32,16 @@
         <td>{{ session.last_queue_update or "—" }}</td>
         <td>{{ session.last_checked_at or "—" }}</td>
         <td>{{ session.next_check_at or "—" }}</td>
-        <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN CHROME{% else %}{{ session.runtime_state.value }}{% endif %}</td>
+        <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN BROWSER{% else %}{{ session.runtime_state.value }}{% endif %}</td>
         <td>
           {% if action %}<div class="action-status">{{ action.kind.value | title }}: {{ action.status.value | lower }}</div>{% endif %}
           {% if session.runtime_state.value == "OPEN_IN_CHROME" %}
           <button hx-post="{{ base }}/close?{{ query }}" {{ mutate | safe }}>Close</button>
           {% elif session.runtime_state.value == "CHECKING" or pending %}
-          <button disabled title="Another owner is using this session">Open in Chrome</button>
+          <button disabled title="Another owner is using this session">Open</button>
           <button disabled>Refresh Now</button><button disabled>Replace</button><button disabled>Delete</button>
           {% else %}
-          <button hx-post="{{ base }}/open?{{ query }}" {{ mutate | safe }}>Open in Chrome</button>
+          <button hx-post="{{ base }}/open?{{ query }}" {{ mutate | safe }}>Open</button>
           <button hx-post="{{ base }}/refresh?{{ query }}&token={{ render_token }}" {{ mutate | safe }}>Refresh Now</button>
           <button hx-post="{{ base }}/replace?{{ query }}&token={{ render_token }}"
                   hx-confirm="Replace this managed session? The old session is kept if acquisition fails."

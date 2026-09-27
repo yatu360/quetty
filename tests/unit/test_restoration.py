@@ -8,7 +8,13 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics import PrometheusMetrics
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+)
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.state import FileSystemStateStore, StateUnreadableError
 from queue_load_test.transfer import (
@@ -181,6 +187,32 @@ async def setup_restorer(
         browser_manager,
         transfer_extractor,
     )
+
+
+async def test_backend_provenance_mismatch_fails_without_opening_context(
+    tmp_path: Path,
+) -> None:
+    result = TransferExtractionResult(
+        transfer_url="https://queue.staging.test/journey?q=queue-expected",
+        expected_queue_id="queue-expected",
+        observed_queue_id="queue-expected",
+    )
+    restorer, persisted, repository, _, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [result],
+    )
+    persisted.browser_backend = BrowserBackendName.CAMOUFOX
+    await repository.update(persisted)
+
+    restored = await restorer.restore(persisted)
+
+    assert not restored.success
+    assert restored.failure is RestoreFailure.BACKEND_MISMATCH
+    assert persisted.queue_id == "queue-expected"
+    assert manager.contexts == []
+    assert (await repository.get(persisted.session_id)).queue_id == "queue-expected"  # type: ignore[union-attr]
+    await repository.close()
 
 
 def matching_result() -> TransferExtractionResult:

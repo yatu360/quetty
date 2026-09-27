@@ -2,8 +2,8 @@
 
 This runs the real operator stack end to end: the FastAPI app and lifespan, the
 persisted RunConfig, bounded creation, the scheduler/monitor/lifecycle evaluator,
-operator actions, the headed-Chrome manager, SQLite, local state files, and
-installed Google Chrome. Requests are the same HTTP calls the HTMX dashboard makes.
+operator actions, the headed-browser manager, SQLite, local state files, and the
+selected installed browser backend. Requests are the same HTTP calls the HTMX dashboard makes.
 
 The only substitute is the target: ``LocalQueueSimulator`` on 127.0.0.1 serves
 Queue-it-*like* pages with synthetic identities. This is **not** Queue-it and no
@@ -31,6 +31,12 @@ import httpx
 
 from queue_load_test.config import Settings
 from queue_load_test.harness.local_queue_simulator import LocalQueueSimulator
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+)
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.utils.instance_lock import InstanceLock
 from queue_load_test.web.app import create_app
@@ -59,7 +65,7 @@ class Recorder:
         return bool(passed)
 
 
-def _chrome_processes() -> int:
+def _browser_processes(backend: BrowserBackendName) -> int:
     try:
         psutil: Any = importlib.import_module("psutil")
     except ImportError:  # pragma: no cover - benchmark extra
@@ -70,9 +76,12 @@ def _chrome_processes() -> int:
             arguments = process.cmdline()
         except psutil.Error:
             continue
-        if "--remote-debugging-pipe" in arguments and not any(
-            argument.startswith("--type=") for argument in arguments
-        ):
+        if backend is BrowserBackendName.CHROME:
+            if "--remote-debugging-pipe" in arguments and not any(
+                argument.startswith("--type=") for argument in arguments
+            ):
+                count += 1
+        elif arguments and Path(arguments[0]).name.casefold() == "camoufox":
             count += 1
     return count
 
@@ -150,11 +159,18 @@ async def until(
         await asyncio.sleep(interval)
 
 
-def workflow_settings(directory: Path, *, database: Path, headed: bool = False) -> Settings:
+def workflow_settings(
+    directory: Path,
+    *,
+    database: Path,
+    headed: bool = False,
+    backend: BrowserBackendName = BrowserBackendName.CHROME,
+) -> Settings:
     values: dict[str, object] = {
         "DATABASE_URL": f"sqlite:///{database}",
         "STATE_DIRECTORY": directory / "state",
         "SESSION_MODE": "HYBRID",
+        "BROWSER_BACKEND": backend.value,
         "CHROME_PROCESS_COUNT": 1,
         "MAX_CONTEXTS_PER_BROWSER": 5,
         "MAX_ACTIVE_CONTEXTS": 5,
@@ -178,7 +194,7 @@ def workflow_settings(directory: Path, *, database: Path, headed: bool = False) 
         "SERVICED_SOON_POLL_MIN_SECONDS": 1.5,
         "SERVICED_SOON_POLL_MAX_SECONDS": 2,
         "MAX_MANUAL_REQUESTED_SESSIONS": 50,
-        # Acquisition windows follow --headed, like the manual Chrome pool.
+        # Acquisition windows follow --headed, like the manual browser pool.
         "CREATION_HEADLESS": not headed,
     }
     return Settings(_env_file=None, **values)  # type: ignore[arg-type, call-arg]
@@ -193,15 +209,29 @@ def _dd(html: str, label: str) -> str | None:
     return match.group(1) if match else None
 
 
-async def run_workflow(directory: Path, *, headed: bool) -> dict[str, Any]:
+async def run_workflow(
+    directory: Path,
+    *,
+    headed: bool,
+    backend: BrowserBackendName = BrowserBackendName.CHROME,
+) -> dict[str, Any]:
     record = Recorder()
     simulator = LocalQueueSimulator(new_identity_prefix="sim-accept")
     await simulator.start()
     database_path = directory / "operator.sqlite3"
     db = Database(database_path)
-    settings = workflow_settings(directory, database=database_path, headed=headed)
+    settings = workflow_settings(
+        directory,
+        database=database_path,
+        headed=headed,
+        backend=backend,
+    )
     target = simulator.entry_url
-    evidence: dict[str, Any] = {"headed_manual_chrome": headed, "requested": REQUESTED}
+    evidence: dict[str, Any] = {
+        "browser_backend": backend.value,
+        "headed_manual_browser": headed,
+        "requested": REQUESTED,
+    }
 
     def build() -> tuple[Any, ApplicationRunRuntime]:
         repository = SQLiteSessionRepository(database_path)
@@ -222,12 +252,30 @@ async def run_workflow(directory: Path, *, headed: bool) -> dict[str, Any]:
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ui:
-                await _first_boot(ui, record, db, target, evidence)
+                await _first_boot(ui, record, db, target, evidence, backend=backend)
                 await _dashboard(ui, record, db, simulator, evidence)
                 await _pause_resume(ui, record, db, evidence)
-                await _open_close(ui, record, db, simulator, runtime, evidence)
+                await _open_close(
+                    ui,
+                    record,
+                    db,
+                    simulator,
+                    runtime,
+                    evidence,
+                    backend=backend,
+                )
                 await _refresh(ui, record, db, simulator, evidence)
                 await _add_replace_delete(ui, record, db, directory, evidence)
+                await _no_id_open_and_window_loss(
+                    ui,
+                    record,
+                    db,
+                    simulator,
+                    runtime,
+                    settings.state_directory,
+                    backend,
+                )
+                evidence["identities_created_before_restart"] = simulator.new_identities
                 # Persist a PAUSED control so the restart has something to recover.
                 await ui.post("/monitoring/pause", headers={"HX-Request": "true"})
                 before_shutdown = db.identities()
@@ -235,10 +283,10 @@ async def run_workflow(directory: Path, *, headed: bool) -> dict[str, Any]:
                     "SELECT operator_population_adjustment FROM runtime_control"
                 )
         record.check(
-            "shutdown_zero_contexts_owners_and_chrome",
-            db.owners() == 0 and _chrome_processes() == 0,
+            "shutdown_zero_contexts_owners_and_browser_processes",
+            db.owners() == 0 and _browser_processes(backend) == 0,
             owners=db.owners(),
-            chrome_processes=_chrome_processes(),
+            browser_processes=_browser_processes(backend),
         )
         record.check(
             "shutdown_deleted_or_replaced_nothing",
@@ -304,12 +352,43 @@ async def run_workflow(directory: Path, *, headed: bool) -> dict[str, Any]:
                     "RUNNING" in resumed.text and elapsed is not None,
                     seconds=elapsed,
                 )
+                reset = await ui.post("/run/reset", headers={"HX-Request": "true"})
+                state_files = (
+                    list(settings.state_directory.iterdir())
+                    if settings.state_directory.exists()
+                    else []
+                )
+                record.check(
+                    "stop_and_reset_clears_run_sessions_state_and_ownership",
+                    reset.status_code == 204
+                    and reset.headers.get("HX-Redirect") == "/setup"
+                    and db.value("SELECT COUNT(*) FROM run_config") == 0
+                    and db.value("SELECT COUNT(*) FROM queue_sessions") == 0
+                    and db.value("SELECT COUNT(*) FROM queue_progress") == 0
+                    and db.owners() == 0
+                    and _browser_processes(backend) == 0
+                    and state_files == [],
+                    state_files=len(state_files),
+                    browser_processes=_browser_processes(backend),
+                )
+                setup_after_reset = await ui.get("/")
+                record.check(
+                    "stop_and_reset_returns_to_setup",
+                    setup_after_reset.headers.get("location") == "/setup",
+                )
         record.check(
             "final_shutdown_clean",
-            db.owners() == 0 and _chrome_processes() == 0,
+            db.owners() == 0 and _browser_processes(backend) == 0,
             owners=db.owners(),
         )
-        await _partial_resume(directory / "partial", simulator, record, evidence, headed=headed)
+        await _partial_resume(
+            directory / "partial",
+            simulator,
+            record,
+            evidence,
+            headed=headed,
+            backend=backend,
+        )
     finally:
         await simulator.close()
 
@@ -332,6 +411,7 @@ async def _partial_resume(
     evidence: dict[str, Any],
     *,
     headed: bool,
+    backend: BrowserBackendName,
 ) -> None:
     """Stop during initial acquisition, restart, and resume only the deficit."""
 
@@ -339,7 +419,12 @@ async def _partial_resume(
     directory.mkdir(parents=True, exist_ok=True)
     database_path = directory / "partial.sqlite3"
     db = Database(database_path)
-    settings = workflow_settings(directory, database=database_path, headed=headed).model_copy(
+    settings = workflow_settings(
+        directory,
+        database=database_path,
+        headed=headed,
+        backend=backend,
+    ).model_copy(
         update={"creation_workers": 1}
     )
     # Slow each new identity so shutdown lands mid-acquisition deterministically.
@@ -408,6 +493,8 @@ async def _first_boot(
     db: Database,
     target: str,
     evidence: dict[str, Any],
+    *,
+    backend: BrowserBackendName,
 ) -> None:
     root = await ui.get("/")
     setup = await ui.get("/setup")
@@ -464,7 +551,7 @@ async def _first_boot(
         "bounded_acquisition_reaches_target",
         elapsed is not None and db.valid() == REQUESTED,
         seconds=evidence["acquisition_seconds"],
-        chrome_processes=_chrome_processes(),
+        browser_processes=_browser_processes(backend),
     )
     record.check(
         "dashboard_shows_sessions_as_they_appear",
@@ -472,9 +559,9 @@ async def _first_boot(
         rows_seen=evidence["dashboard_rows_seen"],
     )
     record.check(
-        "chrome_processes_bounded_during_acquisition",
-        0 <= _chrome_processes() <= 1,
-        chrome_processes=_chrome_processes(),
+        "browser_processes_bounded_during_acquisition",
+        0 <= _browser_processes(backend) <= 1,
+        browser_processes=_browser_processes(backend),
     )
 
 
@@ -492,8 +579,12 @@ async def _dashboard(
     first_id, first_queue = sessions[0]
 
     async def progress_visible() -> bool:
-        page = await ui.get("/partials/sessions")
-        return "44.0%" in page.text
+        await ui.get("/partials/sessions")
+        return int(
+            db.value(
+                "SELECT COUNT(*) FROM queue_progress WHERE progress_percentage = 44"
+            )
+        ) == REQUESTED
 
     elapsed = await until(progress_visible, timeout=20, interval=0.3)
     page = (await ui.get("/partials/sessions")).text
@@ -551,7 +642,6 @@ async def _pause_resume(
     evidence: dict[str, Any],
 ) -> None:
     identities = db.identities()
-    statuses = dict(db.rows("SELECT session_id, status FROM queue_sessions"))
     paused = await ui.post("/monitoring/pause", headers={"HX-Request": "true"})
     record.check(
         "pause_persisted",
@@ -559,6 +649,7 @@ async def _pause_resume(
         and db.value("SELECT monitoring_paused FROM runtime_control") == 1,
     )
     await asyncio.sleep(1.0)  # let any check already in flight finish
+    statuses = dict(db.rows("SELECT session_id, status FROM queue_sessions"))
     snapshot = dict(db.rows("SELECT session_id, last_checked_at FROM queue_sessions"))
     await asyncio.sleep(4.5)  # more than two polling intervals
     later = dict(db.rows("SELECT session_id, last_checked_at FROM queue_sessions"))
@@ -588,6 +679,8 @@ async def _open_close(
     simulator: LocalQueueSimulator,
     runtime: ApplicationRunRuntime,
     evidence: dict[str, Any],
+    *,
+    backend: BrowserBackendName,
 ) -> None:
     session_a, session_b = evidence["session_ids"][:2]
     queue_a = db.identities()[session_a]
@@ -599,16 +692,16 @@ async def _open_close(
     opened = await ui.post(f"/sessions/{session_a}/open", headers={"HX-Request": "true"})
     row = db.session(session_a) or {}
     record.check(
-        "open_in_chrome_restores_existing_identity",
-        "Opened in Chrome" in opened.text
-        and "OPEN IN CHROME" in opened.text
+        "open_in_browser_restores_existing_identity",
+        "Opened in browser" in opened.text
+        and "OPEN IN BROWSER" in opened.text
         and row.get("manual_owner_id") is not None
         and row.get("queue_id") == queue_a,
-        headed=evidence["headed_manual_chrome"],
-        chrome_processes=_chrome_processes(),
+        headed=evidence["headed_manual_browser"],
+        browser_processes=_browser_processes(backend),
     )
     record.check(
-        "open_in_chrome_is_not_queue_status",
+        "open_in_browser_is_not_queue_status",
         row.get("status") != "OPEN_IN_CHROME" and "ACTIVE_QUEUE" in opened.text,
         persisted_status=row.get("status"),
     )
@@ -627,8 +720,8 @@ async def _open_close(
     delete_busy = await ui.post(f"/sessions/{session_a}/delete", headers={"HX-Request": "true"})
     record.check(
         "refresh_and_delete_refused_while_open",
-        "Close the Chrome session" in refresh_busy.text
-        and "Close the Chrome session" in delete_busy.text
+        "Close the browser session" in refresh_busy.text
+        and "Close the browser session" in delete_busy.text
         and db.session(session_a) is not None,
     )
     capacity = await runtime.capacity()
@@ -641,7 +734,7 @@ async def _open_close(
     row = db.session(session_a) or {}
     record.check(
         "close_releases_ownership_and_persists_latest_state",
-        "Chrome session closed" in closed.text
+        "Browser session closed" in closed.text
         and row.get("manual_owner_id") is None
         and db.progress(session_a) == 58.0
         and row.get("next_check_at") != next_while_open
@@ -662,7 +755,7 @@ async def _open_close(
     row = db.session(session_a) or {}
     record.check(
         "identity_mismatch_preserves_expected_queue_id",
-        "Opened in Chrome" not in mismatch.text
+        "Opened in browser" not in mismatch.text
         and row.get("queue_id") == queue_a
         and row.get("manual_owner_id") is None
         and simulator.new_identities == REQUESTED,
@@ -792,17 +885,114 @@ async def _add_replace_delete(
     )
     repeated = await ui.post(f"/sessions/{session_d}/delete", headers={"HX-Request": "true"})
     record.check("repeat_delete_is_idempotent", "already deleted" in repeated.text)
-    # REQUESTED initial identities + 1 Add + 1 Replace; the mismatch Open created none.
-    evidence["identities_created_before_restart"] = REQUESTED + 2
+async def _no_id_open_and_window_loss(
+    ui: httpx.AsyncClient,
+    record: Recorder,
+    db: Database,
+    simulator: LocalQueueSimulator,
+    runtime: ApplicationRunRuntime,
+    state_directory: Path,
+    backend: BrowserBackendName,
+) -> None:
+    """Exercise adoption, duplicate rejection, and live-window loss on the real backend."""
+
+    repository = SQLiteSessionRepository(db.path)
+    adopted_id = "accept-no-id-adopt"
+    duplicate_id = "accept-no-id-duplicate"
+    try:
+        for session_id in (adopted_id, duplicate_id):
+            await repository.create(
+                QueueSession(
+                    session_id=session_id,
+                    queue_id=None,
+                    transfer_url="",
+                    mode=SessionMode.HYBRID,
+                    browser_backend=backend,
+                    status=QueueStatus.FAILED,
+                    state_path=state_directory / f"{session_id}.json",
+                    last_error="controlled_no_identity",
+                )
+            )
+    finally:
+        await repository.close()
+
+    opened = await ui.post(f"/sessions/{adopted_id}/open", headers={"HX-Request": "true"})
+    elapsed = await until(
+        lambda: (db.session(adopted_id) or {}).get("queue_id") is not None,
+        timeout=10,
+    )
+    adopted = db.session(adopted_id) or {}
+    adopted_queue_id = adopted.get("queue_id")
+    record.check(
+        "no_id_open_adopts_first_unique_queue_identity",
+        "no Queue ID yet" in opened.text
+        and elapsed is not None
+        and adopted_queue_id is not None
+        and adopted.get("browser_backend") == backend.value,
+        seconds=elapsed,
+    )
+
+    manual = runtime._manual_sessions
+    assert manual is not None
+    live = manual._open.get(adopted_id)
+    assert live is not None
+    await live.page.close()
+    released = await until(
+        lambda: (db.session(adopted_id) or {}).get("manual_owner_id") is None,
+        timeout=10,
+    )
+    record.check(
+        "manual_window_loss_releases_ownership_and_parks",
+        released is not None and adopted_id not in manual._open,
+        seconds=released,
+    )
+
+    existing_queue = next(
+        queue_id for queue_id in db.identities().values() if queue_id is not None
+    )
+    simulator.forced_new_ids.append(existing_queue)
+    duplicate_open = await ui.post(
+        f"/sessions/{duplicate_id}/open",
+        headers={"HX-Request": "true"},
+    )
+    await until(
+        lambda: bool(
+            runtime._manual_sessions
+            and runtime._manual_sessions._open.get(duplicate_id)
+            and runtime._manual_sessions._open[duplicate_id].adoption_blocked
+        ),
+        timeout=10,
+    )
+    duplicate = db.session(duplicate_id) or {}
+    record.check(
+        "duplicate_no_id_adoption_is_rejected_without_replacing_existing_identity",
+        "no Queue ID yet" in duplicate_open.text
+        and duplicate.get("queue_id") is None
+        and duplicate.get("status") == QueueStatus.FAILED.value
+        and existing_queue in db.identities().values()
+        and not (state_directory / f"{duplicate_id}.json").exists(),
+    )
+    await ui.post(f"/sessions/{duplicate_id}/close", headers={"HX-Request": "true"})
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--headed", action="store_true", help="show the operator Chrome window")
+    parser.add_argument("--headed", action="store_true", help="show the operator browser window")
+    parser.add_argument(
+        "--backend",
+        choices=tuple(backend.value for backend in BrowserBackendName),
+        default=BrowserBackendName.CHROME.value,
+    )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory(prefix="phase5-workflow-") as directory:
-        result = asyncio.run(run_workflow(Path(directory), headed=args.headed))
+        result = asyncio.run(
+            run_workflow(
+                Path(directory),
+                headed=args.headed,
+                backend=BrowserBackendName.parse(args.backend),
+            )
+        )
     text = json.dumps(result, indent=2, default=str)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,13 @@ from queue_load_test.browser import BrowserManager, BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+)
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import QueueIdConflictError, SessionRepository
 from queue_load_test.state import BrowserState, StateStore, StateStoreError
@@ -162,6 +168,7 @@ class QueueSessionCreator:
         staging_url: str,
         state_directory: Path,
         mode: SessionMode,
+        browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
         live_extractor: QueueItLiveStateExtractor | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
         retry_policy: CreationRetryPolicy | None = None,
@@ -178,6 +185,7 @@ class QueueSessionCreator:
         self._staging_url = staging_url
         self._state_directory = state_directory
         self._mode = SessionMode.parse(mode)
+        self._browser_backend = BrowserBackendName.parse(browser_backend)
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
         self._transfer_extractor_factory = transfer_extractor_factory
         self._retry_policy = retry_policy or CreationRetryPolicy()
@@ -339,6 +347,7 @@ class QueueSessionCreator:
                 queue_id=queue_id,
                 transfer_url=transfer.transfer_url,
                 mode=self._mode,
+                browser_backend=self._browser_backend,
                 status=QueueStatus.PARKED,
                 state_path=state_path,
                 created_at=observed_at,
@@ -425,6 +434,7 @@ class QueueSessionCreator:
             queue_id=None,
             transfer_url="",
             mode=self._mode,
+            browser_backend=self._browser_backend,
             status=QueueStatus.FAILED,
             state_path=self._state_directory / f"{work_item.session_id}.json",
             attempt_count=attempts,

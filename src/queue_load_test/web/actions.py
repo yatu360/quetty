@@ -78,7 +78,7 @@ class OperatorActionManager:
 
     Per-session actions acquire a persisted, fenced operator lease *before* they
     are queued, so incompatible work on one session (automatic check, headed
-    Chrome, another operator action) is rejected atomically while different
+    a live browser, another operator action) is rejected atomically while different
     sessions proceed concurrently up to ``worker_count``. Request tokens make a
     repeated submission of the same rendered button return the original action.
     """

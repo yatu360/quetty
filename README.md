@@ -57,10 +57,13 @@ intentionally pinned because upstream explicitly recorded Playwright 1.61/1.62
 compatibility for that build and this project locally validated it.
 
 `BROWSER_BACKEND=chrome|camoufox` is typed and defaults to `chrome`. The Camoufox path
-in this prompt proves bounded launch/context/close/recovery only. Stable per-session
-Camoufox identity and park/reopen are not implemented until Phase 6 Prompt 3, so do not
-use the Camoufox option for Queue-it runs yet. Neither backend adds proxy rotation,
-CAPTCHA solving, WAF-specific behavior, or traffic interception.
+is opt-in for new runs and supports the same Queue-session workflow. Queue ID is the
+authoritative persisted identity; transfer URL and same-backend HYBRID storage state
+restore it in a fresh disposable context. Camoufox fingerprint continuity is neither
+available in 0.5.6 nor required, and no fingerprint data is persisted. Backend
+provenance is persisted on the run and session, so legacy records remain Chrome and
+cross-backend restoration fails closed. Neither backend adds proxy rotation, CAPTCHA
+solving, WAF-specific behavior, or traffic interception.
 
 The application is configured through environment variables. Start from:
 
@@ -91,7 +94,7 @@ background tasks.
 On a new empty database, the UI shows setup before any dashboard. Enter an authorised
 absolute HTTP(S) staging URL and the requested session count. Start persists the run,
 then delegates acquisition to the existing fixed worker pool and bounded queue. It does
-not create population-sized tasks, Chrome processes, or contexts. A database containing
+not create population-sized tasks, browser processes, or contexts. A database containing
 sessions but no run configuration is rejected because those identities cannot safely
 be associated with a newly entered target.
 
@@ -102,12 +105,12 @@ would make every observation look admitted. The setup page states this.
 
 Restarting `queue-load-test-ui` loads the same persisted run, skips setup, counts valid
 persisted Queue IDs, and resumes only the remaining acquisition deficit. Existing
-identities are never silently retargeted. New sessions acquire their Queue ID in visible
-Chrome (`CREATION_HEADLESS=false`) and are then monitored headlessly (`HEADLESS=true`);
+identities are never silently retargeted. New sessions acquire their Queue ID in a visible
+browser (`CREATION_HEADLESS=false`) and are then monitored headlessly (`HEADLESS=true`);
 set `CREATION_HEADLESS=true` to acquire headlessly too.
 
 To start over, use **Stop & Reset Run** on the dashboard. After you confirm, it runs the normal ordered shutdown (creation, monitoring,
-operator work, headed Chrome, then the automatic browsers). It then deletes the run, every
+operator work, headed browsers, then the automatic browsers). It then deletes the run, every
 session and its progress, and all saved browser state, and resets the pause and population
 controls. The UI returns to setup, and a restart also opens on setup. Nothing is cancelled
 at Queue-it. If the database wipe fails, nothing is deleted and the existing run restarts.
@@ -133,10 +136,11 @@ This global control is not Queue-it's `PAUSED` lifecycle observation. It affects
 automatic scheduling; headed sessions and manual refresh actions remain separate
 controls.
 
-Each persisted row has **Open in Chrome**. The action restores the expected Queue ID
-through the existing transfer-first/HYBRID identity checks and retains a context in one
-shared visible installed-Google-Chrome pool. `OPEN_IN_CHROME` is browser ownership, not
-a `QueueStatus`; the Queue-it status remains independently visible. An identity mismatch
+Each persisted row has **Open**. The action restores the expected Queue ID through the
+existing transfer-first/HYBRID identity checks and retains a context in one shared
+visible browser pool. The historical internal value `OPEN_IN_CHROME` is retained for
+database compatibility; the UI presents it as **OPEN IN BROWSER**. It is browser
+ownership, not a `QueueStatus`; Queue-it status remains independently visible. An identity mismatch
 or restore failure leaves the expected Queue ID unchanged, closes browser resources, and
 shows only a sanitized error.
 
@@ -146,10 +150,10 @@ in the same UI process are idempotent, and manual contexts share the global
 `MAX_ACTIVE_CONTEXTS` budget with automatic work. When the configured manual or global
 budget is full, the UI reports **Browser capacity currently unavailable**.
 
-Closing the page/window, using **Close**, losing the headed Chrome process, or shutting
+Closing the page/window, using **Close**, losing the headed browser process, or shutting
 down the application releases ownership. When the page is still inspectable, closure
 uses the normal lifecycle evaluator, saves progress and a fresh HYBRID `storage_state`,
-and computes the normal next check. If Chrome has already gone away, the last persisted
+and computes the normal next check. If the browser has already gone away, the last persisted
 state is preserved and automatic monitoring can recover later. After a crash, restart
 clears all persisted headed ownership (see below); no browser-only state can keep a
 session open forever.
@@ -158,7 +162,7 @@ The remaining per-row controls reuse those same domain services. **Refresh Now**
 the session, restores its expected identity, runs one normal evaluator/monitor pass,
 persists progress and state, and parks it again. It is intentionally available while
 automatic monitoring is globally paused, but reports busy during an automatic check,
-another refresh, or **Open in Chrome**. **Delete** means “stop managing this visitor”:
+another refresh, or **Open**. **Delete** means “stop managing this visitor”:
 after browser confirmation it removes the session, progress, leases, transfer identity,
 and local HYBRID state; it never calls a Queue-it cancellation API. An open headed
 session must be closed before deletion.
@@ -298,8 +302,9 @@ Prometheus at `/metrics` and import the file, or read `/status` directly.
 python -m pytest
 ```
 
-The ordinary suite includes a controlled 10-session Chrome integration run
-against a local Queue-it-shaped simulator. It does not contact staging. Tests
+The ordinary suite includes controlled Chrome and Camoufox application workflows plus
+a 20-cycle Camoufox park/reopen and process/repository restart run against a local
+Queue-it-shaped simulator. It does not contact staging. Tests
 marked `staging` are excluded by default even if staging configuration is
 present.
 

@@ -1,4 +1,4 @@
-"""Bounded headed-Chrome ownership for operator-opened persisted sessions."""
+"""Bounded headed-browser ownership for operator-opened persisted sessions."""
 
 from __future__ import annotations
 
@@ -98,11 +98,11 @@ class ManualChromeSessionManager:
     async def open(self, session_id: str) -> ManualOpenResult:
         async with self._lock:
             if self._closing:
-                raise ManualOpenError("Manual Chrome is shutting down")
+                raise ManualOpenError("Manual browser is shutting down")
             if session_id in self._open:
                 return ManualOpenResult(
                     ManualOpenStatus.ALREADY_OPEN,
-                    "Session is already open in Chrome",
+                    "Session is already open in a browser",
                 )
             task = self._opening.get(session_id)
             if task is None:
@@ -154,7 +154,7 @@ class ManualChromeSessionManager:
             opened.owned_context.context.on("close", lambda _: record.closed.set())
             async with self._lock:
                 if self._closing:
-                    raise ManualOpenError("Manual Chrome is shutting down")
+                    raise ManualOpenError("Manual browser is shutting down")
                 self._open[session_id] = record
                 record.watcher = asyncio.create_task(
                     self._watch(record),
@@ -163,15 +163,15 @@ class ManualChromeSessionManager:
             if record.identity_pending:
                 return ManualOpenResult(
                     ManualOpenStatus.OPENED,
-                    "Opened in Chrome (no Queue ID yet; it will be captured if one appears)",
+                    "Opened in browser (no Queue ID yet; it will be captured if one appears)",
                 )
-            return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in Chrome")
+            return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in browser")
         except BrowserCapacityError as exc:
             raise ManualOpenError("Browser capacity currently unavailable") from exc
         except ManualOpenError:
             raise
         except Exception as exc:
-            raise ManualOpenError("Unable to open session in Chrome") from exc
+            raise ManualOpenError("Unable to open session in browser") from exc
         finally:
             async with self._lock:
                 retained = session_id in self._open
@@ -186,9 +186,9 @@ class ManualChromeSessionManager:
                 await self._browser_manager.start()
 
     async def _browser_alive(self, record: _OpenSession) -> bool:
-        """Check the owning headed Chrome without triggering a restart.
+        """Check the owning headed browser without triggering a restart.
 
-        Repairing here would relaunch a visible Chrome window after a crash even
+        Repairing here would relaunch a visible browser window after a crash even
         though no operator asked for one; the pool is restarted lazily by the next
         Open instead.
         """
@@ -285,7 +285,7 @@ class ManualChromeSessionManager:
                     await self._monitor.apply_restore_result(session, result)
         except Exception as exc:  # noqa: BLE001 - preserve state and release ownership
             logger.warning(
-                "Final manual Chrome inspection failed for %s: %s",
+                "Final manual browser inspection failed for %s: %s",
                 record.session_id,
                 type(exc).__name__,
             )
@@ -393,6 +393,6 @@ class ManualChromeSessionManager:
                 log_event(
                     logger,
                     logging.WARNING,
-                    "manual_chrome_shutdown_failed",
+                    "manual_browser_shutdown_failed",
                     error_type=type(exc).__name__,
                 )

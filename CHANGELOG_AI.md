@@ -3778,3 +3778,62 @@ provenance, and actual local cross-engine storage-state behavior.
 - Exact next task: **Phase 6 Prompt 4 — Camoufox Creation, Restoration, Monitoring, and
   Manual Open.** Its implementation remains blocked until a released supported
   per-context identity contract resolves this gate.
+
+## 2026-09-27 — Phase 6 Prompt 4 — Camoufox creation, restoration, monitoring, and manual Open
+
+### Agent / Model
+
+OpenAI Codex / GPT-5 (implementation), completed by Claude Code / Claude Opus 5.5
+after Codex ran out of usage.
+
+### Design correction
+
+- Prompt 3's stable per-context fingerprint result remains **FAIL / unsupported** but is
+  now explicitly **NOT REQUIRED**. Queue ID is the authoritative persisted journey
+  identity; transfer URL and same-backend storage state are restoration mechanisms;
+  BrowserContexts are disposable and fingerprints may change on reconstruction. A
+  fingerprint change never permits Queue ID replacement, and the expected Queue ID is
+  never silently overwritten. Prompt 3 is no longer described as blocking Phase 6.
+
+### Changes made
+
+- Persisted `browser_backend` provenance on `run_config` and every `queue_sessions`
+  row, with legacy databases migrated to `chrome`. Restart rebuilds the runtime from the
+  persisted run backend. Run/session mismatch returns `BACKEND_MISMATCH` before any
+  context opens and the state checker reports `backend_provenance_mismatch`, so
+  cross-engine storage fallback is never attempted implicitly. No fingerprint data is
+  persisted.
+- Creator, restorer, setup acquisition, deficit acquisition, Add, create-first Replace,
+  monitoring, Refresh Now, manual Open/Close, no-ID Open adoption, Delete, and Stop &
+  Reset run unchanged through the selected backend; orchestration stays browser-agnostic.
+- Browser launch and Playwright shutdown are now deadline-bounded like the other
+  browser operations.
+- `CamoufoxBackend` serializes live contexts per managed process for 0.5.6 navigation
+  reliability. Claude corrected Codex's first version, which used one backend-wide lease
+  waited on under the manager allocation lock: the lease is now per process, released
+  when a close starts, dropped with its process, and disabled for the long-lived manual
+  Open pool, where a retained window would otherwise block every other allocation.
+- Browser-neutral UI wording; the persisted `OPEN_IN_CHROME` value is retained and
+  documented as historical browser-ownership naming. The run backend appears once in
+  run information. No fingerprint information is displayed.
+- The Phase 5 workflow harness is backend-parameterized (`--backend chrome|camoufox`)
+  and counts only parent Camoufox processes.
+- Added `tests/integration/test_camoufox_queue_continuity.py` (20 park/reopen cycles
+  with a full process/repository restart at cycle 10, mismatch preservation, and
+  TRANSFER_ONLY without state) and backend lease unit tests.
+- Added `docs/phase6_runtime_integration.md`; updated README, PROJECT_CONTEXT,
+  PHASE_PLAN, and the Camoufox context strategy.
+
+### Validation
+
+- Controlled Chrome workflow: **61/61 PASS**. Controlled Camoufox workflow: **61/61 PASS**.
+- Camoufox continuity: **20/20** cycles, Queue ID and provenance unchanged; injected
+  mismatch failed without overwriting the expected Queue ID.
+- Full non-staging suite: **483 passed, 4 staging tests deselected**.
+- `ruff check src tests`: passed. `mypy src`: passed, 68 source files.
+- Staging: **NOT RUN**. No Queue-it traffic was sent.
+
+### Next task
+
+Camoufox remains opt-in and non-default. Exact next task: **Phase 6 Prompt 5 — Camoufox
+Queue-Session Recovery and Capacity Benchmark.**

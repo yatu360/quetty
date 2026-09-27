@@ -8,7 +8,13 @@ from typing import cast
 
 import pytest
 
-from queue_load_test.models import QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueSession,
+    QueueStatus,
+    RunConfig,
+    SessionMode,
+)
 from queue_load_test.repository import SessionRepository, SQLiteSessionRepository
 from queue_load_test.state import FileSystemStateStore, StateConsistencyChecker
 
@@ -102,6 +108,37 @@ async def test_consistency_checker_does_not_require_state_for_transfer_only_or_f
         await repository.close()
 
 
+async def test_consistency_checker_reports_run_session_backend_provenance_mismatch(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(":memory:")
+    store = FileSystemStateStore(tmp_path / "state")
+    await repository.create_run(
+        RunConfig(
+            run_id="camoufox-run",
+            target_url="https://queue.test/",
+            requested_sessions=1,
+            created_at=datetime(2026, 9, 27, tzinfo=UTC),
+            browser_backend=BrowserBackendName.CAMOUFOX,
+        )
+    )
+    legacy_chrome = _session("legacy-chrome", store.path_for("legacy-chrome"))
+    await repository.create(legacy_chrome)
+    await store.save(legacy_chrome.session_id, {"cookies": [], "origins": []})
+
+    try:
+        report = await StateConsistencyChecker(repository, store).check()
+
+        assert report.count("backend_provenance_mismatch") == 1
+        finding = next(
+            item for item in report.findings if item.kind == "backend_provenance_mismatch"
+        )
+        assert finding.session_ids == ("legacy-chrome",)
+        assert finding.detail == "run backend is camoufox; session backend is chrome"
+    finally:
+        await repository.close()
+
+
 async def test_state_store_slow_write_does_not_block_event_loop(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -131,6 +168,9 @@ class _ListingRepository:
 
     async def list(self) -> list[QueueSession]:
         return list(self._sessions)
+
+    async def get_active_run(self) -> RunConfig | None:
+        return None
 
 
 def _checker(sessions: list[QueueSession], store: FileSystemStateStore) -> StateConsistencyChecker:
