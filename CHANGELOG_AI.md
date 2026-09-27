@@ -3303,3 +3303,55 @@ Phase 5 complete — define Phase 6 only from the next operator/product requirem
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
+## 2026-09-27 — Phase 5 follow-up — Dashboard index write-cost recheck
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Confirm that the Phase 5 dashboard-order index does not regress the Phase 4
+10,000-row write and seeding benchmark.
+
+### Findings
+
+- An A/B of `phase3_repository --sessions 10000 --batch-size 50 --samples 20` compared
+  the pre-index commit `8135510` with current code, three alternating runs each, on
+  macOS (Apple M5 Pro).
+- Seeding was 7.7% slower with the index (3,240 → 3,489 ms), and the database was
+  about 1.09 MB larger.
+- Updates were initially about 8% slower because `update()` rewrote the immutable
+  `created_at`, forcing index maintenance.
+- Due count, claims, releases, scheduler iteration, and the due-query plan were
+  unchanged.
+
+### Fix
+
+- `SQLiteSessionRepository.update()` no longer writes `created_at`. A regression test
+  (`test_update_never_rewrites_created_at`) covers this.
+- An interleaved micro-benchmark of 3,000 durable updates per variant, run twice,
+  measured:
+  - no index: 0.237–0.238 ms p50;
+  - index with the old update: 0.262–0.264 ms p50;
+  - index with the fixed update: 0.237–0.238 ms p50.
+
+### Files Modified
+
+- `src/queue_load_test/repository/sqlite.py`
+- `tests/unit/test_repository.py`
+- `docs/phase4_postgresql_readiness.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `.venv/bin/python -m pytest`: 449 passed, 4 gated staging tests deselected.
+- Ruff: passed.
+- mypy: no issues in 65 source files.
+- Phase 5 UI benchmark: the dashboard still uses `idx_queue_sessions_dashboard_order`.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`

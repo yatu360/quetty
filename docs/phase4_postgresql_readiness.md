@@ -266,3 +266,36 @@ Reopen the PostgreSQL gate if sustained browser-backed measurement shows SQLite 
 serialization, lock waits, claim/update/release latency, backlog recovery, or a
 multi-node ownership requirement missing the agreed cadence. The current check does
 not measure PostgreSQL, multi-process contention, or real Queue-it write rates.
+
+## Phase 5 Index Recheck — 2026-09-27
+
+Phase 5 added `idx_queue_sessions_dashboard_order (created_at, session_id)` for the
+operator dashboard. SQLite creates it for every database a component connects to, so
+the 10,000-row benchmark above was re-run with and without it. The host was an Apple
+M5 Pro on macOS with SQLite 3.50.4. The runs used the same command, alternated between
+the pre-index commit `8135510` and current code, and used fresh databases.
+
+| Median of 3 runs | Without index | With index |
+|---|---:|---:|
+| Seed 10,000 one-row commits | 3,240 ms (3,086 rows/s) | 3,489 ms (2,866 rows/s), +7.7% |
+| Database size | 4,407,296 bytes | 5,500,928 bytes |
+| Due count, claim 50, lease release, scheduler iteration | — | unchanged within noise |
+| Due-query plan | `idx_queue_sessions_due` | unchanged |
+
+**Updates.** The first comparison also showed updates about 8% slower. The cause was
+that `update()` rewrote the immutable `created_at` column, which forced index
+maintenance on every update. `update()` no longer writes `created_at`; a regression
+test covers this. The benchmark's update metric uses 20 samples, too few to resolve a
+difference this small, so a dedicated interleaved micro-benchmark measured 3,000
+durable one-row updates per variant, twice:
+
+| Variant | Update p50 | Update p95 |
+|---|---:|---:|
+| No index | 0.237–0.238 ms | 0.327–0.366 ms |
+| Index, old update (`created_at` in `SET`) | 0.262–0.264 ms | 0.356–0.358 ms |
+| Index, current update | 0.237–0.238 ms | 0.322 ms |
+
+**Net effect.** Inserts pay about 25 µs for the extra index entry, and the database is
+about 1.1 MB larger per 10,000 sessions. Updates, claims, releases, and due queries are
+unaffected. This does not change the SQLite decision. The Windows figures above were
+not re-measured.

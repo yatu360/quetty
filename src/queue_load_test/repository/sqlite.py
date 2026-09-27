@@ -960,18 +960,21 @@ class SQLiteSessionRepository:
                 elif session.manual_owner_id is not None:
                     ownership_sql = " AND worker_id IS NULL AND manual_owner_id = ?"
                     ownership_parameters = (session.manual_owner_id,)
+                # created_at is immutable after insert. Leaving it out of SET keeps
+                # SQLite from maintaining the dashboard-order index on every update.
+                values = _session_values(session)
                 cursor = connection.execute(
                     """
                     UPDATE queue_sessions SET
                         queue_id = ?, transfer_url = ?, mode = ?, status = ?, state_path = ?,
-                        created_at = ?, last_checked_at = ?, last_queue_update = ?,
+                        last_checked_at = ?, last_queue_update = ?,
                         last_progress_change_at = ?, next_check_at = ?, attempt_count = ?,
                         last_error = ?, worker_id = ?, lease_until = ?,
                         manual_owner_id = ?, manual_lease_until = ?
                     WHERE session_id = ?
                     """
                     + ownership_sql,
-                    _session_values(session)[1:] + (session.session_id,) + ownership_parameters,
+                    values[1:6] + values[7:] + (session.session_id,) + ownership_parameters,
                 )
                 if cursor.rowcount != 1:
                     connection.rollback()

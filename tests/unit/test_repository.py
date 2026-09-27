@@ -601,3 +601,20 @@ async def test_progress_survives_repository_restart(tmp_path: Path) -> None:
 
     assert loaded == expected_progress
     await restarted_repository.close()
+
+
+async def test_update_never_rewrites_created_at(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "created-at.sqlite3")
+    session = make_session("immutable", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW)
+    await repository.create(session)
+    original = (await repository.get("immutable")).created_at  # type: ignore[union-attr]
+
+    session.created_at = NOW + timedelta(days=30)
+    session.last_error = "changed"
+    await repository.update(session)
+
+    persisted = await repository.get("immutable")
+    assert persisted is not None
+    assert persisted.created_at == original
+    assert persisted.last_error == "changed"
+    await repository.close()
