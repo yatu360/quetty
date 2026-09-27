@@ -375,7 +375,8 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–5 implemented; 10,000-session staging acquisition NOT RUN.**
+**Status: Prompts 1–6 implemented; 10,000-session staging acquisition and monitoring
+NOT RUN.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
 
@@ -433,9 +434,16 @@ Planned prompt breakdown:
    no-navigation preflight mechanics passed, but no configured authorised environment
    existed, so all real 10,000-ID outcomes remain UNKNOWN. See
    `docs/phase4_acquisition.md`.
-6. **Phase 4 Prompt 6 — 10,000-session monitoring/backlog benchmark (next)** — validate adaptive cadence,
-   prioritization, sweep time, queue depth, fairness, and degraded-mode behavior.
-7. **Worker/node loss and disaster recovery** — exercise lease expiry, process/node
+6. **Phase 4 Prompt 6 — 10,000-session monitoring/backlog benchmark** — **completed
+   synthetically on 2026-09-27; authorised Queue-it monitoring NOT RUN.** Two
+   deliberate 10,000-row sweeps with 20 fixed workers, a 50-item queue, and 50-row
+   claims drained to zero in 76.595/92.241 seconds at 130.56/108.41 synthetic checks/s,
+   with zero failures and lease conflicts. A production-policy adaptive simulation
+   checked all 10,000, exposed a 2,885-row maximum backlog and 26.599-second maximum
+   oldest-overdue age, and ended at zero. Process CPU averaged/peaked at 59.00/81.8%
+   and RSS at 68.08/76.54 MB. Browser restore, identity, navigation, Chrome resources,
+   and sustainable live cadence remain UNKNOWN. See `docs/phase4_monitoring.md`.
+7. **Scale resilience, recovery, and observability (next)** — exercise lease expiry, process/node
    loss, restart, state-store faults, and identity preservation.
 8. **Production observability and Phase 4 acceptance** — finalize dashboards/alerts and
    produce the full PASS/FAIL/UNKNOWN scale report.

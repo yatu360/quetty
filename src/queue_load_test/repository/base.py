@@ -25,6 +25,19 @@ class LeaseOwnershipError(RepositoryError):
 
 
 @dataclass(frozen=True, slots=True)
+class DueSessionSummary:
+    """Low-cost aggregate view of currently claimable monitoring work."""
+
+    count: int
+    oldest_due_at: datetime | None
+
+    def oldest_overdue_seconds(self, *, now: datetime) -> float:
+        if self.oldest_due_at is None:
+            return 0.0
+        return max(0.0, (now - self.oldest_due_at).total_seconds())
+
+
+@dataclass(frozen=True, slots=True)
 class RecoverySummary:
     """Low-cost aggregate view of persisted recovery state."""
 
@@ -77,6 +90,8 @@ class SessionRepository(Protocol):
     async def get_progress(self, session_id: str) -> QueueProgress | None: ...
 
     async def count_due_sessions(self, *, now: datetime) -> int: ...
+
+    async def due_session_summary(self, *, now: datetime) -> DueSessionSummary: ...
 
     async def claim_due_sessions(
         self,

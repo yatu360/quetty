@@ -206,6 +206,16 @@ class PrometheusMetrics:
             "Due, currently unleased sessions waiting to be claimed.",
             registry=self.registry,
         )
+        self.monitoring_overdue_sessions = Gauge(
+            "monitoring_overdue_sessions",
+            "Claimable sessions whose next check time has arrived.",
+            registry=self.registry,
+        )
+        self.monitoring_oldest_overdue_seconds = Gauge(
+            "monitoring_oldest_overdue_seconds",
+            "Age in seconds of the oldest currently claimable session.",
+            registry=self.registry,
+        )
         self.monitoring_sessions_claimed_total = Counter(
             "monitoring_sessions_claimed_total",
             "Sessions successfully claimed for monitoring.",
@@ -347,8 +357,15 @@ class PrometheusMetrics:
         self.monitoring_workers_active.set(active_workers)
         self.monitoring_queue_depth.set(queue_depth)
 
-    def set_monitoring_backlog(self, due_sessions: int) -> None:
+    def set_monitoring_backlog(
+        self,
+        due_sessions: int,
+        *,
+        oldest_overdue_seconds: float = 0.0,
+    ) -> None:
         self.monitoring_due_backlog.set(due_sessions)
+        self.monitoring_overdue_sessions.set(due_sessions)
+        self.monitoring_oldest_overdue_seconds.set(max(0.0, oldest_overdue_seconds))
 
     def record_monitoring_claims(self, claimed: int) -> None:
         self.monitoring_sessions_claimed_total.inc(claimed)

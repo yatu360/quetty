@@ -9,10 +9,10 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4; Prompts 1–5 are implemented. The authorised 10,000-session
-  target run has **NOT RUN**.
-- Last completed work: the gated 10,000-ID acquisition preflight and resumable harness,
-  `docs/phase4_acquisition.md`.
+- Current phase: Phase 4; Prompts 1–6 are implemented. Both the authorised 10,000-ID
+  acquisition and browser-backed 10,000-session monitoring run are **NOT RUN**.
+- Last completed work: the bounded 10,000-row monitoring/backlog harness and measured
+  local report, `docs/phase4_monitoring.md`.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -20,11 +20,16 @@ live monitoring.
   reliability remain unproven.
 - Phase 2 acceptance remains **3 PASS, 2 FAIL, 15 UNKNOWN**. The missing measurements
   are carried as explicit blockers, not converted into Phase 3 scalability claims.
-- Phase 4 readiness: browser-backed creation duration and monitoring checks/s are
-  UNKNOWN. The 10,000-row synthetic monitoring projection is 10.56–10.58 seconds at
-  the measured Phase 3 synthetic rate, or 21.11–21.16 seconds with an assumed 50%
-  planning utilization. Neither is a real Queue-it sweep estimate. SQLite and
-  distribution decisions for the larger target remain UNKNOWN.
+- Phase 4 monitoring: two actual local synthetic 10,000-row sweeps used 20 fixed
+  workers, a 50-item queue, and 50-row claims. They drained 10,000 to zero in
+  76.595/92.241 seconds (130.56/108.41 synthetic checks/s), with zero failures or lease
+  conflicts. An adaptive production-policy simulation checked all 10,000, peaked at a
+  2,885-row backlog and 26.599-second oldest-overdue age, then drained to zero. This
+  supersedes the earlier linear projection but remains scheduler/SQLite evidence only;
+  real browser-backed checks/s and cadence are UNKNOWN.
+- During the monitoring run, application CPU averaged 59.00% and peaked at 81.8%; RSS
+  averaged 68.08 MB and peaked at 76.54 MB. No Chrome process was launched, so Chrome,
+  restore, navigation, identity, and context measurements remain UNKNOWN.
 - Persistence decision: a 10,000-row local SQLite benchmark retained the ordered index
   and measured 0.940/0.999 ms due-count p50/p95, 0.538/0.691 ms claim-50, and
   1.550/1.667 ms scheduler-iteration latency. PostgreSQL remains optional and deferred;
@@ -64,8 +69,9 @@ live monitoring.
   25 contexts per process, 50 globally, and 10 creation workers/queue slots, and emits
   aggregate JSON with post-run identity count, context, lease, and state-consistency
   verification. Transfer URLs and Queue IDs are absent from the report.
-- Next planned work: **Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep
-  Benchmark**. A real sweep remains blocked until an authorised population exists.
+- Next planned work: **Phase 4 Prompt 7 — Scale Resilience, Recovery, and
+  Observability**. A real Queue-it monitoring sweep remains blocked until an authorised
+  10,000-session population exists.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -319,6 +325,15 @@ peaked at 20, and lease conflicts remained zero. A jittered pass processed all 1
 sessions across a ten-second simulated due window and drained every checkpoint. These
 are scheduler/SQLite measurements using a synthetic handler, not Queue-it check rates.
 
+The Phase 4 benchmark in `src/queue_load_test/harness/phase4_monitoring.py` scales the
+same bounded architecture to 10,000 synthetic rows and keeps deliberate all-due sweeps
+separate from adaptive scheduling. The adaptive clock advances by measured batch time,
+so due work can accumulate rather than being hidden while a batch drains. Its 10,000
+scheduled rows had 9,801 distinct exact due times, a largest one-second bucket of 439,
+a maximum backlog of 2,885, and a maximum oldest-overdue age of 26.599 seconds before
+ending at zero. The fixed queue/workers peaked at 50/20. See
+`docs/phase4_monitoring.md`; this is not a browser or Queue-it throughput result.
+
 `QueueSessionMonitor` restores one leased session, evaluates live status, verifies
 identity, persists progress and timestamps, refreshes HYBRID state when appropriate,
 computes `next_check_at`, and lets the scheduler release the lease. Defaults are:
@@ -372,8 +387,9 @@ generated intervals.
   transient/permanent failures, active workers, bounded queue depth, duration, and the
   current-run acquisition rate.
 - Monitoring telemetry includes aggregate checks/rate/duration, active fixed workers,
-  bounded queue depth, due unleased backlog, claimed sessions, and lease conflicts.
-  Restore failures and identity mismatches remain separately counted.
+  bounded queue depth, due/overdue unleased counts, oldest-overdue age, claimed
+  sessions, and lease conflicts. Restore failures and identity mismatches remain
+  separately counted. No Queue ID or session ID is used as a label.
 - `ObservabilityHttpServer` serves `/status` and `/metrics`; `StatusSummary` also renders
   terminal-readable text.
 - The Phase 1 harness records creation/context/navigation/restore/monitor latency,
@@ -422,9 +438,10 @@ generated intervals.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-26: `.venv/bin/pytest -q` reported **296 passed, 4 deselected
-  in 19.81 seconds**. The deselected tests were explicitly gated staging harnesses.
-  Ruff and strict mypy passed (50 source files).
+- Latest result on 2026-09-27: `python -m pytest -q` reported **325 passed, 2 skipped,
+  and 4 gated staging tests deselected in 355.93 seconds**. The focused monitoring/
+  repository/metrics suite reported 47 passed in 58.18 seconds; its 10,000-row test was
+  included. Ruff and strict mypy pass for 52 source files.
 
 ## Phase 1 Acceptance Results
 
@@ -470,11 +487,16 @@ mechanics only; they are not Queue-it staging or performance measurements.
 
 ## Known Issues / Unknowns
 
-- No real authorised staging run or generated performance JSON is checked in; all
-  vendor-, theme-, event-timing-, and destination-specific acceptance remains unknown.
+- No real authorised staging run exists; all vendor-, theme-, event-timing-, and
+  destination-specific acceptance remains unknown. Aggregate synthetic Prompt 6 data
+  is checked in at `docs/results/phase4_monitoring_result.json`.
 - Real transfer and storage-state restore rates, `lastUpdated` cadence, lifecycle timing,
   Queue-it CPU/RAM headroom, browser crash rate, and monitoring sweep time have not been
   measured.
+- The synthetic 10,000-row scheduler drained all work, but the adaptive simulation
+  reached a 2,885-row backlog and 26.599-second oldest-overdue age. Its lifecycle mix is
+  not observed Queue-it data, and no numeric real-monitoring service level has been
+  supplied. Single-machine live cadence therefore remains UNKNOWN.
 - The Phase 2 HYBRID restore benchmark is implemented but **NOT RUN**. Both staging
   environment gates were absent, so transfer/storage success rates, fallback frequency,
   latency percentiles, error distribution, and identity mismatches remain UNKNOWN.
@@ -605,6 +627,9 @@ mechanics only; they are not Queue-it staging or performance measurements.
   multi-node execution.
 - `docs/phase4_acquisition.md` — gated 10,000-ID preflight/run/resume procedure, aggregate
   report fields, bounded profile, and current staging NOT RUN result.
+- `docs/phase4_monitoring.md` and `docs/results/phase4_monitoring_result.json` — local
+  10,000-row deliberate/adaptive scheduler measurements and the browser/staging UNKNOWN
+  boundary.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -740,6 +765,12 @@ $env:RUN_PHASE4_ACQUISITION_BENCHMARK = "1"
 queue-load-test-phase4-acquisition --confirm-authorized-staging --creation-timeout-seconds 86400 --report phase4-acquisition-benchmark.json
 ```
 
+Local synthetic Phase 4 10,000-session monitoring benchmark (dedicated empty database):
+
+```powershell
+queue-load-test-phase4-monitoring --database phase4-monitoring-synthetic.sqlite3 --report phase4-monitoring-benchmark.json --population 10000 --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2 --check-delay-seconds 0.001 --sample-interval-seconds 1
+```
+
 Read-only state consistency report for an existing database:
 
 ```powershell
@@ -761,9 +792,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep Benchmark.** Preserve the
-bounded single-machine deployment and report real results only if the authorised
-10,000-session population exists; otherwise retain UNKNOWN outcomes.
+**Phase 4 Prompt 7 — Scale Resilience, Recovery, and Observability.** Preserve the
+bounded single-machine deployment and retain real Queue-it outcomes as UNKNOWN until
+an authorised population is actually exercised.
 
 ## Instructions for Future AI Sessions
 

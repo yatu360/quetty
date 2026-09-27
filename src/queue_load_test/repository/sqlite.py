@@ -16,6 +16,7 @@ from queue_load_test.models import (
     validate_transition,
 )
 from queue_load_test.repository.base import (
+    DueSessionSummary,
     LeaseOwnershipError,
     QueueIdConflictError,
     RecoverySummary,
@@ -511,20 +512,29 @@ class SQLiteSessionRepository:
     async def count_due_sessions(self, *, now: datetime) -> int:
         """Count sessions currently eligible for a monitoring lease."""
 
+        return (await self.due_session_summary(now=now)).count
+
+    async def due_session_summary(self, *, now: datetime) -> DueSessionSummary:
+        """Return count and oldest due time without loading individual sessions."""
+
         now_storage = _to_storage(now)
         if now_storage is None:
             raise ValueError("now is required")
 
-        def operation() -> int:
+        def operation() -> DueSessionSummary:
             row = self._connect().execute(
                 f"""
-                SELECT COUNT(*) AS total
+                SELECT COUNT(*) AS total, MIN({_DUE_TIME_SQL}) AS oldest_due_at
                 FROM queue_sessions
                 WHERE {_DUE_FILTER_SQL}
                 """,
                 (now_storage, now_storage),
             ).fetchone()
-            return int(row["total"])
+            oldest = row["oldest_due_at"]
+            return DueSessionSummary(
+                count=int(row["total"]),
+                oldest_due_at=_from_storage(oldest) if oldest is not None else None,
+            )
 
         return await self._run(operation)
 

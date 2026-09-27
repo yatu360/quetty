@@ -38,6 +38,7 @@ queue-load-test-phase3-storage = "queue_load_test.harness.phase3_storage:main"
 queue-load-test-state-check = "queue_load_test.harness.state_consistency:main"
 queue-load-test-phase3-recovery = "queue_load_test.harness.phase3_recovery:main"
 queue-load-test-phase4-acquisition = "queue_load_test.harness.phase4_acquisition:main"
+queue-load-test-phase4-monitoring = "queue_load_test.harness.phase4_monitoring:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

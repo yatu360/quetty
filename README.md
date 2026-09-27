@@ -258,6 +258,17 @@ queue-load-test-phase4-acquisition --confirm-authorized-staging --report phase4-
 
 See `docs/phase4_acquisition.md` for the required bounded profile and persistent paths.
 
+The Phase 4 monitoring harness separately runs repeated deliberate 10,000-row sweeps
+and an adaptive/jittered synthetic schedule through the bounded scheduler. It does not
+launch Chrome or claim Queue-it restore throughput:
+
+```powershell
+queue-load-test-phase4-monitoring --database phase4-monitoring-synthetic.sqlite3 --report phase4-monitoring-benchmark.json --population 10000 --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2 --sample-interval-seconds 1
+```
+
+See [`docs/phase4_monitoring.md`](docs/phase4_monitoring.md) for measured local results
+and the real-staging UNKNOWN boundary.
+
 Normal runtime startup uses one aggregate SQLite recovery query and does not scan all
 state files. Missing/corrupt state counts require the explicit state consistency scan.
 See [the Phase 3 recovery benchmark](docs/phase3-recovery.md) for scenario outcomes and

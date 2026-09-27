@@ -173,6 +173,8 @@ phase4-storage-benchmark*.json
 phase4-storage-synthetic*/
 phase4-acquisition-benchmark*.json
 phase4-acquisition-preflight*.json
+phase4-monitoring-benchmark*.json
+phase4-monitoring-synthetic*.sqlite3
 .phase2-concurrency-runs/
 .venv
 env/

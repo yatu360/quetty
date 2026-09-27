@@ -368,6 +368,7 @@ class MonitoringMetrics:
     queue_depth: int = 0
     maximum_queue_depth: int = 0
     due_backlog: int = 0
+    oldest_overdue_seconds: float = 0.0
     lease_conflicts: int = 0
     scheduler_iterations: int = 0
     idle_iterations: int = 0
@@ -508,10 +509,15 @@ class ParkedSessionScheduler:
                 return 0
             self.metrics.scheduler_iterations += 1
             now = self._clock()
-            due_backlog = await self._repository.count_due_sessions(now=now)
+            due_summary = await self._repository.due_session_summary(now=now)
+            due_backlog = due_summary.count
             self.metrics.due_backlog = due_backlog
+            self.metrics.oldest_overdue_seconds = due_summary.oldest_overdue_seconds(now=now)
             if self._observability is not None:
-                self._observability.set_monitoring_backlog(due_backlog)
+                self._observability.set_monitoring_backlog(
+                    due_backlog,
+                    oldest_overdue_seconds=self.metrics.oldest_overdue_seconds,
+                )
             available = self._queue.maxsize - self._queue.qsize()
             limit = min(available, self._claim_batch_size)
             if limit < 1:
@@ -548,7 +554,10 @@ class ParkedSessionScheduler:
                 self.metrics.idle_iterations += 1
             if self._observability is not None:
                 self._observability.record_monitoring_claims(len(sessions))
-                self._observability.set_monitoring_backlog(self.metrics.due_backlog)
+                self._observability.set_monitoring_backlog(
+                    self.metrics.due_backlog,
+                    oldest_overdue_seconds=self.metrics.oldest_overdue_seconds,
+                )
             self._set_monitoring_activity()
             return len(sessions)
 

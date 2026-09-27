@@ -100,7 +100,7 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     metrics.set_creation_activity(in_flight=2, queue_depth=3)
     metrics.set_creation_rate(4.5)
     metrics.set_monitoring_activity(active_workers=2, queue_depth=4)
-    metrics.set_monitoring_backlog(12)
+    metrics.set_monitoring_backlog(12, oldest_overdue_seconds=34.5)
     metrics.record_monitoring_claims(5)
     metrics.record_monitoring_lease_conflicts(1)
     metrics.record_restore(
@@ -146,6 +146,8 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     assert metrics.registry.get_sample_value("monitoring_workers_active") == 2
     assert metrics.registry.get_sample_value("monitoring_queue_depth") == 4
     assert metrics.registry.get_sample_value("monitoring_due_backlog") == 12
+    assert metrics.registry.get_sample_value("monitoring_overdue_sessions") == 12
+    assert metrics.registry.get_sample_value("monitoring_oldest_overdue_seconds") == 34.5
     assert metrics.registry.get_sample_value("monitoring_sessions_claimed_total") == 5
     assert metrics.registry.get_sample_value("monitoring_lease_conflicts_total") == 1
     assert metrics.registry.get_sample_value("queue_sessions_active") == 1

@@ -1,6 +1,7 @@
 """Session persistence abstractions and SQLite implementation."""
 
 from queue_load_test.repository.base import (
+    DueSessionSummary,
     LeaseOwnershipError,
     QueueIdConflictError,
     RecoverySummary,
@@ -11,6 +12,7 @@ from queue_load_test.repository.base import (
 from queue_load_test.repository.sqlite import SQLiteSessionRepository
 
 __all__ = [
+    "DueSessionSummary",
     "LeaseOwnershipError",
     "QueueIdConflictError",
     "RecoverySummary",

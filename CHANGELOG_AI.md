@@ -2425,3 +2425,121 @@ Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep Benchmark
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 4 acquisition harness, tests, metrics, and project records
+
+## 2026-09-27 — Phase 4 Prompt 6 — 10,000-Session Monitoring and Sweep Benchmark
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Validate bounded monitoring behavior at a 10,000-row persisted population, separately
+measure deliberate full sweeps and adaptive scheduling, and preserve UNKNOWN for real
+Queue-it conclusions without an authorised population.
+
+### Changes Made
+
+- Added `queue-load-test-phase4-monitoring`, which seeds a dedicated synthetic SQLite
+  population and runs two repeated all-due sweeps plus a production-policy adaptive
+  schedule through fixed workers, bounded claims, and a bounded queue.
+- Made adaptive simulated time advance by measured batch duration so new due work can
+  accumulate visibly rather than being hidden while a batch drains.
+- Added aggregate p50/p95/p99 check latency, SQLite query/claim/update/release latency,
+  backlog, oldest-overdue age, jitter distribution, resource sampling, and explicit
+  browser/restore UNKNOWN fields to atomic JSON/text output.
+- Added `DueSessionSummary` to the repository boundary and SQLite implementation. The
+  scheduler now exports due/overdue count and oldest-overdue age through Prometheus,
+  without Queue ID or session ID labels.
+- Added tests covering 10,000 due rows, bounded/disjoint claims, terminal/future/leased
+  exclusion, repeated sweeps, adaptive jitter, bounded workers/queue, serialization,
+  and resource observations. Existing tests continue to cover worker exceptions,
+  transient retry, lease expiry, repeated scheduling, and shutdown.
+- Added the human report and a compact aggregate machine-readable result. Updated the
+  roadmap, context, README, command entry point, and generated-output ignores.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase4_monitoring.py`
+- `tests/unit/test_phase4_monitoring.py`
+- `docs/phase4_monitoring.md`
+- `docs/results/phase4_monitoring_result.json`
+
+### Files Modified
+
+- `.gitignore`
+- `pyproject.toml`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/repository/__init__.py`
+- `src/queue_load_test/repository/base.py`
+- `src/queue_load_test/repository/sqlite.py`
+- `src/queue_load_test/scheduler/monitoring.py`
+- `tests/unit/test_observability.py`
+
+### Tests Run
+
+- Focused monitoring/repository/metrics suite — 47 passed in 58.18 seconds.
+- Phase 4 monitoring tests excluding the already-run 10,000 seed case after adaptive
+  clock correction — 3 passed, 1 deselected in 3.86 seconds.
+- Full `python -m pytest -q` — 325 passed, 2 Windows-inapplicable permission tests
+  skipped, 4 gated staging tests deselected in 355.93 seconds.
+- `python -m ruff check src tests` — passed.
+- `python -m mypy src` — passed with no issues in 52 source files.
+
+### Staging Tests
+
+- Command: not run; `RUN_STAGING_TESTS` and
+  `RUN_PHASE4_MONITORING_BENCHMARK` were unset, `.env` was absent, and no application
+  session database or authorised 10,000-session population existed.
+- Result: **NOT RUN / UNKNOWN**. No staging traffic or Queue-it browser operation was
+  performed.
+
+### Important Decisions
+
+- Retained the single-machine SQLite/local-state deployment and existing fixed-worker,
+  bounded-queue architecture. No PostgreSQL, distributed worker, or extra Chrome
+  capacity was added.
+- Scenario A and Scenario B remain explicitly separate. Synthetic throughput is not
+  labeled as Queue-it check throughput.
+- The final low-overhead run sampled process resources every second. An exploratory
+  50 ms sample run was retained only as ignored local data and is not the reported
+  result.
+- The adaptive run exposed rather than hid backlog: 2,885 maximum due rows and 26.599
+  seconds maximum oldest-overdue age, ending at zero.
+
+### Verified Results
+
+- Sweep 1: 10,000/10,000 checks, 0 failures, 76.595 seconds, 130.56/s.
+- Sweep 2: 10,000/10,000 checks, 0 failures, 92.241 seconds, 108.41/s.
+- Both sweeps: queue peak 50, active-worker peak 20, ending backlog zero, lease
+  conflicts zero.
+- Adaptive: 10,000/10,000 checks, 0 failures, 107.31 processing checks/s, 9,801 exact
+  due times, largest one-second bucket 439, backlog peak 2,885, oldest-overdue peak
+  26.599 seconds, ending backlog zero.
+- Application CPU average/peak 59.00/81.8%; RSS average/peak 68.08/76.54 MB. No Chrome
+  process was part of this synthetic run.
+
+### Known Issues
+
+- Real transfer/storage restoration, identity mismatch incidence, Chrome/context
+  stability, navigation, page latency, live CPU/RAM, and sustainable Queue-it cadence
+  remain UNKNOWN.
+- The deterministic adaptive lifecycle mix is not observed staging data.
+- No numeric real-monitoring service-level cadence was provided, so live sufficiency
+  cannot be accepted.
+- SQLite operation latency under the all-due concurrent-write sweep includes executor
+  waiting and is not directly comparable with isolated repository microbenchmarks.
+
+### Follow-Up
+
+Phase 4 Prompt 7 — Scale Resilience, Recovery, and Observability
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: Phase 4 monitoring harness, tests, aggregate result, and project records
