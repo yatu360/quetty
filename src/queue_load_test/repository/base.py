@@ -40,6 +40,14 @@ class UnownedSessionsError(RepositoryError):
     """Raised when legacy sessions cannot safely be associated with a new target."""
 
 
+class ManualSessionBusyError(RepositoryError):
+    """Raised when automatic or manual browser work already owns a session."""
+
+
+class ManualSessionCapacityError(RepositoryError):
+    """Raised when the persisted manual-open capacity is exhausted."""
+
+
 class ClaimedSessions(list[QueueSession]):
     """Claimed sessions plus how many of them were taken over from expired leases.
 
@@ -123,6 +131,28 @@ class SessionRepository(Protocol):
     async def is_monitoring_paused(self) -> bool: ...
 
     async def set_monitoring_paused(self, paused: bool) -> bool: ...
+
+    async def acquire_manual_ownership(
+        self,
+        session_id: str,
+        *,
+        owner_id: str,
+        now: datetime,
+        lease_until: datetime,
+        capacity: int,
+    ) -> QueueSession: ...
+
+    async def renew_manual_ownership(
+        self,
+        session_id: str,
+        *,
+        owner_id: str,
+        lease_until: datetime,
+    ) -> bool: ...
+
+    async def release_manual_ownership(self, session_id: str, *, owner_id: str) -> bool: ...
+
+    async def recover_stale_manual_ownership(self, *, now: datetime) -> int: ...
 
     async def create(
         self,

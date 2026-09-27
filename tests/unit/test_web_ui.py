@@ -1,6 +1,6 @@
 import asyncio
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -17,6 +17,7 @@ from queue_load_test.models import (
 )
 from queue_load_test.repository import SQLiteSessionRepository, UnownedSessionsError
 from queue_load_test.web import create_app
+from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
 from queue_load_test.web.service import RuntimeCapacity
 
 
@@ -27,6 +28,8 @@ class FakeRuntime:
         self.repository = repository
         self.pause_calls = 0
         self.resume_calls = 0
+        self.open_calls: list[str] = []
+        self.close_calls: list[str] = []
 
     async def start_run(self, run: RunConfig) -> None:
         self.started.append(run)
@@ -50,6 +53,28 @@ class FakeRuntime:
         self.resume_calls += 1
         if self.repository is not None:
             await self.repository.set_monitoring_paused(False)
+
+    async def open_session(self, session_id: str) -> ManualOpenResult:
+        self.open_calls.append(session_id)
+        if self.repository is not None:
+            now = datetime.now(UTC)
+            await self.repository.acquire_manual_ownership(
+                session_id,
+                owner_id="fake-ui",
+                now=now,
+                lease_until=now + timedelta(seconds=30),
+                capacity=5,
+            )
+        return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in Chrome")
+
+    async def close_session(self, session_id: str) -> bool:
+        self.close_calls.append(session_id)
+        if self.repository is None:
+            return False
+        return await self.repository.release_manual_ownership(
+            session_id,
+            owner_id="fake-ui",
+        )
 
     async def close(self) -> None:
         self.closed += 1
@@ -393,3 +418,52 @@ def test_dashboard_startup_respects_pause_persisted_before_repository_reopen(
         assert "PAUSED" in response.text
         assert "Resume Monitoring" in response.text
         assert len(runtime.started) == 1
+
+
+def test_dashboard_opens_and_closes_existing_session_in_chrome(tmp_path: Path) -> None:
+    database = tmp_path / "manual-open-ui.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    asyncio.run(repository.initialize())
+    asyncio.run(
+        repository.create_run(
+            RunConfig(
+                run_id="manual-run",
+                target_url="https://staging.example.test/queue",
+                requested_sessions=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+    )
+    asyncio.run(
+        repository.create(
+            QueueSession(
+                session_id="manual-session",
+                queue_id="expected-queue",
+                transfer_url="https://sensitive.invalid/transfer",
+                mode=SessionMode.HYBRID,
+                state_path=Path("sensitive-state.json"),
+                status=QueueStatus.ACTIVE_QUEUE,
+            )
+        )
+    )
+    asyncio.run(repository.close())
+
+    app_repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(app_repository)
+    app = create_app(settings=settings(database), repository=app_repository, runtime=runtime)
+    with TestClient(app) as client:
+        initial = client.get("/partials/sessions")
+        assert "Open in Chrome" in initial.text
+
+        opened = client.post("/sessions/manual-session/open")
+        assert opened.status_code == 200
+        assert "Opened in Chrome" in opened.text
+        assert "OPEN IN CHROME" in opened.text
+        assert ">Close<" in opened.text
+        assert runtime.open_calls == ["manual-session"]
+
+        closed = client.post("/sessions/manual-session/close")
+        assert closed.status_code == 200
+        assert "Chrome session closed" in closed.text
+        assert "Open in Chrome" in closed.text
+        assert runtime.close_calls == ["manual-session"]

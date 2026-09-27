@@ -26,6 +26,8 @@ from queue_load_test.repository.base import (
     ClaimedSessions,
     DueSessionSummary,
     LeaseOwnershipError,
+    ManualSessionBusyError,
+    ManualSessionCapacityError,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
@@ -38,7 +40,8 @@ _T = TypeVar("_T")
 _SESSION_COLUMNS = """
     session_id, queue_id, transfer_url, mode, status, state_path,
     created_at, last_checked_at, last_queue_update, last_progress_change_at,
-    next_check_at, attempt_count, last_error, worker_id, lease_until
+    next_check_at, attempt_count, last_error, worker_id, lease_until,
+    manual_owner_id, manual_lease_until
 """
 
 _NON_MONITORABLE_STATUSES_SQL = "'ADMITTED', 'EXPIRED', 'FAILED', 'NEW', 'CREATING'"
@@ -46,6 +49,7 @@ _DUE_TIME_SQL = "COALESCE(next_check_at, created_at)"
 _DUE_FILTER_SQL = f"""
     {_DUE_TIME_SQL} <= ?
     AND (lease_until IS NULL OR lease_until <= ?)
+    AND (manual_owner_id IS NULL OR manual_lease_until <= ?)
     AND status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
 """
 _DUE_ORDER_SQL = f"{_DUE_TIME_SQL}, created_at, session_id"
@@ -54,6 +58,11 @@ _DUE_INDEX_SQL = f"""
 CREATE INDEX IF NOT EXISTS {_DUE_INDEX_NAME}
     ON queue_sessions ({_DUE_ORDER_SQL})
     WHERE status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
+"""
+_MANUAL_LEASE_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_queue_sessions_manual_lease
+    ON queue_sessions (manual_lease_until)
+    WHERE manual_owner_id IS NOT NULL
 """
 
 _SCHEMA = """
@@ -85,7 +94,9 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
     last_error TEXT,
     worker_id TEXT,
-    lease_until TEXT
+    lease_until TEXT,
+    manual_owner_id TEXT,
+    manual_lease_until TEXT
 );
 CREATE TABLE IF NOT EXISTS queue_progress (
     session_id TEXT PRIMARY KEY REFERENCES queue_sessions(session_id) ON DELETE CASCADE,
@@ -168,6 +179,8 @@ def _session_values(session: QueueSession) -> tuple[object, ...]:
         session.last_error,
         session.worker_id,
         _to_storage(session.lease_until),
+        session.manual_owner_id,
+        _to_storage(session.manual_lease_until),
     )
 
 
@@ -191,6 +204,8 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
         last_error=row["last_error"],
         worker_id=row["worker_id"],
         lease_until=_from_storage(row["lease_until"]),
+        manual_owner_id=row["manual_owner_id"],
+        manual_lease_until=_from_storage(row["manual_lease_until"]),
     )
 
 
@@ -240,6 +255,17 @@ def _row_to_progress(row: sqlite3.Row) -> QueueProgress:
         active_queue=_from_boolean_storage(row["active_queue"]),
         manual_update_warning=row["manual_update_warning"],
     )
+
+
+def _row_runtime_state(row: sqlite3.Row, *, now: datetime) -> BrowserRuntimeState:
+    manual_lease_until = _from_storage(row["manual_lease_until"])
+    if row["manual_owner_id"] is not None and (
+        manual_lease_until is not None and manual_lease_until > now
+    ):
+        return BrowserRuntimeState.OPEN_IN_CHROME
+    if row["worker_id"] is not None or row["status"] == "CHECKING":
+        return BrowserRuntimeState.CHECKING
+    return BrowserRuntimeState.PARKED
 
 
 def _save_progress(connection: sqlite3.Connection, progress: QueueProgress) -> None:
@@ -380,6 +406,145 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def acquire_manual_ownership(
+        self,
+        session_id: str,
+        *,
+        owner_id: str,
+        now: datetime,
+        lease_until: datetime,
+        capacity: int,
+    ) -> QueueSession:
+        """Atomically exclude automatic work and reserve bounded manual ownership."""
+
+        if not owner_id.strip():
+            raise ValueError("owner_id cannot be blank")
+        if capacity < 1:
+            raise ValueError("capacity must be at least 1")
+        now_storage = _to_storage(now)
+        lease_storage = _to_storage(lease_until)
+        if now_storage is None or lease_storage is None or lease_storage <= now_storage:
+            raise ValueError("manual lease must end after now")
+
+        def operation() -> QueueSession:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    """
+                    UPDATE queue_sessions
+                    SET manual_owner_id = NULL, manual_lease_until = NULL
+                    WHERE manual_owner_id IS NOT NULL AND manual_lease_until <= ?
+                    """,
+                    (now_storage,),
+                )
+                row = connection.execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    raise SessionNotFoundError(f"Session {session_id!r} does not exist")
+                if row["manual_owner_id"] is not None:
+                    raise ManualSessionBusyError("Session is already open in Chrome")
+                # Any automatic owner, including one whose lease just expired, may
+                # still have live browser work. Do not overlap it; the scheduler can
+                # reclaim/release that ownership through its normal fenced path.
+                if row["worker_id"] is not None:
+                    raise ManualSessionBusyError("Session is currently being checked")
+                active = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM queue_sessions
+                        WHERE manual_owner_id IS NOT NULL AND manual_lease_until > ?
+                        """,
+                        (now_storage,),
+                    ).fetchone()[0]
+                )
+                if active >= capacity:
+                    raise ManualSessionCapacityError("Browser capacity currently unavailable")
+                cursor = connection.execute(
+                    """
+                    UPDATE queue_sessions
+                    SET manual_owner_id = ?, manual_lease_until = ?
+                    WHERE session_id = ? AND worker_id IS NULL AND manual_owner_id IS NULL
+                    """,
+                    (owner_id, lease_storage, session_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ManualSessionBusyError("Session browser ownership changed")
+                claimed = connection.execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return _row_to_session(claimed)
+
+        return await self._run(operation)
+
+    async def renew_manual_ownership(
+        self,
+        session_id: str,
+        *,
+        owner_id: str,
+        lease_until: datetime,
+    ) -> bool:
+        lease_storage = _to_storage(lease_until)
+        if lease_storage is None:
+            raise ValueError("lease_until is required")
+
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                """
+                UPDATE queue_sessions SET manual_lease_until = ?
+                WHERE session_id = ? AND manual_owner_id = ?
+                """,
+                (lease_storage, session_id, owner_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
+    async def release_manual_ownership(self, session_id: str, *, owner_id: str) -> bool:
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                """
+                UPDATE queue_sessions
+                SET manual_owner_id = NULL, manual_lease_until = NULL
+                WHERE session_id = ? AND manual_owner_id = ?
+                """,
+                (session_id, owner_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
+    async def recover_stale_manual_ownership(self, *, now: datetime) -> int:
+        now_storage = _to_storage(now)
+        if now_storage is None:
+            raise ValueError("now is required")
+
+        def operation() -> int:
+            connection = self._connect()
+            cursor = connection.execute(
+                """
+                UPDATE queue_sessions
+                SET manual_owner_id = NULL, manual_lease_until = NULL
+                WHERE manual_owner_id IS NOT NULL AND manual_lease_until <= ?
+                """,
+                (now_storage,),
+            )
+            connection.commit()
+            return cursor.rowcount
+
+        return await self._run(operation)
+
     def _connect(self) -> sqlite3.Connection:
         if self._connection is None:
             if self._database != ":memory:":
@@ -391,6 +556,7 @@ class SQLiteSessionRepository:
             connection.executescript(_SCHEMA)
             self._migrate_session_columns(connection)
             self._ensure_due_index(connection)
+            connection.execute(_MANUAL_LEASE_INDEX_SQL)
             connection.commit()
             if self._database != ":memory:":
                 Path(self._database).chmod(0o600)
@@ -403,7 +569,12 @@ class SQLiteSessionRepository:
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(queue_sessions)").fetchall()
         }
-        for name in ("last_queue_update", "last_progress_change_at"):
+        for name in (
+            "last_queue_update",
+            "last_progress_change_at",
+            "manual_owner_id",
+            "manual_lease_until",
+        ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE queue_sessions ADD COLUMN {name} TEXT")
 
@@ -470,7 +641,7 @@ class SQLiteSessionRepository:
             try:
                 connection.execute(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _session_values(session),
                 )
                 if progress is not None:
@@ -501,7 +672,7 @@ class SQLiteSessionRepository:
             try:
                 connection.executemany(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (_session_values(session) for session, _ in rows),
                 )
                 for _, progress in rows:
@@ -540,13 +711,17 @@ class SQLiteSessionRepository:
                 if session.worker_id is not None:
                     ownership_sql = " AND worker_id = ?"
                     ownership_parameters = (session.worker_id,)
+                elif session.manual_owner_id is not None:
+                    ownership_sql = " AND worker_id IS NULL AND manual_owner_id = ?"
+                    ownership_parameters = (session.manual_owner_id,)
                 cursor = connection.execute(
                     """
                     UPDATE queue_sessions SET
                         queue_id = ?, transfer_url = ?, mode = ?, status = ?, state_path = ?,
                         created_at = ?, last_checked_at = ?, last_queue_update = ?,
                         last_progress_change_at = ?, next_check_at = ?, attempt_count = ?,
-                        last_error = ?, worker_id = ?, lease_until = ?
+                        last_error = ?, worker_id = ?, lease_until = ?,
+                        manual_owner_id = ?, manual_lease_until = ?
                     WHERE session_id = ?
                     """
                     + ownership_sql,
@@ -718,6 +893,7 @@ class SQLiteSessionRepository:
                         now_storage,
                         now_storage,
                         now_storage,
+                        now_storage,
                         *terminal_statuses,
                         *terminal_statuses,
                     ),
@@ -803,10 +979,14 @@ class SQLiteSessionRepository:
         if parsed_runtime is BrowserRuntimeState.CHECKING:
             clauses.append("(s.worker_id IS NOT NULL OR s.status = 'CHECKING')")
         elif parsed_runtime is BrowserRuntimeState.PARKED:
-            clauses.append("(s.worker_id IS NULL AND s.status != 'CHECKING')")
+            clauses.append(
+                "(s.worker_id IS NULL AND s.status != 'CHECKING' "
+                "AND (s.manual_owner_id IS NULL OR s.manual_lease_until <= ?))"
+            )
+            parameters.append(_to_storage(datetime.now(UTC)))
         elif parsed_runtime is BrowserRuntimeState.OPEN_IN_CHROME:
-            # Prompt 3 will add explicit headed-Chrome ownership persistence.
-            clauses.append("0 = 1")
+            clauses.append("(s.manual_owner_id IS NOT NULL AND s.manual_lease_until > ?)")
+            parameters.append(_to_storage(datetime.now(UTC)))
         where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
         offset = (page - 1) * page_size
 
@@ -820,7 +1000,7 @@ class SQLiteSessionRepository:
                 """
                 SELECT s.session_id, s.queue_id, s.status, p.progress_percentage,
                        s.last_queue_update, s.last_checked_at, s.next_check_at,
-                       s.worker_id
+                       s.worker_id, s.manual_owner_id, s.manual_lease_until
                 FROM queue_sessions AS s
                 LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
                 """
@@ -837,11 +1017,7 @@ class SQLiteSessionRepository:
                     last_queue_update=_from_storage(row["last_queue_update"]),
                     last_checked_at=_from_storage(row["last_checked_at"]),
                     next_check_at=_from_storage(row["next_check_at"]),
-                    runtime_state=(
-                        BrowserRuntimeState.CHECKING
-                        if row["worker_id"] is not None or row["status"] == "CHECKING"
-                        else BrowserRuntimeState.PARKED
-                    ),
+                    runtime_state=_row_runtime_state(row, now=datetime.now(UTC)),
                 )
                 for row in rows
             )
@@ -875,7 +1051,7 @@ class SQLiteSessionRepository:
                 FROM queue_sessions
                 WHERE {_DUE_FILTER_SQL}
                 """,
-                    (now_storage, now_storage),
+                    (now_storage, now_storage, now_storage),
                 )
                 .fetchone()
             )
@@ -926,7 +1102,7 @@ class SQLiteSessionRepository:
                     ORDER BY {_DUE_ORDER_SQL}
                     LIMIT ?
                     """,
-                    (now_storage, now_storage, limit),
+                    (now_storage, now_storage, now_storage, limit),
                 ).fetchall()
                 session_ids = [row["session_id"] for row in rows]
                 # A due row that still carries a lease can only have been selected
@@ -939,7 +1115,8 @@ class SQLiteSessionRepository:
                 if session_ids:
                     placeholders = ", ".join("?" for _ in session_ids)
                     connection.execute(
-                        f"UPDATE queue_sessions SET worker_id = ?, lease_until = ? "
+                        f"UPDATE queue_sessions SET worker_id = ?, lease_until = ?, "
+                        "manual_owner_id = NULL, manual_lease_until = NULL "
                         f"WHERE session_id IN ({placeholders})",
                         (worker_id, lease_storage, *session_ids),
                     )
@@ -987,7 +1164,7 @@ class SQLiteSessionRepository:
                 ORDER BY {_DUE_ORDER_SQL}
                 LIMIT ?
                 """,
-                    (now_storage, now_storage, limit),
+                    (now_storage, now_storage, now_storage, limit),
                 )
                 .fetchall()
             )

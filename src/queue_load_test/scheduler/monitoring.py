@@ -278,9 +278,18 @@ class QueueSessionMonitor:
         self,
         session: QueueSession,
     ) -> tuple[MonitoringOutcome, QueueProgress | None]:
+        result = await self._restore_with_retries(session)
+        return await self.apply_restore_result(session, result)
+
+    async def apply_restore_result(
+        self,
+        session: QueueSession,
+        result: SessionRestoreResult,
+    ) -> tuple[MonitoringOutcome, QueueProgress | None]:
+        """Evaluate and persist an already-observed live result."""
+
         previous_status = session.status
         previous_progress = await self._repository.get_progress(session.session_id)
-        result = await self._restore_with_retries(session)
         observed_at = self._clock()
         progress_changed = False
 

@@ -85,6 +85,16 @@ class Settings(BaseSettings):
         alias="MAX_MANUAL_REQUESTED_SESSIONS",
         ge=1,
     )
+    max_manual_open_sessions: int = Field(
+        default=5,
+        alias="MAX_MANUAL_OPEN_SESSIONS",
+        ge=1,
+    )
+    manual_open_lease_seconds: float = Field(
+        default=30.0,
+        alias="MANUAL_OPEN_LEASE_SECONDS",
+        gt=3,
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -140,6 +150,9 @@ class Settings(BaseSettings):
 
         if self.monitor_queue_capacity > self.max_active_contexts:
             raise ValueError("MONITOR_QUEUE_CAPACITY cannot exceed MAX_ACTIVE_CONTEXTS")
+
+        if self.max_manual_open_sessions > self.max_active_contexts:
+            raise ValueError("MAX_MANUAL_OPEN_SESSIONS cannot exceed MAX_ACTIVE_CONTEXTS")
 
         if self.poll_jitter_seconds >= self.queue_poll_seconds:
             raise ValueError("POLL_JITTER_SECONDS must be less than QUEUE_POLL_SECONDS")

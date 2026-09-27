@@ -9,7 +9,7 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 5 Prompt 2 is complete. A localhost FastAPI/Jinja2/HTMX operator
+- Current phase: Phase 5 Prompt 3 is complete. A localhost FastAPI/Jinja2/HTMX operator
   UI now provides persisted first-run setup, bounded acquisition/runtime startup, run
   recovery, aggregate status, and a safe paginated session dashboard.
 - The SQLite schema now includes one immutable current `run_config` row. The run target
@@ -26,9 +26,17 @@ live monitoring.
   releases claimed-but-not-started leases, and wakes promptly on local resume without
   resetting `next_check_at` or materializing the due population.
 - Browser ownership is represented by `BrowserRuntimeState` (`PARKED`, `CHECKING`, and
-  reserved `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Headed Chrome,
-  mutations, manual refresh, and recovery controls remain later prompts.
-- Exact next task: **Phase 5 Prompt 3 — Open Existing Session in Headed Chrome**.
+  `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Manual opens use persisted
+  renewable ownership leases that atomically exclude automatic scheduler claims.
+- Manual sessions share one lazily started headed installed-Google-Chrome pool, are
+  capped by `MAX_MANUAL_OPEN_SESSIONS` (default 5), and share the existing global
+  context budget with headless automatic work. They never launch one process per row.
+- Page/context/window closure, Chrome loss, explicit Close, and application shutdown
+  release ownership. A still-live page is inspected through the existing extractor and
+  lifecycle evaluator, with progress/scheduling and HYBRID state refreshed where
+  possible; an already-lost page preserves its last persisted state.
+- Exact next task: **Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh
+  Actions**.
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -209,7 +217,7 @@ close the context, release the lease, and park them again.
 `session_id`, optional `queue_id`, sensitive `transfer_url`, `mode`, `status`, sensitive
 `state_path`, `created_at`, `last_checked_at`, `last_queue_update`,
 `last_progress_change_at`, `next_check_at`, `attempt_count`, `last_error`, `worker_id`,
-and `lease_until`.
+`lease_until`, `manual_owner_id`, and `manual_lease_until`.
 
 `QueueProgress` holds optional layout-dependent observations: `queue_number`,
 `users_ahead`, `progress_percentage`, `estimated_wait_text`, `expected_service_time`,
@@ -242,6 +250,10 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   there is no target-changing operation.
 - SQLite has a singleton `runtime_control` table containing `monitoring_paused`. Its
   O(1) update survives restart; the claim transaction checks it before selecting rows.
+- Manual browser ownership is stored on the session as a separately fenced owner/lease.
+  Manual acquisition rejects an automatic owner and enforces the manual-open limit in
+  one `BEGIN IMMEDIATE` transaction. Due claims exclude live manual leases and can
+  reclaim a row after that ownership expires.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
   `QueueIdConflictError`.
 - Updates from leased snapshots are conditional on the persisted `worker_id`. A stale
@@ -290,6 +302,11 @@ disconnected browsers; restart immediately removes and invalidates lost contexts
 relaunches only the failed slot, preserves persisted session identity outside the
 browser, and updates metrics. Relaunch runs outside the global manager lock, so a
 healthy process can continue accepting contexts while another process restarts.
+
+Phase 5 manual opens use a separate `headless=False`, `channel="chrome"` manager because
+headed mode is a process launch option. It is one shared lazy process with up to five
+contexts by default, not one process per session. A shared context-capacity coordinator
+spans the headed and automatic managers so both count against `MAX_ACTIVE_CONTEXTS`.
 
 ## Target Acquisition Model
 
@@ -869,7 +886,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 Prompt 3 — Open Existing Session in Headed Chrome.
+Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh Actions.
 
 ## Instructions for Future AI Sessions
 

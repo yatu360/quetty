@@ -59,7 +59,8 @@ queue-load-test-ui
 
 Open `http://127.0.0.1:8000`. `UI_HOST` defaults to `127.0.0.1`, `UI_PORT` defaults to
 `8000`, and `MAX_MANUAL_REQUESTED_SESSIONS` defaults to the currently supported 10,000
-session safety ceiling.
+session safety ceiling. `MAX_MANUAL_OPEN_SESSIONS` defaults to 5 and bounds visible
+operator contexts; `MANUAL_OPEN_LEASE_SECONDS` defaults to 30 seconds.
 
 On a new empty database, the UI shows setup before any dashboard. Enter an authorised
 absolute HTTP(S) staging URL and the requested session count. Start persists the run,
@@ -91,8 +92,29 @@ the full backlog. The state survives restart and repeated pause/resume requests 
 idempotent.
 
 This global control is not Queue-it's `PAUSED` lifecycle observation. It affects only
-automatic scheduling; future headed sessions and manual refresh actions remain separate
+automatic scheduling; headed sessions and manual refresh actions remain separate
 controls.
+
+Each persisted row has **Open in Chrome**. The action restores the expected Queue ID
+through the existing transfer-first/HYBRID identity checks and retains a context in one
+shared visible installed-Google-Chrome pool. `OPEN_IN_CHROME` is browser ownership, not
+a `QueueStatus`; the Queue-it status remains independently visible. An identity mismatch
+or restore failure leaves the expected Queue ID unchanged, closes browser resources, and
+shows only a sanitized error.
+
+Manual ownership is a persisted, renewable lease that automatic claims exclude in the
+same SQLite transaction. A session already being checked reports busy, repeated opens
+in the same UI process are idempotent, and manual contexts share the global
+`MAX_ACTIVE_CONTEXTS` budget with automatic work. When the configured manual or global
+budget is full, the UI reports **Browser capacity currently unavailable**.
+
+Closing the page/window, using **Close**, losing the headed Chrome process, or shutting
+down the application releases ownership. When the page is still inspectable, closure
+uses the normal lifecycle evaluator, saves progress and a fresh HYBRID `storage_state`,
+and computes the normal next check. If Chrome has already gone away, the last persisted
+state is preserved and automatic monitoring can recover later. Expired persisted manual
+leases are recovered after a crash/restart; no browser-only state can keep a session
+open forever.
 
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;

@@ -6,6 +6,7 @@ import pytest
 
 from queue_load_test.browser import (
     BrowserCapacityError,
+    BrowserContextCapacity,
     BrowserManager,
 )
 from queue_load_test.browser.manager import PlaywrightStarter
@@ -83,6 +84,8 @@ def manager_and_playwright(
     per_browser: int = 5,
     global_limit: int = 5,
     observability: PrometheusMetrics | None = None,
+    headless: bool = True,
+    shared_capacity: BrowserContextCapacity | None = None,
 ) -> tuple[BrowserManager, FakePlaywright]:
     playwright = FakePlaywright()
 
@@ -95,6 +98,8 @@ def manager_and_playwright(
         max_active_contexts=global_limit,
         playwright_starter=cast(PlaywrightStarter, starter),
         observability=observability,
+        headless=headless,
+        shared_capacity=shared_capacity,
     )
     return manager, playwright
 
@@ -120,6 +125,42 @@ async def test_manager_starts_one_google_chrome_process() -> None:
     assert len(playwright.chromium.browsers) == 1
     assert playwright.chromium.launch_calls == [{"channel": "chrome", "headless": True}]
     await manager.shutdown()
+
+
+async def test_manual_manager_launches_visible_installed_google_chrome() -> None:
+    manager, playwright = manager_and_playwright(headless=False)
+
+    await manager.start()
+
+    assert playwright.chromium.launch_calls == [{"channel": "chrome", "headless": False}]
+    await manager.shutdown()
+
+
+async def test_headed_and_headless_pools_share_one_global_context_budget() -> None:
+    shared = BrowserContextCapacity(2)
+    automatic, _ = manager_and_playwright(global_limit=2, shared_capacity=shared)
+    manual, _ = manager_and_playwright(
+        global_limit=2,
+        headless=False,
+        shared_capacity=shared,
+    )
+    await automatic.start()
+    await manual.start()
+    automatic_context = await automatic.create_context()
+    manual_context = await manual.create_context()
+
+    with pytest.raises(BrowserCapacityError, match="Global"):
+        await automatic.create_context()
+    assert shared.active == 2
+
+    await manual_context.close()
+    assert shared.active == 1
+    replacement = await automatic.create_context()
+    await replacement.close()
+    await automatic_context.close()
+    assert shared.active == 0
+    await manual.shutdown()
+    await automatic.shutdown()
 
 
 async def test_fresh_context_has_no_shared_storage_state() -> None:
@@ -330,6 +371,26 @@ async def test_dead_browser_is_detected_and_restarted() -> None:
     assert replacement_context.browser_id == 0
     assert replacement_context.context is playwright.chromium.browsers[1].contexts[0]
     await replacement_context.close()
+    await manager.shutdown()
+
+
+async def test_browser_crash_releases_shared_context_capacity() -> None:
+    shared = BrowserContextCapacity(1)
+    manager, playwright = manager_and_playwright(
+        global_limit=1,
+        shared_capacity=shared,
+    )
+    await manager.start()
+    lost_context = await manager.create_context()
+    assert shared.active == 1
+    playwright.chromium.browsers[0].connected = False
+
+    assert await manager.restart_failed_browsers() == 1
+
+    assert lost_context.closed
+    assert shared.active == 0
+    replacement = await manager.create_context()
+    await replacement.close()
     await manager.shutdown()
 
 

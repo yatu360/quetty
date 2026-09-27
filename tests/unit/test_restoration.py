@@ -62,6 +62,12 @@ class FakeBrowserManager:
         self.contexts: list[FakeContext] = []
         self.storage_states: list[object | None] = []
 
+    async def create_context(self, *, storage_state: object | None = None) -> object:
+        context = FakeContext()
+        self.contexts.append(context)
+        self.storage_states.append(storage_state)
+        return FakeOwnedContext(context)
+
     @asynccontextmanager
     async def context(self, *, storage_state: object | None = None):
         context = FakeContext()
@@ -83,6 +89,16 @@ class TimeoutBrowserManager(FakeBrowserManager):
             yield context
         finally:
             context.closed = True
+
+
+class FakeOwnedContext:
+    def __init__(self, context: FakeContext) -> None:
+        self.context = context
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+        self.context.closed = True
 
 
 class LiveExtractor:
@@ -216,6 +232,91 @@ async def test_transfer_only_restores_same_identity_and_progress(tmp_path: Path)
     assert persisted is not None
     assert persisted.queue_id == "queue-expected"
     assert persisted.last_error is None
+    await repository.close()
+
+
+async def test_manual_open_retains_only_matching_identity_context(tmp_path: Path) -> None:
+    restorer, expected, repository, _, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.TRANSFER_ONLY,
+        [matching_result()],
+    )
+
+    opened = await restorer.restore_open(expected)
+
+    assert opened.result.success
+    assert opened.result.identity_match is True
+    assert opened.result.observed_queue_id == "queue-expected"
+    assert opened.owned_context is not None
+    assert opened.page is manager.contexts[0].page
+    assert not manager.contexts[0].closed
+    await opened.owned_context.close()
+    await repository.close()
+
+
+async def test_manual_open_identity_mismatch_closes_context_without_replacing_id(
+    tmp_path: Path,
+) -> None:
+    restorer, expected, repository, _, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.TRANSFER_ONLY,
+        [mismatch_result()],
+    )
+
+    opened = await restorer.restore_open(expected)
+
+    assert not opened.result.success
+    assert opened.result.failure is RestoreFailure.IDENTITY_MISMATCH
+    assert opened.owned_context is None
+    assert manager.contexts[0].closed
+    persisted = await repository.get(expected.session_id)
+    assert persisted is not None
+    assert persisted.queue_id == "queue-expected"
+    assert persisted.last_error == "restore:IDENTITY_MISMATCH"
+    await repository.close()
+
+
+async def test_manual_hybrid_open_refreshes_storage_state(tmp_path: Path) -> None:
+    restorer, expected, repository, state_store, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+    )
+
+    opened = await restorer.restore_open(expected)
+
+    assert opened.result.success
+    assert opened.result.state_refreshed
+    assert await state_store.load(expected.session_id) == {
+        "cookies": [{"name": "refreshed"}],
+        "origins": [],
+    }
+    assert opened.owned_context is not None
+    assert not manager.contexts[0].closed
+    await opened.owned_context.close()
+    await repository.close()
+
+
+async def test_manual_final_inspection_refreshes_hybrid_storage_state(tmp_path: Path) -> None:
+    restorer, expected, repository, state_store, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+    )
+    context = FakeContext()
+
+    result = await restorer.inspect_open(
+        expected,
+        context=cast(Any, context),
+        page=cast(Any, context.page),
+    )
+
+    assert result.success
+    assert result.state_refreshed
+    assert await state_store.load(expected.session_id) == {
+        "cookies": [{"name": "refreshed"}],
+        "origins": [],
+    }
     await repository.close()
 
 

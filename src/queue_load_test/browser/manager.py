@@ -35,6 +35,34 @@ class BrowserManagerNotStartedError(BrowserManagerError):
     """Raised when an operation requires a running manager."""
 
 
+class BrowserContextCapacity:
+    """One event-loop-local context budget shared by headless and headed pools."""
+
+    def __init__(self, maximum: int) -> None:
+        if maximum < 1:
+            raise ValueError("maximum must be at least 1")
+        self.maximum = maximum
+        self._active = 0
+
+    @property
+    def active(self) -> int:
+        return self._active
+
+    @property
+    def available(self) -> int:
+        return max(0, self.maximum - self._active)
+
+    def acquire(self) -> bool:
+        if self._active >= self.maximum:
+            return False
+        self._active += 1
+        return True
+
+    def release(self) -> None:
+        if self._active > 0:
+            self._active -= 1
+
+
 @dataclass(frozen=True, slots=True)
 class BrowserProcessCapacity:
     """Capacity details for one managed Chrome process."""
@@ -74,6 +102,7 @@ class OwnedBrowserContext:
         "_context",
         "_creation_duration_seconds",
         "_manager",
+        "_shared_capacity_reserved",
         "_slot",
     )
 
@@ -85,6 +114,7 @@ class OwnedBrowserContext:
         *,
         creation_duration_seconds: float = 0.0,
         acquisition_wait_seconds: float = 0.0,
+        shared_capacity_reserved: bool = False,
     ) -> None:
         self._manager = manager
         self._slot = slot
@@ -92,6 +122,7 @@ class OwnedBrowserContext:
         self._closed = False
         self._creation_duration_seconds = creation_duration_seconds
         self._acquisition_wait_seconds = acquisition_wait_seconds
+        self._shared_capacity_reserved = shared_capacity_reserved
 
     @property
     def context(self) -> BrowserContext:
@@ -129,7 +160,12 @@ class OwnedBrowserContext:
         await self.close()
 
     def _mark_closed(self) -> None:
+        if self._closed:
+            return
         self._closed = True
+        if self._shared_capacity_reserved:
+            self._shared_capacity_reserved = False
+            self._manager._release_shared_capacity()
 
 
 async def _start_playwright() -> Playwright:
@@ -150,6 +186,7 @@ class BrowserManager:
         observability: PrometheusMetrics | None = None,
         operation_timeout_seconds: float = 30.0,
         close_timeout_seconds: float = 5.0,
+        shared_capacity: BrowserContextCapacity | None = None,
     ) -> None:
         if operation_timeout_seconds <= 0 or close_timeout_seconds <= 0:
             raise ValueError("browser operation timeouts must be positive")
@@ -180,6 +217,7 @@ class BrowserManager:
         # during restart/shutdown, is therefore bounded.
         self._operation_timeout_seconds = operation_timeout_seconds
         self._close_timeout_seconds = close_timeout_seconds
+        self._shared_capacity = shared_capacity
 
     @classmethod
     def from_settings(
@@ -188,6 +226,7 @@ class BrowserManager:
         *,
         playwright_starter: PlaywrightStarter = _start_playwright,
         observability: PrometheusMetrics | None = None,
+        shared_capacity: BrowserContextCapacity | None = None,
     ) -> Self:
         return cls(
             chrome_process_count=settings.chrome_process_count,
@@ -196,6 +235,7 @@ class BrowserManager:
             headless=settings.headless,
             playwright_starter=playwright_starter,
             observability=observability,
+            shared_capacity=shared_capacity,
         )
 
     @property
@@ -282,6 +322,8 @@ class BrowserManager:
                 restart_tasks = self._schedule_failed_restarts_locked()
                 if self._active_context_count() >= self._max_active_contexts:
                     raise BrowserCapacityError("Global browser context capacity is exhausted")
+                if self._shared_capacity is not None and self._shared_capacity.available < 1:
+                    raise BrowserCapacityError("Global browser context capacity is exhausted")
 
                 candidates = [
                     slot
@@ -296,12 +338,21 @@ class BrowserManager:
                         key=lambda candidate: (len(candidate.contexts), candidate.index),
                     )
                     creation_started = time.perf_counter()
+                    shared_capacity_reserved = False
                     try:
+                        if self._shared_capacity is not None:
+                            shared_capacity_reserved = self._shared_capacity.acquire()
+                            if not shared_capacity_reserved:
+                                raise BrowserCapacityError(
+                                    "Global browser context capacity is exhausted"
+                                )
                         context = await asyncio.wait_for(
                             self._new_context(slot.browser, storage_state),
                             timeout=self._operation_timeout_seconds,
                         )
                     except Exception:
+                        if shared_capacity_reserved and self._shared_capacity is not None:
+                            self._shared_capacity.release()
                         creation_duration = time.perf_counter() - creation_started
                         if self._observability is not None:
                             self._observability.record_context_creation_failure()
@@ -332,6 +383,7 @@ class BrowserManager:
                             context,
                             creation_duration_seconds=creation_duration,
                             acquisition_wait_seconds=acquisition_wait_seconds,
+                            shared_capacity_reserved=shared_capacity_reserved,
                         )
                         slot.contexts.add(owned_context)
                         self._update_capacity_metrics()
@@ -394,6 +446,10 @@ class BrowserManager:
         owned_context._mark_closed()
         self._update_capacity_metrics()
         await self._bounded_close(owned_context.context.close(), owned_context._slot.index)
+
+    def _release_shared_capacity(self) -> None:
+        if self._shared_capacity is not None:
+            self._shared_capacity.release()
 
     async def _bounded_close(self, closing: Awaitable[None], browser_id: int) -> None:
         """Close a Chrome resource without letting cancellation or a dead process hang us."""
@@ -575,6 +631,11 @@ class BrowserManager:
             per_browser_available = sum(
                 process.available_contexts for process in process_capacity if process.connected
             )
+            shared_available = (
+                self._shared_capacity.available
+                if self._shared_capacity is not None
+                else self._max_active_contexts - active
+            )
             return BrowserCapacity(
                 chrome_processes=len(self._slots),
                 connected_processes=sum(process.connected for process in process_capacity),
@@ -582,6 +643,7 @@ class BrowserManager:
                 available_contexts=min(
                     self._max_active_contexts - active,
                     per_browser_available,
+                    shared_available,
                 ),
                 maximum_active_contexts=self._max_active_contexts,
                 processes=process_capacity,

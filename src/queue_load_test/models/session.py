@@ -75,6 +75,8 @@ class QueueSession:
     last_error: str | None = None
     worker_id: str | None = None
     lease_until: datetime | None = None
+    manual_owner_id: str | None = None
+    manual_lease_until: datetime | None = None
 
     def __post_init__(self) -> None:
         self.mode = SessionMode.parse(self.mode)

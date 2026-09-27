@@ -9,6 +9,8 @@ from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import (
     LeaseOwnershipError,
+    ManualSessionBusyError,
+    ManualSessionCapacityError,
     QueueIdConflictError,
     SessionRepository,
     SQLiteSessionRepository,
@@ -254,6 +256,107 @@ async def test_active_lease_prevents_claim_until_expiry(tmp_path: Path) -> None:
     assert await repository.count_due_sessions(now=NOW + timedelta(seconds=60)) == 0
     assert await repository.count_due_sessions(now=NOW + timedelta(seconds=62)) == 1
     await repository.close()
+
+
+async def test_manual_ownership_blocks_scheduler_and_releases_back_to_due_work(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "manual-owner.sqlite3")
+    await repository.create(
+        make_session("manual", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW)
+    )
+
+    owned = await repository.acquire_manual_ownership(
+        "manual",
+        owner_id="operator-1",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        capacity=1,
+    )
+
+    assert owned.manual_owner_id == "operator-1"
+    assert await repository.count_due_sessions(now=NOW) == 0
+    assert await repository.claim_due_sessions(
+        worker_id="automatic",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        limit=1,
+    ) == []
+    assert await repository.release_manual_ownership("manual", owner_id="operator-1")
+    assert await repository.count_due_sessions(now=NOW) == 1
+    assert [
+        item.session_id
+        for item in await repository.claim_due_sessions(
+            worker_id="automatic",
+            now=NOW,
+            lease_until=NOW + timedelta(seconds=30),
+            limit=1,
+        )
+    ] == ["manual"]
+    await repository.close()
+
+
+async def test_manual_open_is_busy_during_automatic_check(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "manual-busy.sqlite3")
+    await repository.create(
+        make_session("busy", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW)
+    )
+    await repository.claim_due_sessions(
+        worker_id="automatic",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        limit=1,
+    )
+
+    with pytest.raises(ManualSessionBusyError, match="currently being checked"):
+        await repository.acquire_manual_ownership(
+            "busy",
+            owner_id="operator",
+            now=NOW,
+            lease_until=NOW + timedelta(seconds=30),
+            capacity=1,
+        )
+    await repository.close()
+
+
+async def test_manual_capacity_and_stale_restart_recovery(tmp_path: Path) -> None:
+    database = tmp_path / "manual-capacity.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    for session_id in ("first", "second"):
+        await repository.create(
+            make_session(
+                session_id,
+                queue_id=f"queue-{session_id}",
+                status=QueueStatus.ACTIVE_QUEUE,
+                next_check_at=NOW,
+            )
+        )
+    await repository.acquire_manual_ownership(
+        "first",
+        owner_id="old-process",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=5),
+        capacity=1,
+    )
+    with pytest.raises(ManualSessionCapacityError, match="Browser capacity"):
+        await repository.acquire_manual_ownership(
+            "second",
+            owner_id="operator",
+            now=NOW,
+            lease_until=NOW + timedelta(seconds=5),
+            capacity=1,
+        )
+    await repository.close()
+
+    reopened = SQLiteSessionRepository(database)
+    assert await reopened.recover_stale_manual_ownership(
+        now=NOW + timedelta(seconds=6)
+    ) == 1
+    recovered = await reopened.get("first")
+    assert recovered is not None
+    assert recovered.manual_owner_id is None
+    assert recovered.queue_id == "queue-first"
+    await reopened.close()
 
 
 async def test_release_lease_checks_owner_when_provided(tmp_path: Path) -> None:

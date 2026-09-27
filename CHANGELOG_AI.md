@@ -251,6 +251,7 @@ Phase 2 Prompt 1 — Phase 2 Configuration and Scaling Readiness
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
 - Working tree: documentation-only additions; clean before this task
 
 ## 2026-09-26 — Phase 2 Prompt 1 — Phase 2 Configuration and Scaling Readiness
@@ -2902,3 +2903,77 @@ Phase 5 Prompt 3 — Open Existing Session in Headed Chrome
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
+## 2026-09-27 — Phase 5 Prompt 3 — Open Existing Session in Headed Chrome
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Restore an existing persisted visitor in visible installed Google Chrome while
+preserving identity, excluding automatic monitoring, and bounding resources.
+
+### Changes Made
+
+- Added persisted renewable `manual_owner_id`/`manual_lease_until` ownership, separate
+  from `QueueStatus` and automatic worker leases. Atomic acquisition rejects active
+  checks, enforces capacity, and makes due claims skip manual owners.
+- Added `MAX_MANUAL_OPEN_SESSIONS` (default 5) and
+  `MANUAL_OPEN_LEASE_SECONDS` (default 30 seconds).
+- Added one lazy shared `headless=False`, `channel="chrome"` manager. A shared context
+  budget spans automatic and headed managers, so both count against
+  `MAX_ACTIVE_CONTEXTS`; no Chrome process is created per persisted session.
+- Extended identity-safe restoration to retain only a verified expected identity, with
+  transfer-first/HYBRID fallback and refreshed HYBRID storage state.
+- Added page/context close, Chrome-loss, explicit Close, heartbeat, stale-lease recovery,
+  and application-shutdown cleanup. Inspectable closes reuse the lifecycle evaluator,
+  persist progress/state, and schedule the next check; lost pages preserve prior state.
+- Added per-row Open/Close HTMX actions and `OPEN IN CHROME` display.
+
+### Files Added
+
+- `src/queue_load_test/web/manual.py`
+- `tests/unit/test_manual_open.py`
+
+### Files Modified
+
+- Configuration, browser, model, repository, scheduler, restoration, web UI, tests, and
+  the required project documentation.
+
+### Tests Run
+
+- Targeted browser/repository/restoration/monitoring/manual/UI tests — passed.
+- `python3 -m pytest -q` — 402 passed, 4 gated staging tests deselected.
+- `python3 -m ruff check src tests` — passed.
+- `python3 -m mypy src` — passed with no issues in 61 source files.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN**; no authorised
+  Queue-it traffic was needed for this implementation prompt.
+
+### Important Decisions
+
+- `OPEN_IN_CHROME` is `BrowserRuntimeState`, never `QueueStatus`.
+- Mismatch/failure never adopts an unexpected Queue ID and always cleans up ownership.
+- Manual open reports busy instead of racing automatic work; headed and headless Chrome
+  pools are separate but share one global BrowserContext budget.
+
+### Known Issues
+
+- A hard kill can leave the ownership marker until its short lease expires (30 seconds
+  by default). Final inspection is best effort when Chrome is already gone.
+- Cross-pool capacity accounting is local to the single UI process. Real Queue-it
+  headed restoration and long operator dwell remain unverified without staging.
+
+### Follow-Up
+
+Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh Actions
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: implementation and documentation changes pending commit

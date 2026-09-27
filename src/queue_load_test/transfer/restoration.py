@@ -10,10 +10,10 @@ from enum import StrEnum
 from typing import Protocol, cast
 from urllib.parse import urlsplit
 
-from playwright.async_api import Page
+from playwright.async_api import BrowserContext, Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from queue_load_test.browser import BrowserManager
+from queue_load_test.browser import BrowserCapacityError, BrowserManager, OwnedBrowserContext
 from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
@@ -100,6 +100,15 @@ class SessionRestoreResult:
     admitted: bool = False
     expired: bool = False
     attempts: tuple[RestoreAttempt, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class OpenedSessionRestore:
+    """Identity-safe restore result that retains a successful browser context."""
+
+    result: SessionRestoreResult
+    owned_context: OwnedBrowserContext | None = None
+    page: Page | None = None
 
 
 def _is_restore_failure(attempt: RestoreAttempt) -> bool:
@@ -222,6 +231,100 @@ class QueueSessionRestorer:
         result = await self._restore_with_method(session, method)
         self._observe_restore_result(session, result, time.perf_counter() - started)
         return result
+
+    async def restore_open(self, session: QueueSession) -> OpenedSessionRestore:
+        """Restore a session while retaining only a verified live context."""
+
+        started = time.perf_counter()
+        expected_queue_id = session.queue_id
+        if expected_queue_id is None:
+            opened = OpenedSessionRestore(
+                self._result(
+                    RestoreAttempt(
+                        method=RestoreMethod.TRANSFER,
+                        success=False,
+                        failure=RestoreFailure.EXPECTED_IDENTITY_MISSING,
+                    ),
+                    expected_queue_id,
+                )
+            )
+        elif not session.transfer_url.strip():
+            opened = OpenedSessionRestore(
+                self._result(
+                    RestoreAttempt(
+                        method=RestoreMethod.TRANSFER,
+                        success=False,
+                        failure=RestoreFailure.TRANSFER_URL_MISSING,
+                    ),
+                    expected_queue_id,
+                )
+            )
+        elif not self._valid_transfer_url(session.transfer_url):
+            opened = OpenedSessionRestore(
+                self._result(
+                    RestoreAttempt(
+                        method=RestoreMethod.TRANSFER,
+                        success=False,
+                        failure=RestoreFailure.INVALID_TRANSFER_URL,
+                    ),
+                    expected_queue_id,
+                )
+            )
+        else:
+            transfer = await self._open_browser_attempt(
+                session,
+                method=RestoreMethod.TRANSFER,
+            )
+            attempts = [transfer.result.attempts[-1]]
+            if (
+                transfer.owned_context is not None
+                or session.mode is SessionMode.TRANSFER_ONLY
+                or transfer.result.failure is RestoreFailure.STATE_REFRESH_FAILED
+            ):
+                opened = replace(
+                    transfer,
+                    result=self._result(attempts[-1], expected_queue_id, attempts),
+                )
+            else:
+                state, failure = await self._load_storage_state(session)
+                if failure is not None:
+                    state_attempt = RestoreAttempt(
+                        method=RestoreMethod.STORAGE_STATE,
+                        success=False,
+                        failure=failure,
+                    )
+                    attempts.append(state_attempt)
+                    opened = OpenedSessionRestore(
+                        self._result(state_attempt, expected_queue_id, attempts)
+                    )
+                else:
+                    state_opened = await self._open_browser_attempt(
+                        session,
+                        method=RestoreMethod.STORAGE_STATE,
+                        storage_state=state,
+                    )
+                    attempts.append(state_opened.result.attempts[-1])
+                    opened = replace(
+                        state_opened,
+                        result=self._result(attempts[-1], expected_queue_id, attempts),
+                    )
+        await self._record(session, opened.result)
+        self._observe_restore_result(session, opened.result, time.perf_counter() - started)
+        return opened
+
+    async def inspect_open(
+        self,
+        session: QueueSession,
+        *,
+        context: BrowserContext,
+        page: Page,
+    ) -> SessionRestoreResult:
+        """Inspect and refresh a still-open verified manual session."""
+
+        attempt = await self._observe(page, session, RestoreMethod.TRANSFER)
+        if attempt.success and session.mode is SessionMode.HYBRID:
+            attempt = await self._refresh_state(session, context, attempt)
+        return self._result(attempt, session.queue_id)
 
     def _observe_restore_result(
         self,
@@ -370,34 +473,28 @@ class QueueSessionRestorer:
         *,
         refresh_state: bool = True,
     ) -> RestoreAttempt:
-        try:
-            state = await self._state_store.load(session.session_id)
-        except (StateUnreadableError, OSError):
-            # An I/O or permission interruption says nothing about the stored
-            # document, so it stays retryable rather than failing the identity.
-            return RestoreAttempt(
-                method=RestoreMethod.STORAGE_STATE,
-                success=False,
-                failure=RestoreFailure.STATE_UNAVAILABLE,
-            )
-        except StateStoreError:
-            return RestoreAttempt(
-                method=RestoreMethod.STORAGE_STATE,
-                success=False,
-                failure=RestoreFailure.STATE_CORRUPT,
-            )
-        if state is None:
-            return RestoreAttempt(
-                method=RestoreMethod.STORAGE_STATE,
-                success=False,
-                failure=RestoreFailure.STATE_MISSING,
-            )
+        state, failure = await self._load_storage_state(session)
+        if failure is not None:
+            return RestoreAttempt(method=RestoreMethod.STORAGE_STATE, success=False, failure=failure)
         return await self._browser_attempt(
             session,
             method=RestoreMethod.STORAGE_STATE,
             storage_state=cast(ContextStorageState, state),
             refresh_state=refresh_state,
         )
+
+    async def _load_storage_state(
+        self, session: QueueSession
+    ) -> tuple[ContextStorageState | None, RestoreFailure | None]:
+        try:
+            state = await self._state_store.load(session.session_id)
+        except (StateUnreadableError, OSError):
+            return None, RestoreFailure.STATE_UNAVAILABLE
+        except StateStoreError:
+            return None, RestoreFailure.STATE_CORRUPT
+        if state is None:
+            return None, RestoreFailure.STATE_MISSING
+        return cast(ContextStorageState, state), None
 
     async def _browser_attempt(
         self,
@@ -433,6 +530,153 @@ class QueueSessionRestorer:
                 else RestoreFailure.NAVIGATION_FAILED
             )
             return RestoreAttempt(method=method, success=False, failure=failure)
+
+    async def _open_browser_attempt(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod,
+        storage_state: ContextStorageState | None = None,
+    ) -> OpenedSessionRestore:
+        try:
+            async with asyncio.timeout(self._attempt_timeout_seconds):
+                return await self._unbounded_open_browser_attempt(
+                    session,
+                    method=method,
+                    storage_state=storage_state,
+                )
+        except TimeoutError:
+            if self._observability is not None:
+                self._observability.record_browser_operation_timeout()
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            attempt = RestoreAttempt(method=method, success=False, failure=failure)
+            return OpenedSessionRestore(self._result(attempt, session.queue_id))
+
+    async def _unbounded_open_browser_attempt(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod,
+        storage_state: ContextStorageState | None,
+    ) -> OpenedSessionRestore:
+        owned: OwnedBrowserContext | None = None
+        try:
+            owned = await self._browser_manager.create_context(storage_state=storage_state)
+            context = owned.context
+            page = await context.new_page()
+            navigation_url = (
+                self._storage_navigation_url or session.transfer_url
+                if method is RestoreMethod.STORAGE_STATE
+                else session.transfer_url
+            )
+            navigation_started = time.perf_counter()
+            try:
+                response = await page.goto(
+                    navigation_url,
+                    wait_until="domcontentloaded",
+                    timeout=self._navigation_timeout_ms,
+                )
+            except PlaywrightTimeoutError:
+                if self._observability is not None:
+                    self._observability.record_navigation_failure(timed_out=True)
+                failure = (
+                    RestoreFailure.STATE_CONTEXT_FAILED
+                    if method is RestoreMethod.STORAGE_STATE
+                    else RestoreFailure.NAVIGATION_FAILED
+                )
+                attempt = RestoreAttempt(method=method, success=False, failure=failure)
+            except Exception:  # noqa: BLE001
+                if self._observability is not None:
+                    self._observability.record_navigation_failure()
+                failure = (
+                    RestoreFailure.STATE_CONTEXT_FAILED
+                    if method is RestoreMethod.STORAGE_STATE
+                    else RestoreFailure.NAVIGATION_FAILED
+                )
+                attempt = RestoreAttempt(method=method, success=False, failure=failure)
+            else:
+                if response is not None and response.status == 410:
+                    attempt = RestoreAttempt(
+                        method=method,
+                        success=False,
+                        failure=RestoreFailure.SESSION_EXPIRED,
+                        expired=True,
+                    )
+                elif response is not None and response.status >= 400:
+                    failure = (
+                        RestoreFailure.HTTP_FAILURE
+                        if response.status >= 500 or response.status in {408, 429}
+                        else RestoreFailure.INVALID_TRANSFER_URL
+                    )
+                    attempt = RestoreAttempt(method=method, success=False, failure=failure)
+                elif self._admission_detector is not None and await self._admission_detector.detect(
+                    page
+                ):
+                    attempt = RestoreAttempt(
+                        method=method,
+                        success=True,
+                        identity_match=True,
+                        admitted=True,
+                    )
+                else:
+                    attempt = await self._observe(page, session, method)
+                    if attempt.success and session.mode is SessionMode.HYBRID:
+                        attempt = await self._refresh_state(session, context, attempt)
+            finally:
+                if self._observability is not None:
+                    self._observability.record_navigation_duration(
+                        time.perf_counter() - navigation_started
+                    )
+            result = self._result(attempt, session.queue_id)
+            keep_open = result.success or (
+                result.failure is RestoreFailure.STATE_REFRESH_FAILED
+                and result.identity_match is True
+                and (result.progress is not None or result.admitted)
+            )
+            if keep_open:
+                return OpenedSessionRestore(result, owned, page)
+        except asyncio.CancelledError:
+            if owned is not None:
+                await owned.close()
+            raise
+        except BrowserCapacityError:
+            if owned is not None:
+                await owned.close()
+            raise
+        except Exception:  # noqa: BLE001
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            result = self._result(
+                RestoreAttempt(method=method, success=False, failure=failure),
+                session.queue_id,
+            )
+        if owned is not None:
+            await owned.close()
+        return OpenedSessionRestore(result)
+
+    async def _refresh_state(
+        self,
+        session: QueueSession,
+        context: BrowserContext,
+        attempt: RestoreAttempt,
+    ) -> RestoreAttempt:
+        try:
+            state = cast(BrowserState, await context.storage_state())
+            session.state_path = await self._state_store.save(session.session_id, state)
+        except Exception:  # noqa: BLE001
+            return replace(
+                attempt,
+                success=False,
+                failure=RestoreFailure.STATE_REFRESH_FAILED,
+            )
+        return replace(attempt, state_refreshed=True)
 
     async def _unbounded_browser_attempt(
         self,

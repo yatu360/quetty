@@ -3,6 +3,7 @@
 from queue_load_test.browser.manager import (
     BrowserCapacity,
     BrowserCapacityError,
+    BrowserContextCapacity,
     BrowserManager,
     BrowserManagerError,
     BrowserManagerNotStartedError,
@@ -13,6 +14,7 @@ from queue_load_test.browser.manager import (
 __all__ = [
     "BrowserCapacity",
     "BrowserCapacityError",
+    "BrowserContextCapacity",
     "BrowserManager",
     "BrowserManagerError",
     "BrowserManagerNotStartedError",

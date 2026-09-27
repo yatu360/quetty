@@ -9,6 +9,7 @@ from queue_load_test.transfer.extractor import (
     TransferSelector,
 )
 from queue_load_test.transfer.restoration import (
+    OpenedSessionRestore,
     QueueSessionRestorer,
     RestoreAttempt,
     RestoreFailure,
@@ -17,6 +18,7 @@ from queue_load_test.transfer.restoration import (
 )
 
 __all__ = [
+    "OpenedSessionRestore",
     "QueueItTransferExtractor",
     "QueueItTransferSelectors",
     "QueueSessionRestorer",

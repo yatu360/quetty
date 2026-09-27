@@ -1,6 +1,8 @@
 <div id="session-results"
      hx-get="/partials/sessions?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
      hx-trigger="every 2s" hx-swap="outerHTML">
+{% if action_error %}<p class="error" role="alert">{{ action_error }}</p>{% endif %}
+{% if action_message %}<p class="notice" role="status">{{ action_message }}</p>{% endif %}
 {% if session_page.items %}
 <div class="table-wrap">
   <table>
@@ -19,8 +21,18 @@
         <td>{{ session.last_queue_update or "—" }}</td>
         <td>{{ session.last_checked_at or "—" }}</td>
         <td>{{ session.next_check_at or "—" }}</td>
-        <td>{{ session.runtime_state.value }}</td>
-        <td><span class="muted">—</span></td>
+        <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN CHROME{% else %}{{ session.runtime_state.value }}{% endif %}</td>
+        <td>
+          {% if session.runtime_state.value == "OPEN_IN_CHROME" %}
+          <button hx-post="/sessions/{{ session.session_id }}/close?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  hx-target="#session-results" hx-swap="outerHTML">Close</button>
+          {% elif session.runtime_state.value == "CHECKING" %}
+          <button disabled title="Automatic monitoring currently owns this session">Open in Chrome</button>
+          {% else %}
+          <button hx-post="/sessions/{{ session.session_id }}/open?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  hx-target="#session-results" hx-swap="outerHTML">Open in Chrome</button>
+          {% endif %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>

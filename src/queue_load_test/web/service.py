@@ -9,7 +9,7 @@ from typing import Protocol
 
 from pydantic import HttpUrl, TypeAdapter
 
-from queue_load_test.browser import BrowserManager
+from queue_load_test.browser import BrowserContextCapacity, BrowserManager
 from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
@@ -27,6 +27,7 @@ from queue_load_test.scheduler import (
 )
 from queue_load_test.state import FileSystemStateStore
 from queue_load_test.transfer import QueueSessionRestorer
+from queue_load_test.web.manual import ManualChromeSessionManager, ManualOpenResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,10 @@ class RunRuntime(Protocol):
 
     async def resume_monitoring(self) -> None: ...
 
+    async def open_session(self, session_id: str) -> ManualOpenResult: ...
+
+    async def close_session(self, session_id: str) -> bool: ...
+
     async def close(self) -> None: ...
 
 
@@ -59,6 +64,9 @@ class ApplicationRunRuntime:
         self._browser_manager: BrowserManager | None = None
         self._runtime: ApplicationRuntime | None = None
         self._monitoring_scheduler: ParkedSessionScheduler | None = None
+        self._manual_sessions: ManualChromeSessionManager | None = None
+        self._shared_capacity: BrowserContextCapacity | None = None
+        self._headed_browser_manager: BrowserManager | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
@@ -75,7 +83,12 @@ class ApplicationRunRuntime:
             )
             metrics = PrometheusMetrics()
             state_store = FileSystemStateStore(settings.state_directory)
-            browser_manager = BrowserManager.from_settings(settings, observability=metrics)
+            shared_capacity = BrowserContextCapacity(settings.max_active_contexts)
+            browser_manager = BrowserManager.from_settings(
+                settings,
+                observability=metrics,
+                shared_capacity=shared_capacity,
+            )
             target_url = str(validated_url)
             creator = QueueSessionCreator(
                 browser_manager=browser_manager,
@@ -111,6 +124,32 @@ class ApplicationRunRuntime:
                 retry_policy=MonitoringRetryPolicy.from_settings(settings),
                 observability=metrics,
             )
+            headed_manager = BrowserManager(
+                chrome_process_count=1,
+                max_contexts_per_browser=settings.max_manual_open_sessions,
+                max_active_contexts=settings.max_manual_open_sessions,
+                headless=False,
+                observability=metrics,
+                shared_capacity=shared_capacity,
+            )
+            headed_restorer = QueueSessionRestorer(
+                browser_manager=headed_manager,
+                repository=self._repository,
+                state_store=state_store,
+                admission_detector=AdmissionDetector.from_urls(target_url),
+                storage_navigation_url=target_url,
+                admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
+                observability=metrics,
+            )
+            manual_sessions = ManualChromeSessionManager(
+                repository=self._repository,
+                browser_manager=headed_manager,
+                restorer=headed_restorer,
+                monitor=monitor,
+                capacity=settings.max_manual_open_sessions,
+                lease_seconds=settings.manual_open_lease_seconds,
+            )
+            await manual_sessions.recover_stale()
             scheduler = ParkedSessionScheduler.from_settings(
                 settings,
                 repository=self._repository,
@@ -129,6 +168,9 @@ class ApplicationRunRuntime:
             self._browser_manager = browser_manager
             self._monitoring_scheduler = scheduler
             self._runtime = runtime
+            self._manual_sessions = manual_sessions
+            self._shared_capacity = shared_capacity
+            self._headed_browser_manager = headed_manager
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
     async def capacity(self) -> RuntimeCapacity:
@@ -143,10 +185,12 @@ class ApplicationRunRuntime:
             return RuntimeCapacity(
                 maximum_active_contexts=self._base_settings.max_active_contexts
             )
+        shared = self._shared_capacity
+        headed = self._headed_browser_manager
         return RuntimeCapacity(
-            active_contexts=value.active_contexts,
+            active_contexts=shared.active if shared is not None else value.active_contexts,
             maximum_active_contexts=value.maximum_active_contexts,
-            chrome_processes=value.chrome_processes,
+            chrome_processes=value.chrome_processes + int(headed is not None and headed.started),
         )
 
     def error(self) -> str | None:
@@ -170,7 +214,21 @@ class ApplicationRunRuntime:
             return
         await scheduler.resume_monitoring()
 
+    async def open_session(self, session_id: str) -> ManualOpenResult:
+        manager = self._manual_sessions
+        if manager is None:
+            raise RuntimeError("Run runtime has not started")
+        return await manager.open(session_id)
+
+    async def close_session(self, session_id: str) -> bool:
+        manager = self._manual_sessions
+        if manager is None:
+            return False
+        return await manager.close_session(session_id)
+
     async def close(self) -> None:
+        if self._manual_sessions is not None:
+            await self._manual_sessions.close()
         if self._runtime is not None:
             self._runtime.request_shutdown()
         if self._task is not None:

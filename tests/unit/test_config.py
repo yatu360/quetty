@@ -236,6 +236,8 @@ def test_hybrid_and_transfer_only_mode_parsing() -> None:
         ("MONITOR_WORKERS", 0),
         ("MONITOR_QUEUE_CAPACITY", 0),
         ("MONITOR_CLAIM_BATCH_SIZE", 0),
+        ("MAX_MANUAL_OPEN_SESSIONS", 0),
+        ("MANUAL_OPEN_LEASE_SECONDS", 3),
         ("PROMETHEUS_PORT", 65_536),
     ],
 )
@@ -289,6 +291,11 @@ def test_rejects_creation_queue_above_active_context_capacity() -> None:
 def test_rejects_monitor_queue_above_active_context_capacity() -> None:
     with pytest.raises(ValidationError, match="MONITOR_QUEUE_CAPACITY"):
         Settings(**settings_kwargs(MONITOR_QUEUE_CAPACITY=26))
+
+
+def test_rejects_manual_open_capacity_above_global_context_capacity() -> None:
+    with pytest.raises(ValidationError, match="MAX_MANUAL_OPEN_SESSIONS"):
+        Settings(**settings_kwargs(MAX_MANUAL_OPEN_SESSIONS=26))
 
 
 def test_rejects_claim_batch_above_monitor_queue_capacity() -> None:

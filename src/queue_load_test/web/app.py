@@ -18,6 +18,7 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 from queue_load_test.config import Settings
 from queue_load_test.models import BrowserRuntimeState, QueueStatus, RunConfig
 from queue_load_test.repository import RepositoryError, SessionRepository
+from queue_load_test.web.manual import ManualOpenError
 from queue_load_test.web.service import (
     ApplicationRunRuntime,
     DashboardService,
@@ -154,6 +155,8 @@ def create_app(
                 "selected_runtime": runtime_state,
                 "statuses": tuple(QueueStatus),
                 "runtime_states": tuple(BrowserRuntimeState),
+                "action_error": None,
+                "action_message": None,
             },
         )
 
@@ -212,6 +215,67 @@ def create_app(
                 "search": search,
                 "selected_status": status,
                 "selected_runtime": runtime_state,
+                "action_error": None,
+                "action_message": None,
+            },
+        )
+
+    @app.post("/sessions/{session_id}/open", response_class=HTMLResponse)
+    async def open_session(
+        request: Request,
+        session_id: str,
+        page: int = Query(1, ge=1),
+        search: str = "",
+        status: str = "",
+        runtime_state: str = "",
+    ) -> Response:
+        if await require_run() is None:
+            return RedirectResponse("/setup", status_code=303)
+        message: str | None = None
+        error: str | None = None
+        try:
+            message = (await run_runtime.open_session(session_id)).message
+        except (ManualOpenError, RepositoryError) as exc:
+            error = str(exc)
+        return templates.TemplateResponse(
+            request,
+            "_sessions.html",
+            {
+                "session_page": await _session_page(
+                    repository, page, search, status, runtime_state
+                ),
+                "search": search,
+                "selected_status": status,
+                "selected_runtime": runtime_state,
+                "action_error": error,
+                "action_message": message,
+            },
+        )
+
+    @app.post("/sessions/{session_id}/close", response_class=HTMLResponse)
+    async def close_session(
+        request: Request,
+        session_id: str,
+        page: int = Query(1, ge=1),
+        search: str = "",
+        status: str = "",
+        runtime_state: str = "",
+    ) -> Response:
+        if await require_run() is None:
+            return RedirectResponse("/setup", status_code=303)
+        closed = await run_runtime.close_session(session_id)
+        return templates.TemplateResponse(
+            request,
+            "_sessions.html",
+            {
+                "session_page": await _session_page(
+                    repository, page, search, status, runtime_state
+                ),
+                "search": search,
+                "selected_status": status,
+                "selected_runtime": runtime_state,
+                "action_error": None if closed else "Session is not open in Chrome",
+                "action_message": "Chrome session closed" if closed else None,
             },
         )
 
