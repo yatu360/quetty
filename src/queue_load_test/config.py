@@ -95,6 +95,13 @@ class Settings(BaseSettings):
         alias="MANUAL_OPEN_LEASE_SECONDS",
         gt=3,
     )
+    operator_workers: int = Field(default=2, alias="OPERATOR_WORKERS", ge=1)
+    operator_queue_capacity: int = Field(
+        default=10, alias="OPERATOR_QUEUE_CAPACITY", ge=1
+    )
+    operator_lease_seconds: float = Field(
+        default=300.0, alias="OPERATOR_LEASE_SECONDS", gt=0
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -153,6 +160,9 @@ class Settings(BaseSettings):
 
         if self.max_manual_open_sessions > self.max_active_contexts:
             raise ValueError("MAX_MANUAL_OPEN_SESSIONS cannot exceed MAX_ACTIVE_CONTEXTS")
+
+        if self.operator_workers > self.max_active_contexts:
+            raise ValueError("OPERATOR_WORKERS cannot exceed MAX_ACTIVE_CONTEXTS")
 
         if self.poll_jitter_seconds >= self.queue_poll_seconds:
             raise ValueError("POLL_JITTER_SECONDS must be less than QUEUE_POLL_SECONDS")

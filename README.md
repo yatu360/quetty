@@ -61,6 +61,9 @@ Open `http://127.0.0.1:8000`. `UI_HOST` defaults to `127.0.0.1`, `UI_PORT` defau
 `8000`, and `MAX_MANUAL_REQUESTED_SESSIONS` defaults to the currently supported 10,000
 session safety ceiling. `MAX_MANUAL_OPEN_SESSIONS` defaults to 5 and bounds visible
 operator contexts; `MANUAL_OPEN_LEASE_SECONDS` defaults to 30 seconds.
+Browser-backed mutations use `OPERATOR_WORKERS` (default 2) and a bounded
+`OPERATOR_QUEUE_CAPACITY` (default 10); arbitrary HTTP requests never create arbitrary
+background tasks.
 
 On a new empty database, the UI shows setup before any dashboard. Enter an authorised
 absolute HTTP(S) staging URL and the requested session count. Start persists the run,
@@ -115,6 +118,30 @@ and computes the normal next check. If Chrome has already gone away, the last pe
 state is preserved and automatic monitoring can recover later. Expired persisted manual
 leases are recovered after a crash/restart; no browser-only state can keep a session
 open forever.
+
+The remaining per-row controls reuse those same domain services. **Refresh Now** claims
+the session, restores its expected identity, runs one normal evaluator/monitor pass,
+persists progress and state, and parks it again. It is intentionally available while
+automatic monitoring is globally paused, but reports busy during an automatic check,
+another refresh, or **Open in Chrome**. **Delete** means “stop managing this visitor”:
+after browser confirmation it removes the session, progress, leases, transfer identity,
+and local HYBRID state; it never calls a Queue-it cancellation API. An open headed
+session must be closed before deletion.
+
+**Replace** first acquires and persists one valid independent visitor through the
+existing creation path, then deletes the selected visitor. Acquisition failure or a
+duplicate keeps the old visitor intact. **+ New Session** uses that same bounded creator
+to add exactly one extra managed visitor. Neither operation hand-builds transfer URLs.
+The persisted `requested_sessions` remains the initial acquisition target: manual Add
+may make the valid managed count larger, Delete may make it smaller, and neither causes
+automatic refill. A small persisted population adjustment preserves those semantics
+across application restart; Replace leaves it unchanged.
+
+Accordingly, the dashboard distinguishes **Requested Sessions**, **Valid Managed
+Sessions**, and **Remaining To Initial Target** (`max(0, requested - valid)`). Operator
+action status is retained in the application-owned worker manager and appears as
+requested, running, success, or failed across HTMX partial refreshes. Errors shown in
+the browser are sanitized.
 
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;

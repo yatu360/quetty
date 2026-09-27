@@ -3,6 +3,11 @@
      hx-trigger="every 2s" hx-swap="outerHTML">
 {% if action_error %}<p class="error" role="alert">{{ action_error }}</p>{% endif %}
 {% if action_message %}<p class="notice" role="status">{{ action_message }}</p>{% endif %}
+<div class="session-toolbar">
+  <button hx-post="/sessions/new?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+          hx-target="#session-results" hx-swap="outerHTML">+ New Session</button>
+  {% if add_action %}<span role="status">Add: {{ add_action.status.value | lower }} — {{ add_action.message }}</span>{% endif %}
+</div>
 {% if session_page.items %}
 <div class="table-wrap">
   <table>
@@ -13,6 +18,7 @@
     </tr></thead>
     <tbody>
     {% for session in session_page.items %}
+      {% set action = session_actions.get(session.session_id) %}
       <tr>
         <td class="mono">{{ session.session_id }}</td>
         <td class="mono">{{ session.queue_id or "—" }}</td>
@@ -23,14 +29,24 @@
         <td>{{ session.next_check_at or "—" }}</td>
         <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN CHROME{% else %}{{ session.runtime_state.value }}{% endif %}</td>
         <td>
+          {% if action %}<div class="action-status">{{ action.kind.value | title }}: {{ action.status.value | lower }}</div>{% endif %}
           {% if session.runtime_state.value == "OPEN_IN_CHROME" %}
           <button hx-post="/sessions/{{ session.session_id }}/close?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
                   hx-target="#session-results" hx-swap="outerHTML">Close</button>
           {% elif session.runtime_state.value == "CHECKING" %}
           <button disabled title="Automatic monitoring currently owns this session">Open in Chrome</button>
+          <button disabled>Refresh Now</button><button disabled>Replace</button><button disabled>Delete</button>
           {% else %}
           <button hx-post="/sessions/{{ session.session_id }}/open?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
                   hx-target="#session-results" hx-swap="outerHTML">Open in Chrome</button>
+          <button hx-post="/sessions/{{ session.session_id }}/refresh?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  hx-target="#session-results" hx-swap="outerHTML">Refresh Now</button>
+          <button hx-post="/sessions/{{ session.session_id }}/replace?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  hx-confirm="Replace this managed session? The old session is kept if acquisition fails."
+                  hx-target="#session-results" hx-swap="outerHTML">Replace</button>
+          <button hx-post="/sessions/{{ session.session_id }}/delete?page={{ session_page.page }}&search={{ search | urlencode }}&status={{ selected_status }}&runtime_state={{ selected_runtime }}"
+                  hx-confirm="Delete this managed session? This does not cancel anything at Queue-it."
+                  hx-target="#session-results" hx-swap="outerHTML">Delete</button>
           {% endif %}
         </td>
       </tr>

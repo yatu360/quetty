@@ -2977,3 +2977,91 @@ Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh Actions
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: implementation and documentation changes pending commit
+
+## 2026-09-27 — Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh Actions
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Complete the core operator controls without moving Queue-it lifecycle logic into HTTP
+routes or allowing button clicks to create unbounded browser work.
+
+### Changes Made
+
+- Added a fixed `OPERATOR_WORKERS` pool (default 2) and bounded
+  `OPERATOR_QUEUE_CAPACITY` (default 10). Requests expose sanitized requested, running,
+  success, and failed status across HTMX partial refreshes.
+- Added an atomic operator lease acquired before Refresh/Delete/Replace enters the
+  queue. It shares the scheduler's fenced `worker_id` ownership, renews during long
+  work, rejects headed-open or automatic-check ownership, and is released on success,
+  failure, cancellation, queue rejection, and shutdown.
+- Refresh Now directly invokes the existing identity-safe restorer/monitor/evaluator,
+  including while global automatic monitoring is paused. It persists lifecycle,
+  progress, next-check scheduling, and refreshed HYBRID state through existing code.
+- Delete requires the headed session to be closed, atomically deletes the owned row and
+  records the population adjustment, cascades progress/lease metadata, and removes the
+  local state file. Missing rows/state are idempotent; no Queue-it cancellation API is
+  used.
+- Replace runs the existing bounded creator first and deletes the old visitor only
+  after a unique valid replacement is persisted. Duplicate or failed acquisition is
+  cleaned up and leaves the old expected identity intact.
+- Add runs exactly one existing creation work item. It does not change `RunConfig`,
+  `TARGET_QUEUE_IDS`, or hand-build a transfer URL.
+- Added persisted `operator_population_adjustment`. Startup uses
+  `requested_sessions + adjustment` as its effective acquisition target, preserving
+  explicit Add/Delete count changes without mutating the immutable initial target;
+  Replace leaves the adjustment unchanged.
+- Updated the dashboard labels to Requested Sessions, Valid Managed Sessions, and
+  Remaining To Initial Target, and added confirmed per-row controls plus + New Session.
+
+### Tests Run
+
+- Operator action tests cover paused refresh, progress persistence, automatic/manual
+  ownership conflicts, identity preservation, delete cascade/state cleanup and repeat,
+  create-first replacement success/failure, exact Add behavior, fixed concurrency, and
+  queue-capacity rejection.
+- UI tests cover action controls, confirmation, submission, and status survival across
+  HTMX refresh.
+- `.venv/bin/python -m pytest` — 409 passed, 4 gated staging tests deselected.
+- `ruff check src tests` — passed.
+- `mypy src` — passed with no issues in 62 source files.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it traffic was required or sent.
+
+### Important Decisions
+
+- Refresh is an explicit operator action and remains available during global automatic
+  monitoring pause, while still obeying identity, ownership, browser, and work limits.
+- Delete means stop local management and requires Close first; it is not remote Queue-it
+  cancellation.
+- Replacement is create-first. Acquisition failure is atomic from the old visitor's
+  perspective: the old row and Queue ID remain unchanged.
+- `requested_sessions` is the immutable boot/acquisition target. Manual Add/Delete
+  change actual managed population and a separate persisted adjustment; Remaining To
+  Initial Target is informational and never treats an over-target population as error.
+
+### Known Issues
+
+- Operator action history is process-local and bounded; completed browser/DB effects
+  persist, but the requested/running/success/failed banner itself is not restart-safe.
+- A process crash after a successful Add row commit but before its separate population
+  adjustment commit can leave the adjustment one behind. The extra valid visitor is
+  retained and is never silently deleted; Prompt 5 recovery can reconcile this narrow
+  commit window.
+- Real Queue-it Add/Replace/Refresh behavior remains unverified without authorised
+  staging traffic.
+
+### Follow-Up
+
+Phase 5 Prompt 5 — UI Reliability and Recovery
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+- Working tree: implementation, tests, and documentation pending commit

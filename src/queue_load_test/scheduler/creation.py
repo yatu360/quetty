@@ -449,8 +449,8 @@ class SessionCreationController:
     ) -> None:
         if identity_replacement_limit is not None and identity_replacement_limit < 0:
             raise ValueError("identity_replacement_limit cannot be negative")
-        if target_queue_ids < 1:
-            raise ValueError("target_queue_ids must be at least 1")
+        if target_queue_ids < 0:
+            raise ValueError("target_queue_ids cannot be negative")
         if worker_count < 1:
             raise ValueError("worker_count must be at least 1")
         if queue_capacity is not None and queue_capacity < 1:
@@ -465,6 +465,13 @@ class SessionCreationController:
         self._observability = observability
         if observability is not None:
             observability.set_target(target_queue_ids)
+
+    def adjust_target(self, delta: int) -> None:
+        """Keep a still-running acquisition loop aligned with operator add/delete."""
+
+        self._target = max(0, self._target + delta)
+        if self._observability is not None:
+            self._observability.set_target(self._target)
 
     @classmethod
     def from_settings(

@@ -27,6 +27,11 @@ from queue_load_test.scheduler import (
 )
 from queue_load_test.state import FileSystemStateStore
 from queue_load_test.transfer import QueueSessionRestorer
+from queue_load_test.web.actions import (
+    OperatorAction,
+    OperatorActionKind,
+    OperatorActionManager,
+)
 from queue_load_test.web.manual import ManualChromeSessionManager, ManualOpenResult
 
 
@@ -52,6 +57,14 @@ class RunRuntime(Protocol):
 
     async def close_session(self, session_id: str) -> bool: ...
 
+    async def request_action(
+        self, kind: OperatorActionKind, session_id: str | None = None
+    ) -> OperatorAction: ...
+
+    def session_action(self, session_id: str) -> OperatorAction | None: ...
+
+    def latest_add_action(self) -> OperatorAction | None: ...
+
     async def close(self) -> None: ...
 
 
@@ -67,6 +80,7 @@ class ApplicationRunRuntime:
         self._manual_sessions: ManualChromeSessionManager | None = None
         self._shared_capacity: BrowserContextCapacity | None = None
         self._headed_browser_manager: BrowserManager | None = None
+        self._operator_actions: OperatorActionManager | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
@@ -99,10 +113,13 @@ class ApplicationRunRuntime:
                 mode=settings.session_mode,
                 observability=metrics,
             )
+            population_adjustment = (
+                await self._repository.get_operator_population_adjustment()
+            )
             creation = SessionCreationController(
                 repository=self._repository,
                 handler=creator,
-                target_queue_ids=run.requested_sessions,
+                target_queue_ids=max(0, run.requested_sessions + population_adjustment),
                 worker_count=settings.creation_workers,
                 queue_capacity=settings.creation_queue_capacity,
                 observability=metrics,
@@ -150,6 +167,17 @@ class ApplicationRunRuntime:
                 lease_seconds=settings.manual_open_lease_seconds,
             )
             await manual_sessions.recover_stale()
+            operator_actions = OperatorActionManager(
+                repository=self._repository,
+                creator=creator,
+                monitor=monitor,
+                state_store=state_store,
+                target_adjustment=creation,
+                worker_count=settings.operator_workers,
+                queue_capacity=settings.operator_queue_capacity,
+                lease_seconds=settings.operator_lease_seconds,
+            )
+            await operator_actions.start()
             scheduler = ParkedSessionScheduler.from_settings(
                 settings,
                 repository=self._repository,
@@ -171,6 +199,7 @@ class ApplicationRunRuntime:
             self._manual_sessions = manual_sessions
             self._shared_capacity = shared_capacity
             self._headed_browser_manager = headed_manager
+            self._operator_actions = operator_actions
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
     async def capacity(self) -> RuntimeCapacity:
@@ -226,7 +255,25 @@ class ApplicationRunRuntime:
             return False
         return await manager.close_session(session_id)
 
+    async def request_action(
+        self, kind: OperatorActionKind, session_id: str | None = None
+    ) -> OperatorAction:
+        manager = self._operator_actions
+        if manager is None:
+            raise RuntimeError("Run runtime has not started")
+        return await manager.request(kind, session_id)
+
+    def session_action(self, session_id: str) -> OperatorAction | None:
+        manager = self._operator_actions
+        return manager.for_session(session_id) if manager is not None else None
+
+    def latest_add_action(self) -> OperatorAction | None:
+        manager = self._operator_actions
+        return manager.latest_add() if manager is not None else None
+
     async def close(self) -> None:
+        if self._operator_actions is not None:
+            await self._operator_actions.close()
         if self._manual_sessions is not None:
             await self._manual_sessions.close()
         if self._runtime is not None:
@@ -239,8 +286,8 @@ class ApplicationRunRuntime:
 class DashboardSummary:
     target_url: str
     requested_sessions: int
-    loaded_sessions: int
-    remaining: int
+    valid_managed_sessions: int
+    remaining_to_initial_target: int
     creation: str
     monitoring: str
     total_persisted_sessions: int
@@ -262,17 +309,23 @@ class DashboardService:
         capacity = await self._runtime.capacity()
         runtime_error = self._runtime.error()
         monitoring_paused = await self._repository.is_monitoring_paused()
+        population_adjustment = (
+            await self._repository.get_operator_population_adjustment()
+        )
+        effective_target = max(0, run.requested_sessions + population_adjustment)
         if runtime_error is not None:
             creation = "ERROR"
-        elif recovery.valid_queue_ids >= run.requested_sessions:
+        elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
         else:
             creation = "RUNNING"
         return DashboardSummary(
             target_url=run.target_url,
             requested_sessions=run.requested_sessions,
-            loaded_sessions=recovery.valid_queue_ids,
-            remaining=max(0, run.requested_sessions - recovery.valid_queue_ids),
+            valid_managed_sessions=recovery.valid_queue_ids,
+            remaining_to_initial_target=max(
+                0, run.requested_sessions - recovery.valid_queue_ids
+            ),
             creation=creation,
             monitoring="PAUSED" if monitoring_paused else "RUNNING",
             total_persisted_sessions=recovery.total_persisted_sessions,

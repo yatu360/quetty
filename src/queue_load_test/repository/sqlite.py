@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS run_config (
 );
 CREATE TABLE IF NOT EXISTS runtime_control (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    monitoring_paused INTEGER NOT NULL CHECK (monitoring_paused IN (0, 1))
+    monitoring_paused INTEGER NOT NULL CHECK (monitoring_paused IN (0, 1)),
+    operator_population_adjustment INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO runtime_control (singleton, monitoring_paused) VALUES (1, 0);
 CREATE TABLE IF NOT EXISTS queue_sessions (
@@ -406,6 +407,157 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def get_operator_population_adjustment(self) -> int:
+        def operation() -> int:
+            row = self._connect().execute(
+                "SELECT operator_population_adjustment FROM runtime_control WHERE singleton = 1"
+            ).fetchone()
+            if row is None:
+                raise ValueError("Persisted runtime control row is missing")
+            return int(row["operator_population_adjustment"])
+
+        return await self._run(operation)
+
+    async def adjust_operator_population(self, delta: int) -> int:
+        def operation() -> int:
+            connection = self._connect()
+            connection.execute(
+                "UPDATE runtime_control SET operator_population_adjustment = "
+                "operator_population_adjustment + ? WHERE singleton = 1",
+                (delta,),
+            )
+            row = connection.execute(
+                "SELECT operator_population_adjustment FROM runtime_control WHERE singleton = 1"
+            ).fetchone()
+            connection.commit()
+            if row is None:
+                raise ValueError("Persisted runtime control row is missing")
+            return int(row["operator_population_adjustment"])
+
+        return await self._run(operation)
+
+    async def acquire_operator_lease(
+        self,
+        session_id: str,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_until: datetime,
+    ) -> QueueSession:
+        """Atomically reserve one session for a bounded operator action."""
+
+        if not worker_id.strip():
+            raise ValueError("worker_id cannot be blank")
+        now_storage = _to_storage(now)
+        lease_storage = _to_storage(lease_until)
+        if now_storage is None or lease_storage is None or lease_storage <= now_storage:
+            raise ValueError("operator lease must end after now")
+
+        def operation() -> QueueSession:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    raise SessionNotFoundError(f"Session {session_id!r} does not exist")
+                manual_until = _from_storage(row["manual_lease_until"])
+                if row["manual_owner_id"] is not None and (
+                    manual_until is None or manual_until > now
+                ):
+                    raise ManualSessionBusyError("Close the Chrome session before continuing")
+                if row["worker_id"] is not None:
+                    raise ManualSessionBusyError("Session is currently being checked")
+                cursor = connection.execute(
+                    "UPDATE queue_sessions SET worker_id = ?, lease_until = ?, "
+                    "manual_owner_id = NULL, manual_lease_until = NULL "
+                    "WHERE session_id = ? AND worker_id IS NULL "
+                    "AND (manual_owner_id IS NULL OR manual_lease_until <= ?)",
+                    (worker_id, lease_storage, session_id, now_storage),
+                )
+                if cursor.rowcount != 1:
+                    raise ManualSessionBusyError("Session browser ownership changed")
+                claimed = connection.execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return _row_to_session(claimed)
+
+        return await self._run(operation)
+
+    async def delete_owned_session(
+        self,
+        session_id: str,
+        *,
+        worker_id: str,
+        population_delta: int = 0,
+    ) -> bool:
+        def operation() -> bool:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = connection.execute(
+                    "DELETE FROM queue_sessions WHERE session_id = ? AND worker_id = ?",
+                    (session_id, worker_id),
+                )
+                if cursor.rowcount == 1 and population_delta:
+                    connection.execute(
+                        "UPDATE runtime_control SET operator_population_adjustment = "
+                        "operator_population_adjustment + ? WHERE singleton = 1",
+                        (population_delta,),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
+    async def renew_operator_lease(
+        self,
+        session_id: str,
+        *,
+        worker_id: str,
+        lease_until: datetime,
+    ) -> bool:
+        lease_storage = _to_storage(lease_until)
+        if lease_storage is None:
+            raise ValueError("lease_until is required")
+
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                "UPDATE queue_sessions SET lease_until = ? "
+                "WHERE session_id = ? AND worker_id = ?",
+                (lease_storage, session_id, worker_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
+    async def delete_unowned_session(self, session_id: str) -> bool:
+        """Remove a known failed action-created row without overriding ownership."""
+
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                "DELETE FROM queue_sessions WHERE session_id = ? "
+                "AND worker_id IS NULL AND manual_owner_id IS NULL",
+                (session_id,),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
     async def acquire_manual_ownership(
         self,
         session_id: str,
@@ -555,6 +707,7 @@ class SQLiteSessionRepository:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(_SCHEMA)
             self._migrate_session_columns(connection)
+            self._migrate_runtime_control_columns(connection)
             self._ensure_due_index(connection)
             connection.execute(_MANUAL_LEASE_INDEX_SQL)
             connection.commit()
@@ -577,6 +730,18 @@ class SQLiteSessionRepository:
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE queue_sessions ADD COLUMN {name} TEXT")
+
+    @staticmethod
+    def _migrate_runtime_control_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(runtime_control)").fetchall()
+        }
+        if "operator_population_adjustment" not in columns:
+            connection.execute(
+                "ALTER TABLE runtime_control ADD COLUMN "
+                "operator_population_adjustment INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _ensure_due_index(connection: sqlite3.Connection) -> None:

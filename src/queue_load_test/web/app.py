@@ -16,8 +16,9 @@ from fastapi.templating import Jinja2Templates
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from queue_load_test.config import Settings
-from queue_load_test.models import BrowserRuntimeState, QueueStatus, RunConfig
+from queue_load_test.models import BrowserRuntimeState, QueueStatus, RunConfig, SessionSummaryPage
 from queue_load_test.repository import RepositoryError, SessionRepository
+from queue_load_test.web.actions import OperatorActionKind
 from queue_load_test.web.manual import ManualOpenError
 from queue_load_test.web.service import (
     ApplicationRunRuntime,
@@ -132,6 +133,31 @@ def create_app(
     async def require_run() -> RunConfig | None:
         return await repository.get_active_run()
 
+    async def sessions_context(
+        *,
+        page: int,
+        search: str,
+        status: str,
+        runtime_state: str,
+        action_error: str | None = None,
+        action_message: str | None = None,
+    ) -> dict[str, object]:
+        session_page = await _session_page(repository, page, search, status, runtime_state)
+        return {
+            "session_page": session_page,
+            "search": search,
+            "selected_status": status,
+            "selected_runtime": runtime_state,
+            "action_error": action_error,
+            "action_message": action_message,
+            "session_actions": {
+                item.session_id: run_runtime.session_action(item.session_id)
+                for item in session_page.items
+                if run_runtime.session_action(item.session_id) is not None
+            },
+            "add_action": run_runtime.latest_add_action(),
+        }
+
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard_page(
         request: Request,
@@ -143,20 +169,17 @@ def create_app(
         run = await require_run()
         if run is None:
             return RedirectResponse("/setup", status_code=303)
-        session_page = await _session_page(repository, page, search, status, runtime_state)
+        context = await sessions_context(
+            page=page, search=search, status=status, runtime_state=runtime_state
+        )
         return templates.TemplateResponse(
             request,
             "dashboard.html",
             {
                 "summary": await dashboard.summary(run),
-                "session_page": session_page,
-                "search": search,
-                "selected_status": status,
-                "selected_runtime": runtime_state,
+                **context,
                 "statuses": tuple(QueueStatus),
                 "runtime_states": tuple(BrowserRuntimeState),
-                "action_error": None,
-                "action_message": None,
             },
         )
 
@@ -208,16 +231,9 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "_sessions.html",
-            {
-                "session_page": await _session_page(
-                    repository, page, search, status, runtime_state
-                ),
-                "search": search,
-                "selected_status": status,
-                "selected_runtime": runtime_state,
-                "action_error": None,
-                "action_message": None,
-            },
+            await sessions_context(
+                page=page, search=search, status=status, runtime_state=runtime_state
+            ),
         )
 
     @app.post("/sessions/{session_id}/open", response_class=HTMLResponse)
@@ -240,16 +256,14 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "_sessions.html",
-            {
-                "session_page": await _session_page(
-                    repository, page, search, status, runtime_state
-                ),
-                "search": search,
-                "selected_status": status,
-                "selected_runtime": runtime_state,
-                "action_error": error,
-                "action_message": message,
-            },
+            await sessions_context(
+                page=page,
+                search=search,
+                status=status,
+                runtime_state=runtime_state,
+                action_error=error,
+                action_message=message,
+            ),
         )
 
     @app.post("/sessions/{session_id}/close", response_class=HTMLResponse)
@@ -267,16 +281,84 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "_sessions.html",
-            {
-                "session_page": await _session_page(
-                    repository, page, search, status, runtime_state
-                ),
-                "search": search,
-                "selected_status": status,
-                "selected_runtime": runtime_state,
-                "action_error": None if closed else "Session is not open in Chrome",
-                "action_message": "Chrome session closed" if closed else None,
-            },
+            await sessions_context(
+                page=page,
+                search=search,
+                status=status,
+                runtime_state=runtime_state,
+                action_error=None if closed else "Session is not open in Chrome",
+                action_message="Chrome session closed" if closed else None,
+            ),
+        )
+
+    async def submit_operator_action(
+        request: Request,
+        kind: OperatorActionKind,
+        session_id: str | None,
+        page: int,
+        search: str,
+        status: str,
+        runtime_state: str,
+    ) -> Response:
+        if await require_run() is None:
+            return RedirectResponse("/setup", status_code=303)
+        action = await run_runtime.request_action(kind, session_id)
+        error = action.message if action.status.value == "FAILED" else None
+        message = None if error is not None else action.message
+        return templates.TemplateResponse(
+            request,
+            "_sessions.html",
+            await sessions_context(
+                page=page,
+                search=search,
+                status=status,
+                runtime_state=runtime_state,
+                action_error=error,
+                action_message=message,
+            ),
+        )
+
+    def action_route(kind: OperatorActionKind):  # type: ignore[no-untyped-def]
+        async def route(
+            request: Request,
+            session_id: str,
+            page: int = Query(1, ge=1),
+            search: str = "",
+            status: str = "",
+            runtime_state: str = "",
+        ) -> Response:
+            return await submit_operator_action(
+                request, kind, session_id, page, search, status, runtime_state
+            )
+
+        return route
+
+    app.post("/sessions/{session_id}/refresh", response_class=HTMLResponse)(
+        action_route(OperatorActionKind.REFRESH)
+    )
+    app.post("/sessions/{session_id}/delete", response_class=HTMLResponse)(
+        action_route(OperatorActionKind.DELETE)
+    )
+    app.post("/sessions/{session_id}/replace", response_class=HTMLResponse)(
+        action_route(OperatorActionKind.REPLACE)
+    )
+
+    @app.post("/sessions/new", response_class=HTMLResponse)
+    async def add_session(
+        request: Request,
+        page: int = Query(1, ge=1),
+        search: str = "",
+        status: str = "",
+        runtime_state: str = "",
+    ) -> Response:
+        return await submit_operator_action(
+            request,
+            OperatorActionKind.ADD,
+            None,
+            page,
+            search,
+            status,
+            runtime_state,
         )
 
     return app
@@ -288,7 +370,7 @@ async def _session_page(
     search: str,
     status: str,
     runtime_state: str,
-) -> object:
+) -> SessionSummaryPage:
     parsed_status = QueueStatus.parse(status) if status else None
     parsed_runtime = BrowserRuntimeState(runtime_state) if runtime_state else None
     return await repository.list_session_summaries(

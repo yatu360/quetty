@@ -17,6 +17,11 @@ from queue_load_test.models import (
 )
 from queue_load_test.repository import SQLiteSessionRepository, UnownedSessionsError
 from queue_load_test.web import create_app
+from queue_load_test.web.actions import (
+    OperatorAction,
+    OperatorActionKind,
+    OperatorActionStatus,
+)
 from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
 from queue_load_test.web.service import RuntimeCapacity
 
@@ -30,6 +35,7 @@ class FakeRuntime:
         self.resume_calls = 0
         self.open_calls: list[str] = []
         self.close_calls: list[str] = []
+        self.actions: list[OperatorAction] = []
 
     async def start_run(self, run: RunConfig) -> None:
         self.started.append(run)
@@ -75,6 +81,25 @@ class FakeRuntime:
             session_id,
             owner_id="fake-ui",
         )
+
+    async def request_action(
+        self, kind: OperatorActionKind, session_id: str | None = None
+    ) -> OperatorAction:
+        action = OperatorAction(
+            action_id="fake-action",
+            kind=kind,
+            status=OperatorActionStatus.REQUESTED,
+            session_id=session_id,
+            message=f"{kind.value.title()} requested",
+        )
+        self.actions.append(action)
+        return action
+
+    def session_action(self, session_id: str) -> OperatorAction | None:
+        return next((item for item in reversed(self.actions) if item.session_id == session_id), None)
+
+    def latest_add_action(self) -> OperatorAction | None:
+        return next((item for item in reversed(self.actions) if item.session_id is None), None)
 
     async def close(self) -> None:
         self.closed += 1
@@ -467,3 +492,50 @@ def test_dashboard_opens_and_closes_existing_session_in_chrome(tmp_path: Path) -
         assert "Chrome session closed" in closed.text
         assert "Open in Chrome" in closed.text
         assert runtime.close_calls == ["manual-session"]
+
+
+def test_operator_action_routes_render_controls_and_survive_partial_refresh(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "operator-routes.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    asyncio.run(repository.initialize())
+    asyncio.run(
+        repository.create_run(
+            RunConfig(
+                run_id="operator-run",
+                target_url="https://staging.example.test/queue",
+                requested_sessions=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+    )
+    asyncio.run(repository.create(QueueSession(
+        session_id="operator-session",
+        queue_id="operator-queue",
+        transfer_url="https://sensitive.invalid/transfer",
+        mode=SessionMode.HYBRID,
+        state_path=Path("sensitive-state.json"),
+        status=QueueStatus.PARKED,
+    )))
+    asyncio.run(repository.close())
+
+    app_repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(app_repository)
+    app = create_app(settings=settings(database), repository=app_repository, runtime=runtime)
+    with TestClient(app) as client:
+        initial = client.get("/partials/sessions")
+        assert "Refresh Now" in initial.text
+        assert "+ New Session" in initial.text
+        assert "hx-confirm" in initial.text
+
+        refresh = client.post("/sessions/operator-session/refresh")
+        assert refresh.status_code == 200
+        assert "Refresh: requested" in refresh.text
+        partial = client.get("/partials/sessions")
+        assert "Refresh: requested" in partial.text
+
+        added = client.post("/sessions/new")
+        assert added.status_code == 200
+        assert "Add requested" in added.text
+        assert runtime.actions[-1].kind is OperatorActionKind.ADD

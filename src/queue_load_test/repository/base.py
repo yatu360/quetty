@@ -132,6 +132,29 @@ class SessionRepository(Protocol):
 
     async def set_monitoring_paused(self, paused: bool) -> bool: ...
 
+    async def get_operator_population_adjustment(self) -> int: ...
+
+    async def adjust_operator_population(self, delta: int) -> int: ...
+
+    async def acquire_operator_lease(
+        self,
+        session_id: str,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_until: datetime,
+    ) -> QueueSession: ...
+
+    async def renew_operator_lease(
+        self, session_id: str, *, worker_id: str, lease_until: datetime
+    ) -> bool: ...
+
+    async def delete_owned_session(
+        self, session_id: str, *, worker_id: str, population_delta: int = 0
+    ) -> bool: ...
+
+    async def delete_unowned_session(self, session_id: str) -> bool: ...
+
     async def acquire_manual_ownership(
         self,
         session_id: str,

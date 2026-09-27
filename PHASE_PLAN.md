@@ -465,7 +465,7 @@ Planned prompt breakdown:
 
 ## Phase 5 — Operator UI
 
-**Status: Prompt 3 complete.**
+**Status: Prompt 4 complete.**
 
 1. **Lightweight Web Dashboard Foundation + Startup Run Setup** — **completed on
    2026-09-27.** Added a localhost FastAPI/Jinja2/HTMX UI, immutable persisted run
@@ -483,13 +483,18 @@ Planned prompt breakdown:
    close/crash/shutdown cleanup, final lifecycle/progress/state refresh where possible,
    and per-row Open/Close controls. `OPEN_IN_CHROME` is browser ownership and is not a
    `QueueStatus`.
-4. **Delete, Replace, Add, and Manual Refresh Actions** — next.
+4. **Delete, Replace, Add, and Manual Refresh Actions** — **completed on 2026-09-27.**
+   Added fenced immediate refresh, confirmed delete, create-first replacement, and
+   one-at-a-time manual Add through a fixed worker pool and bounded queue. Manual
+   refresh works during global pause; requested and actual counts remain distinct, and
+   a persisted adjustment keeps explicit Add/Delete population changes stable across
+   restart.
 5. **UI Reliability and Recovery** — planned.
 6. **Phase 5 Acceptance** — planned.
 
-Later Phase 5 actions must continue to use bounded workers, repository ownership, and
+Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. The disabled new-run placeholder remains; Prompt
-3 does not implement retargeting, session mutation, or manual refresh.
+4 does not implement retargeting.
 
 ## Scaling Gates
 

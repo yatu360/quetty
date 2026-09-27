@@ -9,7 +9,7 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 5 Prompt 3 is complete. A localhost FastAPI/Jinja2/HTMX operator
+- Current phase: Phase 5 Prompt 4 is complete. A localhost FastAPI/Jinja2/HTMX operator
   UI now provides persisted first-run setup, bounded acquisition/runtime startup, run
   recovery, aggregate status, and a safe paginated session dashboard.
 - The SQLite schema now includes one immutable current `run_config` row. The run target
@@ -35,8 +35,18 @@ live monitoring.
   release ownership. A still-live page is inspected through the existing extractor and
   lifecycle evaluator, with progress/scheduling and HYBRID state refreshed where
   possible; an already-lost page preserves its last persisted state.
-- Exact next task: **Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh
-  Actions**.
+- Refresh/Delete/Replace/Add requests run through a fixed operator worker pool and
+  bounded queue. Per-session requests acquire fenced ownership before queueing,
+  preventing scheduler/open races; manual refresh calls the existing monitor even while
+  global automatic monitoring is paused.
+- Delete requires Close first and removes the row, cascading progress, leases, transfer
+  identity, and local state. Replace creates/persists a unique visitor before deleting
+  the old row, so failed/duplicate acquisition leaves the old identity intact. Add
+  creates exactly one independent visitor through the normal creator.
+- `requested_sessions` remains the immutable initial target. A persisted signed
+  operator population adjustment prevents restart acquisition from refilling a manual
+  Delete or discounting a manual Add; Replace does not change it.
+- Exact next task: **Phase 5 Prompt 5 — UI Reliability and Recovery**.
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -248,8 +258,10 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   Existing Phase 2 indexes are migrated in place during initialization.
 - SQLite also has a singleton `run_config` table. Setup is insert-only in Prompt 1;
   there is no target-changing operation.
-- SQLite has a singleton `runtime_control` table containing `monitoring_paused`. Its
-  O(1) update survives restart; the claim transaction checks it before selecting rows.
+- SQLite has a singleton `runtime_control` table containing `monitoring_paused` and the
+  signed `operator_population_adjustment`. Both O(1) values survive restart; the claim
+  transaction checks pause before selecting rows and startup applies the population
+  adjustment without mutating immutable `requested_sessions`.
 - Manual browser ownership is stored on the session as a separately fenced owner/lease.
   Manual acquisition rejects an automatic owner and enforces the manual-open limit in
   one `BEGIN IMMEDIATE` transaction. Due claims exclude live manual leases and can
@@ -333,6 +345,12 @@ saves HYBRID state, persists, and releases the context. SQLite's unique nullable
 `queue_id` constraint remains authoritative. A duplicate deletes newly saved state,
 creates an explicit `FAILED` attempt without a Queue ID, and leaves the existing
 session unchanged.
+
+Manual Add and Replace call this same creator once from a fixed-size operator pool.
+Failed action attempts are removed rather than shown as phantom managed sessions.
+Replace deletes its leased old row only after the replacement has a valid persisted
+identity. Delete and Add update the persisted population adjustment so later startup
+does not undo explicit population changes.
 
 ## Session Lifecycle
 
@@ -886,7 +904,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 Prompt 4 — Delete, Replace, Add, and Manual Refresh Actions.
+Phase 5 Prompt 5 — UI Reliability and Recovery.
 
 ## Instructions for Future AI Sessions
 
