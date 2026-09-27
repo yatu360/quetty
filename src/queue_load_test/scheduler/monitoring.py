@@ -395,6 +395,7 @@ class MonitoringMetrics:
     lease_release_failures: int = 0
     scheduler_iterations: int = 0
     idle_iterations: int = 0
+    skipped_while_paused: int = 0
 
 
 class _StopWorker:
@@ -453,6 +454,9 @@ class ParkedSessionScheduler:
         self._workers: list[asyncio.Task[None]] = []
         self._owned_session_ids: set[str] = set()
         self._schedule_lock = asyncio.Lock()
+        self._pause_lock = asyncio.Lock()
+        self._control_changed = asyncio.Event()
+        self._monitoring_is_paused = False
         self._accepting = True
         self.metrics = MonitoringMetrics()
 
@@ -497,6 +501,7 @@ class ParkedSessionScheduler:
     async def start(self) -> None:
         if self._workers:
             return
+        self._monitoring_is_paused = await self._repository.is_monitoring_paused()
         self._workers = [
             asyncio.create_task(self._worker(index), name=f"queue-monitor-{index}")
             for index in range(self._worker_count)
@@ -505,6 +510,28 @@ class ParkedSessionScheduler:
 
     def stop_scheduling(self) -> None:
         self._accepting = False
+        self._control_changed.set()
+
+    async def pause_monitoring(self) -> None:
+        """Persist pause and fence future automatic claim/check starts."""
+
+        async with self._pause_lock:
+            await self._repository.set_monitoring_paused(True)
+            self._monitoring_is_paused = True
+            self._control_changed.set()
+
+    async def resume_monitoring(self) -> None:
+        """Persist resume without changing any per-session schedule."""
+
+        async with self._pause_lock:
+            await self._repository.set_monitoring_paused(False)
+            self._monitoring_is_paused = False
+            self._control_changed.set()
+
+    async def monitoring_paused(self) -> bool:
+        paused = await self._repository.is_monitoring_paused()
+        self._monitoring_is_paused = paused
+        return paused
 
     async def run(self, stop_event: asyncio.Event) -> MonitoringMetrics:
         """Continuously feed due work until asked to drain and stop."""
@@ -515,7 +542,8 @@ class ParkedSessionScheduler:
             while not stop_event.is_set():
                 delay = self._scheduler_tick_seconds
                 try:
-                    await self.schedule_due()
+                    if not await self.monitoring_paused():
+                        await self.schedule_due()
                 except Exception as exc:  # noqa: BLE001 - keep scheduling through outages
                     consecutive_failures += 1
                     self._record_schedule_failure(exc, consecutive_failures)
@@ -533,13 +561,26 @@ class ParkedSessionScheduler:
                             count=consecutive_failures,
                         )
                     consecutive_failures = 0
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=delay)
-                except TimeoutError:
-                    pass
+                await self._wait_for_tick_or_control_change(stop_event, delay)
         finally:
             await self.shutdown(timeout_seconds=self._shutdown_timeout_seconds)
         return self.metrics
+
+    async def _wait_for_tick_or_control_change(
+        self,
+        stop_event: asyncio.Event,
+        delay: float,
+    ) -> None:
+        """Sleep while paused/idle, waking promptly for local pause/resume changes."""
+
+        if stop_event.is_set():
+            return
+        try:
+            await asyncio.wait_for(self._control_changed.wait(), timeout=delay)
+        except TimeoutError:
+            return
+        finally:
+            self._control_changed.clear()
 
     def _record_schedule_failure(self, exc: Exception, consecutive_failures: int) -> None:
         self.metrics.schedule_failures += 1
@@ -558,30 +599,32 @@ class ParkedSessionScheduler:
         """Claim no more sessions than the bounded queue can accept."""
 
         async with self._schedule_lock:
-            if not self._accepting:
-                return 0
-            self.metrics.scheduler_iterations += 1
-            now = self._clock()
-            due_summary = await self._repository.due_session_summary(now=now)
-            due_backlog = due_summary.count
-            self.metrics.due_backlog = due_backlog
-            self.metrics.oldest_overdue_seconds = due_summary.oldest_overdue_seconds(now=now)
-            if self._observability is not None:
-                self._observability.set_monitoring_backlog(
-                    due_backlog,
-                    oldest_overdue_seconds=self.metrics.oldest_overdue_seconds,
+            async with self._pause_lock:
+                self._monitoring_is_paused = await self._repository.is_monitoring_paused()
+                if not self._accepting or self._monitoring_is_paused:
+                    return 0
+                self.metrics.scheduler_iterations += 1
+                now = self._clock()
+                due_summary = await self._repository.due_session_summary(now=now)
+                due_backlog = due_summary.count
+                self.metrics.due_backlog = due_backlog
+                self.metrics.oldest_overdue_seconds = due_summary.oldest_overdue_seconds(now=now)
+                if self._observability is not None:
+                    self._observability.set_monitoring_backlog(
+                        due_backlog,
+                        oldest_overdue_seconds=self.metrics.oldest_overdue_seconds,
+                    )
+                available = self._queue.maxsize - self._queue.qsize()
+                limit = min(available, self._claim_batch_size)
+                if limit < 1:
+                    self.metrics.idle_iterations += 1
+                    return 0
+                claimed_sessions = await self._repository.claim_due_sessions(
+                    worker_id=self._scheduler_id,
+                    now=now,
+                    lease_until=now + timedelta(seconds=self._lease_seconds),
+                    limit=limit,
                 )
-            available = self._queue.maxsize - self._queue.qsize()
-            limit = min(available, self._claim_batch_size)
-            if limit < 1:
-                self.metrics.idle_iterations += 1
-                return 0
-            claimed_sessions = await self._repository.claim_due_sessions(
-                worker_id=self._scheduler_id,
-                now=now,
-                lease_until=now + timedelta(seconds=self._lease_seconds),
-                limit=limit,
-            )
             if isinstance(claimed_sessions, ClaimedSessions):
                 self._record_lease_recoveries(claimed_sessions.recovered_expired_leases)
                 # This scheduler's own lease expired (a hung check, or a release that
@@ -699,12 +742,10 @@ class ParkedSessionScheduler:
             try:
                 if isinstance(item, _StopWorker):
                     return
-                self.metrics.currently_checking += 1
-                self.metrics.maximum_concurrent_checks = max(
-                    self.metrics.maximum_concurrent_checks,
-                    self.metrics.currently_checking,
-                )
-                self._set_monitoring_activity()
+                if not await self._begin_check():
+                    self.metrics.skipped_while_paused += 1
+                    await self._release_owned_lease(item)
+                    continue
                 try:
                     outcome = await self._handler.check(item)
                     self.metrics.completed += 1
@@ -739,36 +780,54 @@ class ParkedSessionScheduler:
                         )
                 finally:
                     self.metrics.currently_checking -= 1
-                    try:
-                        released = await self._repository.release_lease(
-                            item.session_id,
-                            worker_id=self._scheduler_id,
-                        )
-                        if not released:
-                            self.metrics.lease_conflicts += 1
-                            if self._observability is not None:
-                                self._observability.record_monitoring_lease_conflicts()
-                    except Exception as exc:  # noqa: BLE001
-                        # The lease stays persisted and becomes claimable after
-                        # expiry; the session is never deleted or replaced.
-                        self.metrics.lease_release_failures += 1
-                        if self._observability is not None:
-                            self._observability.record_repository_error("release")
-                        log_event(
-                            logger,
-                            logging.ERROR,
-                            "monitoring_lease_release_failed",
-                            session_id=item.session_id,
-                            queue_id=item.queue_id,
-                            status=item.status.value,
-                            worker_id=self._scheduler_id,
-                            error_type=type(exc).__name__,
-                        )
-                    self._owned_session_ids.discard(item.session_id)
+                    await self._release_owned_lease(item)
                     self.metrics.checked += 1
                     self._set_monitoring_activity()
             finally:
                 self._queue.task_done()
+
+    async def _begin_check(self) -> bool:
+        """Fence check start against pause persistence using one scheduler lock."""
+
+        async with self._pause_lock:
+            if self._monitoring_is_paused:
+                return False
+            self.metrics.currently_checking += 1
+            self.metrics.maximum_concurrent_checks = max(
+                self.metrics.maximum_concurrent_checks,
+                self.metrics.currently_checking,
+            )
+            self._set_monitoring_activity()
+            return True
+
+    async def _release_owned_lease(self, session: QueueSession) -> None:
+        try:
+            released = await self._repository.release_lease(
+                session.session_id,
+                worker_id=self._scheduler_id,
+            )
+            if not released:
+                self.metrics.lease_conflicts += 1
+                if self._observability is not None:
+                    self._observability.record_monitoring_lease_conflicts()
+        except Exception as exc:  # noqa: BLE001
+            # The lease stays persisted and becomes claimable after expiry; the
+            # session identity and schedule are never deleted or replaced.
+            self.metrics.lease_release_failures += 1
+            if self._observability is not None:
+                self._observability.record_repository_error("release")
+            log_event(
+                logger,
+                logging.ERROR,
+                "monitoring_lease_release_failed",
+                session_id=session.session_id,
+                queue_id=session.queue_id,
+                status=session.status.value,
+                worker_id=self._scheduler_id,
+                error_type=type(exc).__name__,
+            )
+        self._owned_session_ids.discard(session.session_id)
+        self._set_monitoring_activity()
 
     async def _repark_after_failure(self, session: QueueSession) -> None:
         session.last_error = "monitor:worker_failure"

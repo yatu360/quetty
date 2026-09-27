@@ -120,6 +120,10 @@ class SessionRepository(Protocol):
 
     async def create_run(self, run: RunConfig) -> RunConfig: ...
 
+    async def is_monitoring_paused(self) -> bool: ...
+
+    async def set_monitoring_paused(self, paused: bool) -> bool: ...
+
     async def create(
         self,
         session: QueueSession,

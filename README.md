@@ -80,6 +80,20 @@ visible page every two seconds. Dashboard requests never allocate a browser cont
 Queue-it lifecycle comes directly from persisted evaluator output and is not inferred
 from Queue ID or progress presence.
 
+**Pause Monitoring** persists one global automatic-monitoring control flag. A pause
+stops new scheduler claims and browser checks; a check already in flight may finish and
+persist normally, while claimed-but-not-started work is released without being checked.
+The dashboard and due-backlog count continue refreshing. Queue IDs, transfer data,
+state, progress, lifecycle status, and `next_check_at` are not changed by the pause.
+Acquisition continues independently. **Resume Monitoring** clears the flag and the
+bounded scheduler claims normally due rows without resetting timestamps or enqueuing
+the full backlog. The state survives restart and repeated pause/resume requests are
+idempotent.
+
+This global control is not Queue-it's `PAUSED` lifecycle observation. It affects only
+automatic scheduling; future headed sessions and manual refresh actions remain separate
+controls.
+
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;
 do not expose the UI beyond a trusted local machine or share its SQLite/state files.

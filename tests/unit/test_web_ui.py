@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,9 +21,12 @@ from queue_load_test.web.service import RuntimeCapacity
 
 
 class FakeRuntime:
-    def __init__(self) -> None:
+    def __init__(self, repository: SQLiteSessionRepository | None = None) -> None:
         self.started: list[RunConfig] = []
         self.closed = 0
+        self.repository = repository
+        self.pause_calls = 0
+        self.resume_calls = 0
 
     async def start_run(self, run: RunConfig) -> None:
         self.started.append(run)
@@ -36,6 +40,16 @@ class FakeRuntime:
 
     def error(self) -> str | None:
         return None
+
+    async def pause_monitoring(self) -> None:
+        self.pause_calls += 1
+        if self.repository is not None:
+            await self.repository.set_monitoring_paused(True)
+
+    async def resume_monitoring(self) -> None:
+        self.resume_calls += 1
+        if self.repository is not None:
+            await self.repository.set_monitoring_paused(False)
 
     async def close(self) -> None:
         self.closed += 1
@@ -273,3 +287,109 @@ def test_ten_thousand_rows_return_only_one_database_bounded_page(tmp_path: Path)
     assert len(page.items) == 50
     assert page.items[0].session_id == "session-04950"
     asyncio.run(repository.close())
+
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TRIGGER reject_population_rewrite
+        BEFORE UPDATE ON queue_sessions
+        BEGIN
+            SELECT RAISE(ABORT, 'session population was rewritten');
+        END
+        """
+    )
+    connection.commit()
+    connection.close()
+    control_repository = SQLiteSessionRepository(database)
+    assert asyncio.run(control_repository.set_monitoring_paused(True))
+    assert asyncio.run(control_repository.set_monitoring_paused(False)) is False
+    assert asyncio.run(
+        control_repository.recovery_summary(now=datetime.now(UTC))
+    ).total_persisted_sessions == 10_000
+    asyncio.run(control_repository.close())
+
+
+def test_dashboard_pause_resume_reflects_persisted_truth_and_keeps_refreshing(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "pause-ui.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    asyncio.run(repository.initialize())
+    asyncio.run(
+        repository.create_run(
+            RunConfig(
+                run_id="pause-run",
+                target_url="https://staging.example.test/queue",
+                requested_sessions=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+    )
+    asyncio.run(repository.create(QueueSession(
+        session_id="due-session",
+        queue_id="due-queue",
+        transfer_url="https://sensitive.invalid/transfer",
+        mode=SessionMode.TRANSFER_ONLY,
+        state_path=Path("sensitive-state.json"),
+        status=QueueStatus.PARKED,
+        next_check_at=datetime.now(UTC),
+    )))
+    asyncio.run(repository.close())
+
+    app_repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(app_repository)
+    app = create_app(
+        settings=settings(database),
+        repository=app_repository,
+        runtime=runtime,
+    )
+    with TestClient(app) as client:
+        running = client.get("/partials/summary")
+        assert "RUNNING" in running.text
+        assert "Pause Monitoring" in running.text
+        assert "Due backlog" in running.text
+        assert "<dt>Due backlog</dt><dd>1</dd>" in running.text
+        assert "every 2s" in running.text
+
+        paused = client.post("/monitoring/pause")
+        assert paused.status_code == 200
+        assert "PAUSED" in paused.text
+        assert "Resume Monitoring" in paused.text
+        assert runtime.pause_calls == 1
+        assert len(runtime.started) == 1
+
+        # Persisted truth, not process-local UI state, drives the next refresh.
+        assert "PAUSED" in client.get("/partials/summary").text
+        resumed = client.post("/monitoring/resume")
+        assert "RUNNING" in resumed.text
+        assert runtime.resume_calls == 1
+
+
+def test_dashboard_startup_respects_pause_persisted_before_repository_reopen(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "paused-restart.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    asyncio.run(repository.initialize())
+    asyncio.run(
+        repository.create_run(
+            RunConfig(
+                run_id="paused-run",
+                target_url="https://staging.example.test/queue",
+                requested_sessions=1,
+                created_at=datetime.now(UTC),
+            )
+        )
+    )
+    asyncio.run(repository.set_monitoring_paused(True))
+    asyncio.run(repository.close())
+
+    reopened = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(reopened)
+    app = create_app(settings=settings(database), repository=reopened, runtime=runtime)
+    with TestClient(app) as client:
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        assert "PAUSED" in response.text
+        assert "Resume Monitoring" in response.text
+        assert len(runtime.started) == 1

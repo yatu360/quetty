@@ -182,6 +182,7 @@ Phase 1 handoff documentation, followed by:
 
 - Last Phase 1 implementation commit: `41d70be` (`Add Phase 1 acceptance harness`)
 - Branch: `main`
+
 - Working tree: clean before the handoff documentation files were created
 
 ## 2026-09-26 — Phase 1 Handoff Documentation
@@ -2820,6 +2821,82 @@ dashboard without duplicating Queue-it lifecycle or browser orchestration.
 ### Follow-Up
 
 Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
+
+## 2026-09-27 — Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Add restart-safe global operator control over automatic monitoring without modifying
+Queue-it lifecycle state, identities, per-session schedules, or acquisition.
+
+### Changes Made
+
+- Added a singleton SQLite `runtime_control` row containing `monitoring_paused`; pause
+  and resume are O(1) updates and are idempotent.
+- Made the existing bounded claim transaction read the control row after
+  `BEGIN IMMEDIATE`, so a completed pause and a claim are serialized across repository
+  connections without updating any `queue_sessions` row.
+- Added scheduler pause/resume methods and a short control lock fencing both claims and
+  check-start decisions. Checks already classified as in flight finish normally.
+  Claimed-but-not-started work is not checked and its lease is released.
+- While paused, the scheduler sleeps on its normal tick/control-change event rather
+  than busy-spinning. Resume wakes it promptly and preserves every `next_check_at`.
+- Added HTMX Pause/Resume Monitoring actions to the auto-refreshing summary. Dashboard
+  state is read from SQLite, not inferred from process-local button state.
+- Kept creation completely independent. No QueueStatus value was added or repurposed;
+  the existing Queue-it `PAUSED` lifecycle observation remains unrelated.
+- Added repository, scheduler, runtime, UI, concurrency, restart, backlog, lease,
+  identity, and 10,000-row no-rewrite regression coverage.
+
+### Files Modified
+
+- `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+- `src/queue_load_test/repository/base.py`, `sqlite.py`
+- `src/queue_load_test/scheduler/monitoring.py`
+- `src/queue_load_test/harness/phase4_monitoring.py`
+- `src/queue_load_test/web/app.py`, `service.py`
+- `src/queue_load_test/web/templates/_summary.html`
+- `tests/unit/test_repository.py`, `test_monitoring.py`, `test_runtime.py`,
+  `test_web_ui.py`
+
+### Database Change
+
+- New singleton `runtime_control` table with a checked Boolean
+  `monitoring_paused` column. Initialization inserts the default RUNNING row if absent.
+- `queue_sessions`, `queue_progress`, transfer URLs, state paths, identities, progress,
+  and schedules are not rewritten when the control changes.
+
+### Tests Run
+
+- Targeted repository/scheduler/runtime/UI tests passed.
+- Full ordinary suite: 384 passed and 4 gated staging tests deselected.
+- `python3 -m ruff check src tests`: passed.
+- `python3 -m mypy src`: no issues in 60 source files.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it traffic was required or sent.
+
+### Known Limitations
+
+- Pause is global for automatic monitoring; there are not per-session pause controls.
+- A browser check already fenced as in flight is deliberately allowed to finish.
+- Other processes observe pause through SQLite on their next scheduler tick; the local
+  UI process also gets an immediate control-change wake-up.
+- Headed Chrome sessions and manual refresh remain separate future controls.
+
+### Follow-Up
+
+Phase 5 Prompt 3 — Open Existing Session in Headed Chrome
 
 ### Git State
 

@@ -258,6 +258,12 @@ class _TimedRepository:
     async def count_due_sessions(self, *, now: datetime) -> int:
         return (await self.due_session_summary(now=now)).count
 
+    async def is_monitoring_paused(self) -> bool:
+        return await self.repository.is_monitoring_paused()
+
+    async def set_monitoring_paused(self, paused: bool) -> bool:
+        return await self.repository.set_monitoring_paused(paused)
+
     async def claim_due_sessions(self, **kwargs: Any) -> list[QueueSession]:
         return await self._timed(
             self.timings.claims,

@@ -157,6 +157,42 @@ async def test_claim_selects_only_due_non_terminal_sessions(tmp_path: Path) -> N
     await repository.close()
 
 
+async def test_persisted_monitoring_pause_atomically_blocks_claims(tmp_path: Path) -> None:
+    database = tmp_path / "paused-claims.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    original = make_session("due", status=QueueStatus.ACTIVE_QUEUE, next_check_at=NOW)
+    await repository.create(original)
+
+    assert await repository.set_monitoring_paused(True)
+    assert await repository.claim_due_sessions(
+        worker_id="worker-1",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        limit=1,
+    ) == []
+    paused = await repository.get("due")
+    assert paused is not None
+    assert paused.status is QueueStatus.ACTIVE_QUEUE
+    assert paused.queue_id == original.queue_id
+    assert paused.worker_id is None
+    assert paused.lease_until is None
+    assert (await repository.due_session_summary(now=NOW)).count == 1
+    await repository.close()
+
+    reopened = SQLiteSessionRepository(database)
+    assert await reopened.is_monitoring_paused()
+    assert not await reopened.set_monitoring_paused(False)
+    resumed_claim = await reopened.claim_due_sessions(
+        worker_id="worker-2",
+        now=NOW,
+        lease_until=NOW + timedelta(seconds=30),
+        limit=1,
+    )
+    assert [session.session_id for session in resumed_claim] == ["due"]
+    await reopened.release_lease("due", worker_id="worker-2")
+    await reopened.close()
+
+
 @pytest.mark.parametrize(
     "status",
     [

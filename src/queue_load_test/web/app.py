@@ -168,6 +168,30 @@ def create_app(
             {"summary": await dashboard.summary(run)},
         )
 
+    @app.post("/monitoring/pause", response_class=HTMLResponse)
+    async def pause_monitoring(request: Request) -> Response:
+        run = await require_run()
+        if run is None:
+            return RedirectResponse("/setup", status_code=303)
+        await run_runtime.pause_monitoring()
+        return templates.TemplateResponse(
+            request,
+            "_summary.html",
+            {"summary": await dashboard.summary(run)},
+        )
+
+    @app.post("/monitoring/resume", response_class=HTMLResponse)
+    async def resume_monitoring(request: Request) -> Response:
+        run = await require_run()
+        if run is None:
+            return RedirectResponse("/setup", status_code=303)
+        await run_runtime.resume_monitoring()
+        return templates.TemplateResponse(
+            request,
+            "_summary.html",
+            {"summary": await dashboard.summary(run)},
+        )
+
     @app.get("/partials/sessions", response_class=HTMLResponse)
     async def sessions_partial(
         request: Request,

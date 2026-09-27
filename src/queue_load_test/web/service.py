@@ -43,6 +43,10 @@ class RunRuntime(Protocol):
 
     def error(self) -> str | None: ...
 
+    async def pause_monitoring(self) -> None: ...
+
+    async def resume_monitoring(self) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -54,6 +58,7 @@ class ApplicationRunRuntime:
         self._repository = repository
         self._browser_manager: BrowserManager | None = None
         self._runtime: ApplicationRuntime | None = None
+        self._monitoring_scheduler: ParkedSessionScheduler | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
@@ -122,6 +127,7 @@ class ApplicationRunRuntime:
                 target_queue_ids=run.requested_sessions,
             )
             self._browser_manager = browser_manager
+            self._monitoring_scheduler = scheduler
             self._runtime = runtime
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
@@ -149,6 +155,20 @@ class ApplicationRunRuntime:
             return None
         exception = task.exception()
         return type(exception).__name__ if exception is not None else None
+
+    async def pause_monitoring(self) -> None:
+        scheduler = self._monitoring_scheduler
+        if scheduler is None:
+            await self._repository.set_monitoring_paused(True)
+            return
+        await scheduler.pause_monitoring()
+
+    async def resume_monitoring(self) -> None:
+        scheduler = self._monitoring_scheduler
+        if scheduler is None:
+            await self._repository.set_monitoring_paused(False)
+            return
+        await scheduler.resume_monitoring()
 
     async def close(self) -> None:
         if self._runtime is not None:
@@ -183,6 +203,7 @@ class DashboardService:
         due = await self._repository.due_session_summary(now=datetime.now(UTC))
         capacity = await self._runtime.capacity()
         runtime_error = self._runtime.error()
+        monitoring_paused = await self._repository.is_monitoring_paused()
         if runtime_error is not None:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= run.requested_sessions:
@@ -195,7 +216,7 @@ class DashboardService:
             loaded_sessions=recovery.valid_queue_ids,
             remaining=max(0, run.requested_sessions - recovery.valid_queue_ids),
             creation=creation,
-            monitoring="RUNNING",
+            monitoring="PAUSED" if monitoring_paused else "RUNNING",
             total_persisted_sessions=recovery.total_persisted_sessions,
             valid_queue_ids=recovery.valid_queue_ids,
             due_backlog=due.count,

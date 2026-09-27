@@ -59,9 +59,11 @@ class BlockingHandler:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.active_ids: set[str] = set()
+        self.checked_ids: list[str] = []
         self.duplicate_check = False
 
     async def check(self, session: QueueSession) -> MonitoringOutcome:
+        self.checked_ids.append(session.session_id)
         if session.session_id in self.active_ids:
             self.duplicate_check = True
         self.active_ids.add(session.session_id)
@@ -567,6 +569,142 @@ async def test_idle_scheduler_loop_waits_for_configured_tick(tmp_path: Path) -> 
     assert scheduler.metrics.idle_iterations == scheduler.metrics.scheduler_iterations
     assert scheduler.metrics.claimed == 0
     assert scheduler.worker_task_count == 0
+    await repository.close()
+
+
+async def test_pause_finishes_in_flight_check_and_releases_queued_claims(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "pause-drain.sqlite3")
+    for index in range(3):
+        await repository.create(make_session(f"due-{index}"))
+    handler = BlockingHandler()
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=1,
+        queue_capacity=3,
+        claim_batch_size=3,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="pause-scheduler",
+    )
+
+    await scheduler.start()
+    assert await scheduler.schedule_due() == 3
+    await handler.started.wait()
+    await scheduler.pause_monitoring()
+    assert await scheduler.monitoring_paused()
+
+    handler.release.set()
+    await scheduler.wait_until_idle()
+
+    assert len(handler.checked_ids) == 1
+    assert scheduler.metrics.completed == 1
+    assert scheduler.metrics.skipped_while_paused == 2
+    for index in range(3):
+        persisted = await repository.get(f"due-{index}")
+        assert persisted is not None
+        assert persisted.status is QueueStatus.PARKED
+        assert persisted.queue_id == f"queue-due-{index}"
+        assert persisted.transfer_url.endswith(f"queue-due-{index}")
+        assert persisted.state_path == Path(f".browser-state/due-{index}.json")
+        assert persisted.next_check_at == NOW
+        assert persisted.worker_id is None
+        assert persisted.lease_until is None
+    assert (await repository.due_session_summary(now=NOW)).count == 3
+
+    await scheduler.resume_monitoring()
+    assert not await scheduler.monitoring_paused()
+    assert await scheduler.schedule_due() == 3
+    await scheduler.wait_until_idle()
+    assert len(handler.checked_ids) == 4
+    await scheduler.shutdown()
+    await repository.close()
+
+
+async def test_scheduler_stays_idle_while_persisted_pause_is_active_then_wakes(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "paused-loop.sqlite3")
+    await repository.create(make_session("due"))
+    await repository.set_monitoring_paused(True)
+    handler = RecordingCycleHandler(repository)
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=1,
+        queue_capacity=1,
+        claim_batch_size=1,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        scheduler_tick_seconds=0.5,
+        clock=lambda: NOW,
+        scheduler_id="paused-loop",
+    )
+    stop_event = asyncio.Event()
+    run_task = asyncio.create_task(scheduler.run(stop_event))
+
+    await asyncio.sleep(0.05)
+    assert scheduler.metrics.scheduler_iterations == 0
+    assert handler.session_ids == []
+    assert (await repository.due_session_summary(now=NOW)).count == 1
+
+    await scheduler.resume_monitoring()
+    await asyncio.wait_for(_wait_for_checks(handler, 1), timeout=1)
+    stop_event.set()
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert handler.session_ids == ["due"]
+    assert scheduler.worker_task_count == 0
+    await repository.close()
+
+
+async def _wait_for_checks(handler: RecordingCycleHandler, expected: int) -> None:
+    while len(handler.session_ids) < expected:
+        await asyncio.sleep(0)
+
+
+class RecordingControlRepository(SQLiteSessionRepository):
+    def __init__(self, database: Path) -> None:
+        super().__init__(database)
+        self.control_writes: list[bool] = []
+
+    async def set_monitoring_paused(self, paused: bool) -> bool:
+        result = await super().set_monitoring_paused(paused)
+        self.control_writes.append(result)
+        return result
+
+
+async def test_pause_resume_are_idempotent_and_concurrent_races_are_linearized(
+    tmp_path: Path,
+) -> None:
+    repository = RecordingControlRepository(tmp_path / "control-race.sqlite3")
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=RecordingCycleHandler(repository),
+        worker_count=1,
+        queue_capacity=1,
+        claim_batch_size=1,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+    )
+
+    await asyncio.gather(*(scheduler.pause_monitoring() for _ in range(8)))
+    assert await repository.is_monitoring_paused()
+    await asyncio.gather(*(scheduler.resume_monitoring() for _ in range(8)))
+    assert not await repository.is_monitoring_paused()
+
+    await asyncio.gather(
+        scheduler.pause_monitoring(),
+        scheduler.resume_monitoring(),
+        scheduler.pause_monitoring(),
+        scheduler.resume_monitoring(),
+    )
+    assert await repository.is_monitoring_paused() is repository.control_writes[-1]
+    assert len(repository.control_writes) == 20
+    await scheduler.shutdown()
     await repository.close()
 
 

@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS run_config (
     status TEXT NOT NULL,
     current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
 );
+CREATE TABLE IF NOT EXISTS runtime_control (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    monitoring_paused INTEGER NOT NULL CHECK (monitoring_paused IN (0, 1))
+);
+INSERT OR IGNORE INTO runtime_control (singleton, monitoring_paused) VALUES (1, 0);
 CREATE TABLE IF NOT EXISTS queue_sessions (
     session_id TEXT PRIMARY KEY,
     queue_id TEXT UNIQUE,
@@ -345,6 +350,33 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 raise
             return run
+
+        return await self._run(operation)
+
+    async def is_monitoring_paused(self) -> bool:
+        """Return the persisted global automatic-monitoring control state."""
+
+        def operation() -> bool:
+            row = self._connect().execute(
+                "SELECT monitoring_paused FROM runtime_control WHERE singleton = 1"
+            ).fetchone()
+            if row is None:
+                raise ValueError("Persisted runtime control row is missing")
+            return bool(row["monitoring_paused"])
+
+        return await self._run(operation)
+
+    async def set_monitoring_paused(self, paused: bool) -> bool:
+        """Persist pause/resume in one row without modifying any queue session."""
+
+        def operation() -> bool:
+            connection = self._connect()
+            connection.execute(
+                "UPDATE runtime_control SET monitoring_paused = ? WHERE singleton = 1",
+                (int(paused),),
+            )
+            connection.commit()
+            return paused
 
         return await self._run(operation)
 
@@ -878,6 +910,14 @@ class SQLiteSessionRepository:
             connection = self._connect()
             connection.execute("BEGIN IMMEDIATE")
             try:
+                control = connection.execute(
+                    "SELECT monitoring_paused FROM runtime_control WHERE singleton = 1"
+                ).fetchone()
+                if control is None:
+                    raise ValueError("Persisted runtime control row is missing")
+                if bool(control["monitoring_paused"]):
+                    connection.commit()
+                    return ClaimedSessions()
                 rows = connection.execute(
                     f"""
                     SELECT {_SESSION_COLUMNS}

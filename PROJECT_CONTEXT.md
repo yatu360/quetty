@@ -9,7 +9,7 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 5 Prompt 1 is complete. A localhost FastAPI/Jinja2/HTMX operator
+- Current phase: Phase 5 Prompt 2 is complete. A localhost FastAPI/Jinja2/HTMX operator
   UI now provides persisted first-run setup, bounded acquisition/runtime startup, run
   recovery, aggregate status, and a safe paginated session dashboard.
 - The SQLite schema now includes one immutable current `run_config` row. The run target
@@ -20,10 +20,15 @@ live monitoring.
   separate count query. The 50-row page works with 10,000 persisted sessions without
   calling `list()` or materializing the population. Search, lifecycle filtering,
   browser-ownership filtering, and two-second HTMX partial refresh are implemented.
+- Automatic monitoring pause is persisted as the singleton `runtime_control` row and
+  never written into `QueueStatus` or every session. SQLite claims atomically return no
+  work while paused. The scheduler lets checks already classified as in flight finish,
+  releases claimed-but-not-started leases, and wakes promptly on local resume without
+  resetting `next_check_at` or materializing the due population.
 - Browser ownership is represented by `BrowserRuntimeState` (`PARKED`, `CHECKING`, and
-  reserved `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Pause/resume,
-  headed Chrome, mutations, manual refresh, and recovery controls remain later prompts.
-- Exact next task: **Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring**.
+  reserved `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Headed Chrome,
+  mutations, manual refresh, and recovery controls remain later prompts.
+- Exact next task: **Phase 5 Prompt 3 — Open Existing Session in Headed Chrome**.
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -235,6 +240,8 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   Existing Phase 2 indexes are migrated in place during initialization.
 - SQLite also has a singleton `run_config` table. Setup is insert-only in Prompt 1;
   there is no target-changing operation.
+- SQLite has a singleton `runtime_control` table containing `monitoring_paused`. Its
+  O(1) update survives restart; the claim transaction checks it before selecting rows.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
   `QueueIdConflictError`.
 - Updates from leased snapshots are conditional on the persisted `worker_id`. A stale
@@ -862,7 +869,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring.
+Phase 5 Prompt 3 — Open Existing Session in Headed Chrome.
 
 ## Instructions for Future AI Sessions
 

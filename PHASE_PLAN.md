@@ -465,23 +465,26 @@ Planned prompt breakdown:
 
 ## Phase 5 — Operator UI
 
-**Status: Prompt 1 complete.**
+**Status: Prompt 2 complete.**
 
 1. **Lightweight Web Dashboard Foundation + Startup Run Setup** — **completed on
    2026-09-27.** Added a localhost FastAPI/Jinja2/HTMX UI, immutable persisted run
    setup, restart-safe bounded acquisition startup, aggregate status, and a safe
    database-paginated dashboard. The UI keeps browser ownership separate from Queue-it
    lifecycle and never renders transfer or browser-state data.
-2. **Persistent Pause / Resume Monitoring** — next.
-3. **Open Existing Session in Headed Chrome** — planned.
+2. **Persistent Pause / Resume Monitoring** — **completed on 2026-09-27.** Added an
+   O(1), restart-safe global monitoring flag, atomic claim gating, deterministic
+   claim/check-start fencing, lease release for queued work, and HTMX pause/resume
+   controls. In-flight checks finish normally; acquisition and session lifecycle data
+   remain independent.
+3. **Open Existing Session in Headed Chrome** — next.
 4. **Delete, Replace, Add, and Manual Refresh Actions** — planned.
 5. **UI Reliability and Recovery** — planned.
 6. **Phase 5 Acceptance** — planned.
 
 Later Phase 5 actions must continue to use bounded workers, repository ownership, and
-existing lifecycle/restoration logic. Prompt 1 intentionally includes only a disabled
-new-run placeholder; it does not implement retargeting, pause/resume, headed ownership,
-session mutation, or manual refresh.
+existing lifecycle/restoration logic. The disabled new-run placeholder remains; Prompt
+2 does not implement retargeting, headed ownership, session mutation, or manual refresh.
 
 ## Scaling Gates
 

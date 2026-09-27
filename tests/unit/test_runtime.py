@@ -66,9 +66,11 @@ class ActiveHandler:
 class StoppableCreation:
     def __init__(self) -> None:
         self.stopped = False
+        self.started = asyncio.Event()
 
     async def run(self, stop_event: asyncio.Event | None = None) -> None:
         assert stop_event is not None
+        self.started.set()
         await stop_event.wait()
         self.stopped = True
 
@@ -138,3 +140,40 @@ async def test_shutdown_finishes_active_work_and_preserves_restart_state(
     assert recovered.worker_id is None
     assert recovered.lease_until is None
     await restarted.close()
+
+
+async def test_persisted_monitoring_pause_does_not_pause_creation(tmp_path: Path) -> None:
+    order: list[str] = []
+    repository = TrackingRepository(tmp_path / "paused-runtime.sqlite3", order)
+    await repository.set_monitoring_paused(True)
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=ActiveHandler(repository),
+        worker_count=1,
+        queue_capacity=1,
+        claim_batch_size=1,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        scheduler_tick_seconds=0.01,
+        shutdown_timeout_seconds=1,
+        clock=lambda: NOW,
+    )
+    browser = FakeBrowserManager(order)
+    creation = StoppableCreation()
+    runtime = ApplicationRuntime(
+        browser_manager=cast(BrowserManager, browser),
+        repository=repository,
+        monitoring_scheduler=scheduler,
+        creation_runner=creation,
+        shutdown_timeout_seconds=1,
+    )
+
+    runtime_task = asyncio.create_task(runtime.run())
+    await asyncio.wait_for(creation.started.wait(), timeout=1)
+    assert await repository.is_monitoring_paused()
+    assert scheduler.metrics.claimed == 0
+
+    runtime.request_shutdown()
+    await asyncio.wait_for(runtime_task, timeout=2)
+    assert creation.stopped
+    assert browser.stopped

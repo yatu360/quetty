@@ -3,7 +3,16 @@
   <div class="run-heading">
     <div><span>Target URL</span><strong class="target">{{ summary.target_url }}</strong></div>
     <div><span>Creation</span><strong class="state">{{ summary.creation }}</strong></div>
-    <div><span>Monitoring</span><strong class="state">{{ summary.monitoring }}</strong></div>
+    <div>
+      <span>Monitoring</span><strong class="state">{{ summary.monitoring }}</strong>
+      {% if summary.monitoring == "PAUSED" %}
+      <button type="button" hx-post="/monitoring/resume" hx-target="#summary"
+              hx-swap="outerHTML">Resume Monitoring</button>
+      {% else %}
+      <button type="button" hx-post="/monitoring/pause" hx-target="#summary"
+              hx-swap="outerHTML">Pause Monitoring</button>
+      {% endif %}
+    </div>
   </div>
   <dl class="metrics-grid">
     <div><dt>Requested Sessions</dt><dd>{{ summary.requested_sessions }}</dd></div>
