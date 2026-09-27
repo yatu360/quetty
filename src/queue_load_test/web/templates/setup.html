@@ -15,7 +15,12 @@
       {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
       <form method="post" action="/setup">
         <label for="target_url">Target URL</label>
-        <input id="target_url" name="target_url" type="url" required
+        <p class="muted" id="target_url_help">
+          The authorised protected staging page that sends visitors into the queue.
+          Reaching this URL is recorded as ADMITTED, so do not enter the Queue-it
+          waiting-room URL itself.
+        </p>
+        <input id="target_url" name="target_url" type="url" required aria-describedby="target_url_help"
                placeholder="https://authorised-staging.example/path"
                value="{{ target_url }}">
         <label for="requested_sessions">Number of sessions</label>

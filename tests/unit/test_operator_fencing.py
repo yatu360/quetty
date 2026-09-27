@@ -78,6 +78,25 @@ class Creator:
 
     async def create(self, item: CreationWorkItem) -> CreationOutcome:
         self.calls += 1
+        if self.mode == "duplicate":
+            # The real creator persists the attempt as FAILED "duplicate_queue_id".
+            await self.repository.create(
+                QueueSession(
+                    session_id=item.session_id,
+                    transfer_url="",
+                    mode=SessionMode.HYBRID,
+                    status=QueueStatus.FAILED,
+                    state_path=Path(f"{item.session_id}.json"),
+                    last_error="duplicate_queue_id",
+                )
+            )
+            return CreationOutcome(
+                kind=CreationOutcomeKind.DUPLICATE,
+                attempts=1,
+                temporary_failures=0,
+                duration_seconds=0,
+                failure_code="duplicate_queue_id",
+            )
         if self.mode == "raise_before_commit":
             await self.repository.create(
                 QueueSession(
@@ -413,6 +432,28 @@ async def test_failed_replacement_that_raises_keeps_old_identity(tmp_path: Path)
     assert await repository.get_operator_population_adjustment() == 0
     assert target.adjustments == []
     assert await owners(repository) == 0
+    await manager.close()
+    await repository.close()
+
+
+async def test_duplicate_replacement_is_not_success_and_keeps_old(tmp_path: Path) -> None:
+    manager, repository, _, _, target = await setup(tmp_path, creator_mode="duplicate")
+    await manager.request(OperatorActionKind.REPLACE, "s0")
+    assert await settle(manager, "s0") is OperatorActionStatus.FAILED
+    rows = await repository.list()
+    assert [(row.session_id, row.queue_id) for row in rows] == [("s0", "queue-s0")]
+    assert await repository.get_operator_population_adjustment() == 0
+    assert target.adjustments == []
+    await manager.close()
+    await repository.close()
+
+
+async def test_delete_without_any_state_file_succeeds(tmp_path: Path) -> None:
+    manager, repository, _, _, _ = await setup(tmp_path, sessions=2)
+    assert not (tmp_path / "state" / "s0.json").exists()
+    await manager.request(OperatorActionKind.DELETE, "s0")
+    assert await settle(manager, "s0") is OperatorActionStatus.SUCCESS
+    assert [row.session_id for row in await repository.list()] == ["s1"]
     await manager.close()
     await repository.close()
 

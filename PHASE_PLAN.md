@@ -465,7 +465,9 @@ Planned prompt breakdown:
 
 ## Phase 5 — Operator UI
 
-**Status: Prompt 5 complete.**
+**Status: Complete (2026-09-27). Acceptance: PARTIAL — 108 PASS, 0 FAIL, 0 UNKNOWN on
+local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
+`docs/phase5_acceptance.md`.
 
 1. **Lightweight Web Dashboard Foundation + Startup Run Setup** — **completed on
    2026-09-27.** Added a localhost FastAPI/Jinja2/HTMX UI, immutable persisted run
@@ -501,7 +503,16 @@ Planned prompt breakdown:
      `docs/phase5_ui_reliability.md`.
 
    No new infrastructure was added.
-6. **Phase 5 Acceptance** — planned.
+6. **Phase 5 Acceptance** — **completed on 2026-09-27.**
+   - `queue-load-test-phase5-workflow --headed` validated the full operator workflow on
+     the real app with installed Chrome against the local simulator (56/56 checks).
+   - Process-level CLI checks covered the localhost bind, a browser double-click,
+     SIGKILL recovery, single-instance refusal, and SIGTERM.
+   - Setup now warns that the target URL is the protected destination.
+   - No architecture changed.
+
+**Next:** Phase 5 complete — define Phase 6 only from the next operator/product
+requirement.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. The disabled new-run placeholder remains; Prompt

@@ -9,7 +9,53 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 5 Prompt 5 is complete. The localhost operator UI is hardened for
+- Current phase: **Phase 5 is complete.** `docs/phase5_acceptance.md` records
+  **PARTIAL: 108 PASS, 0 FAIL, 0 UNKNOWN** on local evidence. Eight separately listed
+  Queue-it staging items (S1–S8) are **NOT RUN / UNKNOWN**; no Queue-it traffic was
+  ever sent.
+- **UI architecture:** localhost FastAPI + Jinja2 + vendored HTMX
+  (`queue-load-test-ui`, `http://127.0.0.1:8000`). `ApplicationRunRuntime` composes the
+  existing creation controller, scheduler/monitor/lifecycle evaluator, restorer,
+  repository, and state store. It adds a fixed-size operator action pool and a bounded
+  headed-Chrome manager. There is one process and one SQLite database, guarded by a
+  single-instance `<database>.lock`.
+- **Startup/run config:** first boot shows setup (protected staging URL plus requested
+  count), then persists one immutable `run_config` row. A restart skips setup and
+  resumes only the deficit to `requested + operator adjustment`. Retargeting is
+  unsupported (use a new, empty database). The setup page warns that the target URL is
+  the protected destination: reaching it is `ADMITTED`, so the waiting-room URL must
+  not be entered.
+- **Pause/resume:** a single persisted `runtime_control` flag gates automatic claims.
+  In-flight checks finish, the backlog stays visible, and the state survives restart.
+  Acquisition, Refresh Now, and headed sessions are independent of it.
+- **Manual Chrome:** Open restores the expected identity into a bounded headed pool
+  under a persisted renewable lease that the scheduler skips. Close, window close, or a
+  crash releases the lease, with a final evaluator pass when the page is still live.
+  Restart clears stale ownership. `OPEN_IN_CHROME` is browser ownership, never
+  `QueueStatus`.
+- **Operator actions:**
+  - Refresh Now runs the existing monitor, including while paused.
+  - Delete is local only (no Queue-it cancellation) and requires Close first.
+  - Replace is create-first, preserving the old identity on failure.
+  - Add creates exactly one visitor.
+  - All actions are fenced per session, deduplicated by render token, and bounded by
+    `OPERATOR_WORKERS`/`OPERATOR_QUEUE_CAPACITY`.
+- **Acceptance evidence:** `queue-load-test-phase5-workflow --headed` passed 56/56
+  checks with the real app and installed Chrome against the local simulator
+  (`docs/results/phase5_workflow_result.json`). The real CLI was checked for default
+  localhost bind, a Playwright double-click, SIGKILL-with-headed-window recovery, a
+  refused second instance, and clean SIGTERM.
+- **Final checks:** 448 passed (4 staging deselected), 13 integration passed, Ruff
+  clean, and mypy clean on darwin/linux. On win32, mypy reports 2 pre-existing
+  `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
+- **Known limitations:**
+  - no staging validation;
+  - harness CLIs do not take the instance lock;
+  - action banners are process-local;
+  - automatic checks do not renew their lease;
+  - Open is synchronous;
+  - no retargeting.
+- Phase 5 Prompt 5 (history): the localhost operator UI was hardened for
   refresh/double-click/restart/Chrome-crash/database-failure/shutdown. See
   `docs/phase5_ui_reliability.md`.
 - Twelve defects were fixed:
@@ -84,7 +130,8 @@ live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 5 Prompt 6 — Phase 5 Acceptance**.
+- Exact next task: **Phase 5 complete — define Phase 6 only from the next
+  operator/product requirement.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -947,7 +994,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 Prompt 6 — Phase 5 Acceptance.
+Phase 5 complete — define Phase 6 only from the next operator/product requirement.
 
 ## Instructions for Future AI Sessions
 

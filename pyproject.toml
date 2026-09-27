@@ -46,6 +46,7 @@ queue-load-test-phase4-monitoring = "queue_load_test.harness.phase4_monitoring:m
 queue-load-test-phase4-recovery = "queue_load_test.harness.phase4_recovery:main"
 queue-load-test-ui = "queue_load_test.web.cli:main"
 queue-load-test-phase5-ui-benchmark = "queue_load_test.harness.phase5_ui_benchmark:main"
+queue-load-test-phase5-workflow = "queue_load_test.harness.phase5_workflow:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

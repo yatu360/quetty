@@ -137,6 +137,7 @@ def test_first_boot_shows_setup_and_valid_submission_starts_one_bounded_runtime(
         response = client.get("/", follow_redirects=True)
         assert response.status_code == 200
         assert "Queue Session Setup" in response.text
+        assert "recorded as ADMITTED" in response.text
 
         response = client.post(
             "/setup",

@@ -49,6 +49,17 @@ class LocalQueueSimulator:
     def protected_url(self) -> str:
         return f"{self.base_url}/protected"
 
+    @property
+    def entry_url(self) -> str:
+        """A protected-site entry that redirects un-admitted visitors into the queue.
+
+        This mirrors how an operator's target URL behaves: the target is the protected
+        destination, and reaching it means admission. Use it as a run target; using the
+        queue page itself would make every observation look admitted.
+        """
+
+        return f"{self.base_url}/entry"
+
     def transfer_url(self, queue_id: str) -> str:
         return f"{self.queue_url}?q={queue_id}"
 
@@ -79,6 +90,13 @@ class LocalQueueSimulator:
                 for key, value in (line.split(":", 1),)
             }
             parsed = urlsplit(target)
+            if parsed.path == "/entry":
+                writer.write(
+                    b"HTTP/1.1 302 Found\r\nLocation: /queue\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                await writer.drain()
+                return
             if parsed.path == "/protected":
                 await self._respond(writer, 200, "<h1>Protected local destination</h1>")
                 return

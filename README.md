@@ -72,9 +72,14 @@ not create population-sized tasks, Chrome processes, or contexts. A database con
 sessions but no run configuration is rejected because those identities cannot safely
 be associated with a newly entered target.
 
+The target URL is the authorised *protected* staging page, the page that sends
+visitors into the queue. The lifecycle evaluator records a visitor as `ADMITTED` when
+normal navigation reaches that URL, so entering the Queue-it waiting-room URL itself
+would make every observation look admitted. The setup page states this.
+
 Restarting `queue-load-test-ui` loads the same persisted run, skips setup, counts valid
 persisted Queue IDs, and resumes only the remaining acquisition deficit. Target changes
-are intentionally unavailable in this prompt; the disabled **Start New Run** control is
+are intentionally unsupported; the disabled **Start New Run** control is
 a placeholder and existing identities are never silently retargeted.
 
 The dashboard shows run/acquisition/monitoring aggregates and a database-paginated
@@ -195,6 +200,22 @@ See `docs/phase5_ui_reliability.md` for the full audit, fencing matrix, fault te
   not Queue-it throughput.
 
 HTMX 2.0.4 is vendored under `web/static/`; the UI makes no CDN requests.
+
+### Phase 5 Acceptance Workflow
+
+`queue-load-test-phase5-workflow [--headed] [--output result.json]` runs the whole
+operator workflow on the real application, with installed Chrome, against
+`LocalQueueSimulator` on 127.0.0.1. It covers:
+
+- setup validation and bounded acquisition;
+- dashboard, search, filters, and auto-refresh;
+- pause/resume;
+- headed Open, scheduler skip, Close, and identity mismatch;
+- Refresh while paused, Add (duplicate submit), Replace, and Delete;
+- graceful shutdown, restart recovery, and partial-acquisition resume.
+
+It needs the `benchmark` extra (`psutil`) and never contacts Queue-it. Results are local
+mechanism evidence only; see `docs/phase5_acceptance.md`.
 
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;

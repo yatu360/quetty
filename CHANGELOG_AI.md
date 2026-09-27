@@ -3210,3 +3210,96 @@ Phase 5 Prompt 6 — Phase 5 Acceptance
 
 - Commit: pending at the time this entry was written
 - Branch: `main`
+
+## 2026-09-27 — Phase 5 Prompt 6 — Phase 5 Acceptance
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Validate the complete Phase 5 operator workflow with evidence, fix defects found by
+acceptance, and hand off. No new architecture.
+
+### Result
+
+**PARTIAL:** 108 PASS, 0 FAIL, 0 UNKNOWN in the required matrix, on local evidence.
+Eight separately listed Queue-it staging items (S1–S8) are NOT RUN / UNKNOWN. See
+`docs/phase5_acceptance.md`.
+
+### Evidence Collected
+
+- **Workflow harness:** `queue-load-test-phase5-workflow --headed` ran the real app
+  lifespan, runtime, SQLite, state files, and installed Chrome (visible headed Open)
+  against `LocalQueueSimulator`. It passed 56/56 checks: setup validation, bounded
+  acquisition, dashboard, pause/resume, Open/skip/Close/mismatch, Refresh while paused,
+  duplicate-submit Add, Replace, Delete, shutdown, restart recovery, no retargeting,
+  and partial-acquisition resume (3/6 → 6). A headless repeat also passed 56/56.
+  Results are in `docs/results/phase5_workflow_result.json`.
+- **Real `queue-load-test-ui` CLI:**
+  - default `127.0.0.1:8000` bind;
+  - a Playwright/Chrome dashboard drive: a double-click Add sent 1 POST and added 1,
+    feedback survived polls, and Refresh succeeded;
+  - SIGKILL while a headed window was open left 1 stale owner with its lease about
+    4 min 47 s in the future, and restart cleared it immediately;
+  - a second instance was refused;
+  - SIGTERM gave a clean exit with 0 Chrome processes and 0 owners.
+
+### Defects Fixed
+
+- **Setup page:** it did not state that the target URL is the protected destination.
+  When the waiting-room URL was entered, every session became `ADMITTED` on its first
+  check (existing admission semantics). Setup and the README now warn, and a test
+  asserts the hint.
+- **Stale text:** the **Start New Run** tooltip and the README said retargeting would
+  come "in a later Phase 5 prompt". Both now say it is unsupported.
+- **Tooling:** the simulator gained a protected `/entry` redirect path. Added the
+  workflow harness, its integration test, and tests for duplicate replacement and
+  delete-without-state.
+
+### Files Added
+
+- `docs/phase5_acceptance.md`, `docs/results/phase5_workflow_result.json`
+- `src/queue_load_test/harness/phase5_workflow.py`
+- `tests/integration/test_phase5_workflow.py`
+
+### Files Modified
+
+- `src/queue_load_test/harness/local_queue_simulator.py`
+- `src/queue_load_test/web/templates/setup.html`, `dashboard.html`
+- `tests/unit/test_web_ui.py`, `tests/unit/test_operator_fencing.py`
+- `pyproject.toml`, `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`,
+  `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `.venv/bin/python -m pytest`: 448 passed, 4 gated staging tests deselected.
+- `.venv/bin/python -m pytest tests/integration`: 13 passed.
+- `ruff check src tests`: passed.
+- `mypy src` (darwin and `--platform linux`): no issues in 65 source files.
+- `mypy src --platform win32`: 2 pre-existing `signal.SIGKILL` errors in
+  `harness/phase4_recovery.py`, documented and not changed.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it staging configuration existed, and no traffic was
+  sent.
+
+### Known Issues
+
+- Queue-it staging items S1–S8 are unknown.
+- Harness CLIs do not take the instance lock.
+- Action banners are process-local.
+- Automatic checks do not renew their lease.
+- Open is synchronous.
+- Retargeting is unsupported.
+
+### Follow-Up
+
+Phase 5 complete — define Phase 6 only from the next operator/product requirement.
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`
