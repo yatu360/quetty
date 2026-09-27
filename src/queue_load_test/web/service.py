@@ -126,8 +126,22 @@ class ApplicationRunRuntime:
                 shared_capacity=shared_capacity,
             )
             target_url = str(validated_url)
+            # Acquisition (setup, Add, Replace) may use its own visible Chrome while
+            # monitoring stays headless. The creator closes its context once the
+            # Queue ID is persisted, so a session never moves between live browsers.
+            creation_browser_manager = browser_manager
+            if settings.creation_headless != settings.headless:
+                creation_contexts = settings.creation_workers + settings.operator_workers
+                creation_browser_manager = BrowserManager(
+                    chrome_process_count=1,
+                    max_contexts_per_browser=creation_contexts,
+                    max_active_contexts=creation_contexts,
+                    headless=settings.creation_headless,
+                    observability=metrics,
+                    shared_capacity=shared_capacity,
+                )
             creator = QueueSessionCreator(
-                browser_manager=browser_manager,
+                browser_manager=creation_browser_manager,
                 repository=self._repository,
                 state_store=state_store,
                 staging_url=target_url,
@@ -229,6 +243,11 @@ class ApplicationRunRuntime:
                         ),
                     ),
                     ("manual_chrome", manual_sessions.close),
+                ),
+                additional_browser_managers=(
+                    (creation_browser_manager,)
+                    if creation_browser_manager is not browser_manager
+                    else ()
                 ),
             )
             self._browser_manager = browser_manager

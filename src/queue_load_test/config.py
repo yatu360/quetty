@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     turn_started_poll_seconds: float = Field(default=0.0, alias="TURN_STARTED_POLL_SECONDS", ge=0)
     stale_update_seconds: float = Field(default=180.0, alias="STALE_UPDATE_SECONDS", gt=0)
     headless: bool = Field(default=True, alias="HEADLESS")
+    # Queue ID acquisition runs in visible Chrome by default; once a Queue ID is
+    # persisted the session is monitored by the HEADLESS automatic pool.
+    creation_headless: bool = Field(default=False, alias="CREATION_HEADLESS")
     database_url: str = Field(default="sqlite:///queue_load_test.sqlite3", alias="DATABASE_URL")
     state_directory: Path = Field(default=Path(".browser-state"), alias="STATE_DIRECTORY")
     prometheus_port: int = Field(default=9090, alias="PROMETHEUS_PORT", ge=1, le=65535)

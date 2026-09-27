@@ -3455,3 +3455,60 @@ Queue ID and Stop & Reset Run against the local simulator.
 - Commits: `c0c401f` (headed open without Queue ID), `c7f70b7` (Stop & Reset Run),
   plus this documentation commit
 - Branch: `main`
+
+## 2026-09-27 — Phase 5 follow-up — Headed Queue ID acquisition, headless monitoring
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Acquire new sessions in visible Chrome, then monitor them headlessly once the Queue ID
+is persisted.
+
+### Changes Made
+
+- Added `CREATION_HEADLESS` (default `false`), independent of `HEADLESS` (monitoring,
+  default `true`).
+- **Separate creation pool:** when the two settings differ, `ApplicationRunRuntime`
+  builds a separate creation `BrowserManager` for `QueueSessionCreator` (setup
+  acquisition, Add, Replace).
+  - It is one Chrome process with `CREATION_WORKERS + OPERATOR_WORKERS` contexts,
+    sharing the global context budget.
+  - `ApplicationRuntime` gained `additional_browser_managers`, started after the
+    automatic manager and shut down just before it.
+- **Handover:** there is no live browser migration. The creator already closes its
+  context after persisting, and headless monitoring restores through the transfer URL
+  or state.
+- `queue-load-test-phase5-workflow` sets `CREATION_HEADLESS` from `--headed`, so
+  headless harness runs stay headless.
+
+### Files Modified
+
+- `src/queue_load_test/config.py`, `.env.example`
+- `src/queue_load_test/runtime.py`, `src/queue_load_test/web/service.py`
+- `src/queue_load_test/harness/phase5_workflow.py`
+- `tests/unit/test_ui_reliability.py`
+- `README.md`, `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest`: 460 tests, all passing except the flaky
+  `test_chrome_loss_while_open_is_detected_without_relaunch` (see Known Issues).
+- `ruff check src tests`: passed. `mypy src`: no issues.
+
+### Staging Tests
+
+- NOT RUN. Headed acquisition with real installed Chrome was not exercised manually.
+
+### Known Issues
+
+- `tests/unit/test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`
+  is timing-flaky: about 1 run in 6–12. It also fails at `45309df`, before these
+  follow-ups. The test reads ownership right after `open_count` drops, before
+  `_finalize` releases the lease.
+
+### Git State
+
+- Branch: `main`

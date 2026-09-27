@@ -150,7 +150,7 @@ async def until(
         await asyncio.sleep(interval)
 
 
-def workflow_settings(directory: Path, *, database: Path) -> Settings:
+def workflow_settings(directory: Path, *, database: Path, headed: bool = False) -> Settings:
     values: dict[str, object] = {
         "DATABASE_URL": f"sqlite:///{database}",
         "STATE_DIRECTORY": directory / "state",
@@ -178,6 +178,8 @@ def workflow_settings(directory: Path, *, database: Path) -> Settings:
         "SERVICED_SOON_POLL_MIN_SECONDS": 1.5,
         "SERVICED_SOON_POLL_MAX_SECONDS": 2,
         "MAX_MANUAL_REQUESTED_SESSIONS": 50,
+        # Acquisition windows follow --headed, like the manual Chrome pool.
+        "CREATION_HEADLESS": not headed,
     }
     return Settings(_env_file=None, **values)  # type: ignore[arg-type, call-arg]
 
@@ -197,7 +199,7 @@ async def run_workflow(directory: Path, *, headed: bool) -> dict[str, Any]:
     await simulator.start()
     database_path = directory / "operator.sqlite3"
     db = Database(database_path)
-    settings = workflow_settings(directory, database=database_path)
+    settings = workflow_settings(directory, database=database_path, headed=headed)
     target = simulator.entry_url
     evidence: dict[str, Any] = {"headed_manual_chrome": headed, "requested": REQUESTED}
 
@@ -337,7 +339,7 @@ async def _partial_resume(
     directory.mkdir(parents=True, exist_ok=True)
     database_path = directory / "partial.sqlite3"
     db = Database(database_path)
-    settings = workflow_settings(directory, database=database_path).model_copy(
+    settings = workflow_settings(directory, database=database_path, headed=headed).model_copy(
         update={"creation_workers": 1}
     )
     # Slow each new identity so shutdown lands mid-acquisition deterministically.

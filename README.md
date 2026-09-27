@@ -79,8 +79,11 @@ would make every observation look admitted. The setup page states this.
 
 Restarting `queue-load-test-ui` loads the same persisted run, skips setup, counts valid
 persisted Queue IDs, and resumes only the remaining acquisition deficit. Existing
-identities are never silently retargeted. To start over, use **Stop & Reset Run** on the
-dashboard. After you confirm, it runs the normal ordered shutdown (creation, monitoring,
+identities are never silently retargeted. New sessions acquire their Queue ID in visible
+Chrome (`CREATION_HEADLESS=false`) and are then monitored headlessly (`HEADLESS=true`);
+set `CREATION_HEADLESS=true` to acquire headlessly too.
+
+To start over, use **Stop & Reset Run** on the dashboard. After you confirm, it runs the normal ordered shutdown (creation, monitoring,
 operator work, headed Chrome, then the automatic browsers). It then deletes the run, every
 session and its progress, and all saved browser state, and resets the pause and population
 controls. The UI returns to setup, and a restart also opens on setup. Nothing is cancelled

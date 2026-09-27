@@ -36,6 +36,7 @@ class ApplicationRuntime:
         target_queue_ids: int | None = None,
         install_signal_handlers: bool = True,
         before_browser_shutdown: Sequence[tuple[str, Callable[[], Awaitable[object]]]] = (),
+        additional_browser_managers: Sequence[BrowserManager] = (),
     ) -> None:
         """Create the runtime.
 
@@ -45,6 +46,8 @@ class ApplicationRuntime:
         host kept running. ``before_browser_shutdown`` steps run, in order, after
         producers and automatic monitoring stop but while Chrome is still usable,
         so dependent work can finish and persist its observations.
+        ``additional_browser_managers`` (for example a headed creation pool) start
+        after ``browser_manager`` and shut down just before it.
         """
 
         if shutdown_timeout_seconds <= 0:
@@ -62,6 +65,7 @@ class ApplicationRuntime:
         self._target_queue_ids = target_queue_ids
         self._install_signals = install_signal_handlers
         self._before_browser_shutdown = tuple(before_browser_shutdown)
+        self._additional_browser_managers = tuple(additional_browser_managers)
 
     @property
     def stopping(self) -> bool:
@@ -113,6 +117,8 @@ class ApplicationRuntime:
                 terminal_sessions=summary.terminal_sessions,
             )
             await self._browser_manager.start()
+            for manager in self._additional_browser_managers:
+                await manager.start()
             log_event(logger, logging.INFO, "application_runtime_started")
             self._tasks.append(
                 asyncio.create_task(
@@ -141,6 +147,8 @@ class ApplicationRuntime:
             )
             for operation, step in self._before_browser_shutdown:
                 await self._shutdown_step(operation, step())
+            for manager in self._additional_browser_managers:
+                await self._shutdown_step("browser", manager.shutdown())
             await self._shutdown_step("browser", self._browser_manager.shutdown())
             await self._shutdown_step("repository", self._repository.close())
             log_event(logger, logging.INFO, "application_runtime_stopped")

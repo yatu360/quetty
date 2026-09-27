@@ -437,6 +437,16 @@ spans the headed and automatic managers so both count against `MAX_ACTIVE_CONTEX
 Headed liveness checks use `capacity(repair=False)`. A crashed headed Chrome is
 relaunched only by the next explicit Open, never by the heartbeat.
 
+Queue ID acquisition (setup, Add, Replace) runs in visible Chrome by default:
+`CREATION_HEADLESS=false`, independent of `HEADLESS=true` for monitoring. When the two
+settings differ, `ApplicationRunRuntime` gives `QueueSessionCreator` its own manager:
+one Chrome process with `CREATION_WORKERS + OPERATOR_WORKERS` contexts, sharing the
+global context budget. `ApplicationRuntime` starts it after the automatic manager and
+shuts it down just before. The creator closes its context once the Queue ID is
+persisted, and headless monitoring then restores the session from its transfer URL or
+state. A live context never moves between browsers. When the settings match, creation
+reuses the automatic manager.
+
 ## Target Acquisition Model
 
 `SessionCreationController` reads the successful unique Queue ID count from the

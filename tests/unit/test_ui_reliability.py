@@ -82,6 +82,8 @@ class World:
     block_restore: asyncio.Event | None = None
     restore_started: asyncio.Event = field(default_factory=asyncio.Event)
     fail_creation: bool = False
+    creator_managers: list[FakeBrowserManager] = field(default_factory=list)
+    restorer_managers: list[FakeBrowserManager] = field(default_factory=list)
 
 
 class FakeOwnedContext:
@@ -168,6 +170,7 @@ class FakeRestorer:
     def __init__(self, world: World, browser_manager: FakeBrowserManager) -> None:
         self.world = world
         self.browser_manager = browser_manager
+        world.restorer_managers.append(browser_manager)
 
     def _observed(self, session: QueueSession) -> SessionRestoreResult:
         return SessionRestoreResult(
@@ -215,7 +218,10 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
     monkeypatch.setattr(
         service_module,
         "QueueSessionCreator",
-        lambda **kwargs: FakeCreator(state, kwargs["repository"]),
+        lambda **kwargs: (
+            state.creator_managers.append(kwargs["browser_manager"]),
+            FakeCreator(state, kwargs["repository"]),
+        )[1],
     )
     monkeypatch.setattr(
         service_module,
@@ -712,6 +718,39 @@ async def test_failed_add_leaves_no_orphan_or_population_drift(
     assert ownership_rows(database) == 0
 
 
+# --------------------------------------------------------------- creation browser
+
+
+async def test_acquisition_uses_headed_chrome_and_monitoring_stays_headless(
+    tmp_path: Path, world: World
+) -> None:
+    database = tmp_path / "headed-creation.sqlite3"
+    await seed(database, requested=1)
+    app, _, _ = build(database)
+
+    async with running(app):
+        await eventually(lambda: _started(world.creator_managers))
+        (creation,) = world.creator_managers
+        assert not creation.headless and creation.start_calls == 1
+        automatic = world.restorer_managers[0]
+        assert automatic.headless and automatic is not creation
+
+    assert creation.shutdown_calls == 1 and not creation.started
+
+
+async def test_headless_creation_setting_reuses_the_automatic_pool(
+    tmp_path: Path, world: World
+) -> None:
+    database = tmp_path / "headless-creation.sqlite3"
+    await seed(database, requested=1)
+    app, _, _ = build(database, CREATION_HEADLESS=True)
+
+    async with running(app):
+        (creation,) = world.creator_managers
+        assert creation.headless and creation is world.restorer_managers[0]
+    assert len([manager for manager in world.managers if manager.headless]) == 1
+
+
 # ------------------------------------------------------------------------ run reset
 
 
@@ -780,6 +819,10 @@ async def test_reset_whose_wipe_fails_restarts_the_existing_run(
 
 
 # -------------------------------------------------------------------------- helpers
+
+
+async def _started(managers: list[FakeBrowserManager]) -> bool:
+    return bool(managers) and all(manager.started for manager in managers)
 
 
 async def _count_valid(repository: SQLiteSessionRepository, expected: int) -> bool:
