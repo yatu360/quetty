@@ -14,7 +14,7 @@ from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, evaluate_queue_status
-from queue_load_test.repository import SessionRepository
+from queue_load_test.repository import ClaimedSessions, SessionRepository
 from queue_load_test.transfer import RestoreFailure, SessionRestoreResult
 
 type Clock = Callable[[], datetime]
@@ -22,6 +22,8 @@ type Jitter = Callable[[float, float], float]
 type Sleep = Callable[[float], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
+
+_MAX_SCHEDULE_BACKOFF_SECONDS = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +187,23 @@ def is_permanent_restore_failure(failure: RestoreFailure | None) -> bool:
     return failure in _EXPIRED_FAILURES or failure in _PERMANENT_FAILURES
 
 
+def is_verified_observation(result: SessionRestoreResult) -> bool:
+    """Accept a verified live observation even when only the state refresh failed.
+
+    A HYBRID refresh writes a new ``storage_state`` after the identity has been
+    verified. When the state store is interrupted the observation itself is still
+    valid; re-navigating would only multiply browser load while storage is down.
+    """
+
+    if result.success:
+        return True
+    return (
+        result.failure is RestoreFailure.STATE_REFRESH_FAILED
+        and result.identity_match is True
+        and result.progress is not None
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MonitoringOutcome:
     session_id: str
@@ -274,7 +293,7 @@ class QueueSessionMonitor:
         elif not result.success and result.failure in _PERMANENT_FAILURES:
             observed_status = QueueStatus.FAILED
             session.status = observed_status
-        elif result.success and result.progress is not None:
+        elif is_verified_observation(result) and result.progress is not None:
             observed_status = evaluate_queue_status(result.progress)
             session.status = observed_status
             progress_changed = _progress_signature(previous_progress) != _progress_signature(
@@ -324,7 +343,7 @@ class QueueSessionMonitor:
         result = await self._restorer.restore(session)
         attempt = 1
         while (
-            not result.success
+            not is_verified_observation(result)
             and not is_permanent_restore_failure(result.failure)
             and attempt < self._retry_policy.max_attempts
         ):
@@ -370,6 +389,10 @@ class MonitoringMetrics:
     due_backlog: int = 0
     oldest_overdue_seconds: float = 0.0
     lease_conflicts: int = 0
+    expired_leases_recovered: int = 0
+    own_expired_leases_reclaimed: int = 0
+    schedule_failures: int = 0
+    lease_release_failures: int = 0
     scheduler_iterations: int = 0
     idle_iterations: int = 0
 
@@ -487,19 +510,49 @@ class ParkedSessionScheduler:
         """Continuously feed due work until asked to drain and stop."""
 
         await self.start()
+        consecutive_failures = 0
         try:
             while not stop_event.is_set():
-                await self.schedule_due()
+                delay = self._scheduler_tick_seconds
                 try:
-                    await asyncio.wait_for(
-                        stop_event.wait(),
-                        timeout=self._scheduler_tick_seconds,
+                    await self.schedule_due()
+                except Exception as exc:  # noqa: BLE001 - keep scheduling through outages
+                    consecutive_failures += 1
+                    self._record_schedule_failure(exc, consecutive_failures)
+                    delay = min(
+                        self._scheduler_tick_seconds * (2.0 ** min(consecutive_failures, 6)),
+                        max(self._scheduler_tick_seconds, _MAX_SCHEDULE_BACKOFF_SECONDS),
                     )
+                else:
+                    if consecutive_failures:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "monitoring_scheduling_recovered",
+                            worker_id=self._scheduler_id,
+                            count=consecutive_failures,
+                        )
+                    consecutive_failures = 0
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=delay)
                 except TimeoutError:
                     pass
         finally:
             await self.shutdown(timeout_seconds=self._shutdown_timeout_seconds)
         return self.metrics
+
+    def _record_schedule_failure(self, exc: Exception, consecutive_failures: int) -> None:
+        self.metrics.schedule_failures += 1
+        if self._observability is not None:
+            self._observability.record_repository_error("schedule")
+        log_event(
+            logger,
+            logging.ERROR,
+            "monitoring_schedule_failed",
+            worker_id=self._scheduler_id,
+            error_type=type(exc).__name__,
+            count=consecutive_failures,
+        )
 
     async def schedule_due(self) -> int:
         """Claim no more sessions than the bounded queue can accept."""
@@ -529,6 +582,13 @@ class ParkedSessionScheduler:
                 lease_until=now + timedelta(seconds=self._lease_seconds),
                 limit=limit,
             )
+            if isinstance(claimed_sessions, ClaimedSessions):
+                self._record_lease_recoveries(claimed_sessions.recovered_expired_leases)
+                # This scheduler's own lease expired (a hung check, or a release that
+                # failed during a database outage) and the row is claimable again.
+                self.metrics.own_expired_leases_reclaimed += (
+                    claimed_sessions.reclaimed_own_expired_leases
+                )
             expected_claims = min(limit, due_backlog)
             conflicts = max(0, expected_claims - len(claimed_sessions))
             if conflicts:
@@ -560,6 +620,20 @@ class ParkedSessionScheduler:
                 )
             self._set_monitoring_activity()
             return len(sessions)
+
+    def _record_lease_recoveries(self, recovered: int) -> None:
+        if recovered < 1:
+            return
+        self.metrics.expired_leases_recovered += recovered
+        if self._observability is not None:
+            self._observability.record_lease_recoveries(recovered)
+        log_event(
+            logger,
+            logging.WARNING,
+            "expired_leases_recovered",
+            worker_id=self._scheduler_id,
+            recovered_leases=recovered,
+        )
 
     async def wait_until_idle(self) -> None:
         await self._queue.join()
@@ -593,10 +667,26 @@ class ParkedSessionScheduler:
             item = self._queue.get_nowait()
             try:
                 if isinstance(item, QueueSession):
-                    await self._repository.release_lease(
-                        item.session_id,
-                        worker_id=self._scheduler_id,
-                    )
+                    try:
+                        await self._repository.release_lease(
+                            item.session_id,
+                            worker_id=self._scheduler_id,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # Shutdown must continue to browser cleanup; an unreleased
+                        # lease becomes recoverable when it expires.
+                        self.metrics.lease_release_failures += 1
+                        if self._observability is not None:
+                            self._observability.record_repository_error("release")
+                        log_event(
+                            logger,
+                            logging.ERROR,
+                            "monitoring_lease_release_failed",
+                            session_id=item.session_id,
+                            queue_id=item.queue_id,
+                            worker_id=self._scheduler_id,
+                            error_type=type(exc).__name__,
+                        )
                     self._owned_session_ids.discard(item.session_id)
             finally:
                 self._queue.task_done()
@@ -635,6 +725,8 @@ class ParkedSessionScheduler:
                     try:
                         await self._repark_after_failure(item)
                     except Exception as exc:  # noqa: BLE001
+                        if self._observability is not None:
+                            self._observability.record_repository_error("repark")
                         log_event(
                             logger,
                             logging.ERROR,
@@ -657,6 +749,11 @@ class ParkedSessionScheduler:
                             if self._observability is not None:
                                 self._observability.record_monitoring_lease_conflicts()
                     except Exception as exc:  # noqa: BLE001
+                        # The lease stays persisted and becomes claimable after
+                        # expiry; the session is never deleted or replaced.
+                        self.metrics.lease_release_failures += 1
+                        if self._observability is not None:
+                            self._observability.record_repository_error("release")
                         log_event(
                             logger,
                             logging.ERROR,

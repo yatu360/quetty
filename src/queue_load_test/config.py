@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_active_contexts: int = Field(default=50, alias="MAX_ACTIVE_CONTEXTS", ge=1, le=100)
     creation_workers: int = Field(default=1, alias="CREATION_WORKERS", ge=1)
     creation_queue_capacity: int = Field(default=5, alias="CREATION_QUEUE_CAPACITY", ge=1)
+    identity_replacement_limit: int = Field(default=0, alias="IDENTITY_REPLACEMENT_LIMIT", ge=0)
     monitor_workers: int = Field(default=1, alias="MONITOR_WORKERS", ge=1)
     monitor_queue_capacity: int = Field(default=5, alias="MONITOR_QUEUE_CAPACITY", ge=1)
     monitor_claim_batch_size: int = Field(default=5, alias="MONITOR_CLAIM_BATCH_SIZE", ge=1)

@@ -148,7 +148,11 @@ class BrowserManager:
         headless: bool = True,
         playwright_starter: PlaywrightStarter = _start_playwright,
         observability: PrometheusMetrics | None = None,
+        operation_timeout_seconds: float = 30.0,
+        close_timeout_seconds: float = 5.0,
     ) -> None:
+        if operation_timeout_seconds <= 0 or close_timeout_seconds <= 0:
+            raise ValueError("browser operation timeouts must be positive")
         if chrome_process_count < 1:
             raise ValueError("chrome_process_count must be at least 1")
         if max_contexts_per_browser < 1:
@@ -169,6 +173,13 @@ class BrowserManager:
         self._slots: list[_BrowserSlot] = []
         self._lock = asyncio.Lock()
         self._running = False
+        self._restart_count = 0
+        self._restart_durations: list[float] = []
+        # Playwright calls against a Chrome process killed mid-call can stay pending
+        # forever. Every browser call made while holding the allocation lock, or
+        # during restart/shutdown, is therefore bounded.
+        self._operation_timeout_seconds = operation_timeout_seconds
+        self._close_timeout_seconds = close_timeout_seconds
 
     @classmethod
     def from_settings(
@@ -190,6 +201,18 @@ class BrowserManager:
     @property
     def started(self) -> bool:
         return self._running
+
+    @property
+    def restart_count(self) -> int:
+        """Disconnected Chrome processes this manager has attempted to replace."""
+
+        return self._restart_count
+
+    @property
+    def restart_durations(self) -> tuple[float, ...]:
+        """Seconds spent on each completed slot replacement, in completion order."""
+
+        return tuple(self._restart_durations)
 
     async def start(self) -> None:
         """Start Playwright and the configured number of Google Chrome processes."""
@@ -274,7 +297,10 @@ class BrowserManager:
                     )
                     creation_started = time.perf_counter()
                     try:
-                        context = await self._new_context(slot.browser, storage_state)
+                        context = await asyncio.wait_for(
+                            self._new_context(slot.browser, storage_state),
+                            timeout=self._operation_timeout_seconds,
+                        )
                     except Exception:
                         creation_duration = time.perf_counter() - creation_started
                         if self._observability is not None:
@@ -358,24 +384,50 @@ class BrowserManager:
     async def close_context(self, owned_context: OwnedBrowserContext) -> None:
         """Close and release a context; repeated calls are safe."""
 
-        async with self._lock:
-            if owned_context.closed:
-                return
-            owned_context._slot.contexts.discard(owned_context)
-            owned_context._mark_closed()
-            self._update_capacity_metrics()
+        # Release capacity synchronously. Waiting for the allocation lock here would
+        # let a cancellation (for example a forced shutdown) arrive before the
+        # context is discarded, permanently leaking its capacity. No await separates
+        # these steps, so they are atomic with respect to other coroutines.
+        if owned_context.closed:
+            return
+        owned_context._slot.contexts.discard(owned_context)
+        owned_context._mark_closed()
+        self._update_capacity_metrics()
+        await self._bounded_close(owned_context.context.close(), owned_context._slot.index)
+
+    async def _bounded_close(self, closing: Awaitable[None], browser_id: int) -> None:
+        """Close a Chrome resource without letting cancellation or a dead process hang us."""
+
+        close = asyncio.ensure_future(closing)
         try:
-            await owned_context.context.close()
+            await asyncio.wait_for(asyncio.shield(close), timeout=self._close_timeout_seconds)
+        except asyncio.CancelledError:
+            # Let Chrome finish closing in the background.
+            close.add_done_callback(lambda task: self._record_background_close(task, browser_id))
+            raise
+        except TimeoutError as exc:
+            close.add_done_callback(lambda task: self._record_background_close(task, browser_id))
+            self._record_close_failure(exc, browser_id)
         except Exception as exc:  # noqa: BLE001
-            if self._observability is not None:
-                self._observability.record_browser_cleanup_failure()
-            log_event(
-                logger,
-                logging.WARNING,
-                "browser_context_close_failed",
-                browser_id=owned_context._slot.index,
-                error_type=type(exc).__name__,
-            )
+            self._record_close_failure(exc, browser_id)
+
+    def _record_background_close(self, task: asyncio.Future[None], browser_id: int) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._record_close_failure(exc, browser_id)
+
+    def _record_close_failure(self, exc: BaseException, browser_id: int) -> None:
+        if self._observability is not None:
+            self._observability.record_browser_cleanup_failure()
+        log_event(
+            logger,
+            logging.WARNING,
+            "browser_context_close_failed",
+            browser_id=browser_id,
+            error_type=type(exc).__name__,
+        )
 
     async def restart_failed_browsers(self) -> int:
         """Detect disconnected processes and replace them."""
@@ -411,6 +463,8 @@ class BrowserManager:
         old_browser: Browser,
         lost_contexts: tuple[OwnedBrowserContext, ...],
     ) -> bool:
+        restart_started = time.perf_counter()
+        self._restart_count += 1
         if self._observability is not None:
             self._observability.record_browser_crash()
         log_event(
@@ -419,22 +473,12 @@ class BrowserManager:
             "browser_process_restarting",
             browser_id=slot.index,
             error_type="BrowserDisconnected",
+            lost_contexts=len(lost_contexts),
         )
         for owned_context in lost_contexts:
-            try:
-                await owned_context.context.close()
-            except Exception as exc:  # noqa: BLE001
-                if self._observability is not None:
-                    self._observability.record_browser_cleanup_failure()
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "lost_browser_context_cleanup_failed",
-                    browser_id=slot.index,
-                    error_type=type(exc).__name__,
-                )
+            await self._bounded_close(owned_context.context.close(), slot.index)
         try:
-            await old_browser.close()
+            await asyncio.wait_for(old_browser.close(), timeout=self._close_timeout_seconds)
         except Exception as exc:  # noqa: BLE001
             if self._observability is not None:
                 self._observability.record_browser_cleanup_failure()
@@ -481,6 +525,22 @@ class BrowserManager:
                     browser_id=slot.index,
                     error_type=type(exc).__name__,
                 )
+        restart_duration = time.perf_counter() - restart_started
+        self._restart_durations.append(restart_duration)
+        if self._observability is not None:
+            self._observability.record_browser_restart(
+                restart_duration,
+                success=installed,
+                lost_contexts=len(lost_contexts),
+            )
+        log_event(
+            logger,
+            logging.INFO if installed else logging.ERROR,
+            "browser_process_restarted" if installed else "browser_process_not_replaced",
+            browser_id=slot.index,
+            duration=restart_duration,
+            lost_contexts=len(lost_contexts),
+        )
         return installed
 
     async def capacity(self) -> BrowserCapacity:
@@ -544,21 +604,10 @@ class BrowserManager:
             slot.contexts.clear()
             for owned_context in contexts:
                 owned_context._mark_closed()
-                try:
-                    await owned_context.context.close()
-                except Exception as exc:  # noqa: BLE001
-                    if self._observability is not None:
-                        self._observability.record_browser_cleanup_failure()
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        "browser_context_shutdown_failed",
-                        browser_id=slot.index,
-                        error_type=type(exc).__name__,
-                    )
+                await self._bounded_close(owned_context.context.close(), slot.index)
         for slot in self._slots:
             try:
-                await slot.browser.close()
+                await asyncio.wait_for(slot.browser.close(), timeout=self._close_timeout_seconds)
             except Exception as exc:  # noqa: BLE001
                 if self._observability is not None:
                     self._observability.record_browser_cleanup_failure()

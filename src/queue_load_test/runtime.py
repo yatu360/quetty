@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import signal
+import time
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -31,6 +33,7 @@ class ApplicationRuntime:
         creation_runner: CreationRunner | None = None,
         shutdown_timeout_seconds: float = 30.0,
         observability: PrometheusMetrics | None = None,
+        target_queue_ids: int | None = None,
     ) -> None:
         if shutdown_timeout_seconds <= 0:
             raise ValueError("shutdown_timeout_seconds must be positive")
@@ -43,6 +46,8 @@ class ApplicationRuntime:
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[object]] = []
         self._startup_recovery_summary: RecoverySummary | None = None
+        self._startup_recovery_seconds: float | None = None
+        self._target_queue_ids = target_queue_ids
 
     @property
     def stopping(self) -> bool:
@@ -51,6 +56,10 @@ class ApplicationRuntime:
     @property
     def startup_recovery_summary(self) -> RecoverySummary | None:
         return self._startup_recovery_summary
+
+    @property
+    def startup_recovery_seconds(self) -> float | None:
+        return self._startup_recovery_seconds
 
     def request_shutdown(self) -> None:
         """Stop producers; workers are drained by ``run`` within the timeout."""
@@ -63,18 +72,26 @@ class ApplicationRuntime:
         loop = asyncio.get_running_loop()
         installed_signals = self._install_signal_handlers(loop)
         try:
+            recovery_started = time.perf_counter()
             self._startup_recovery_summary = await self._repository.recovery_summary(
                 now=datetime.now(UTC)
             )
+            self._startup_recovery_seconds = time.perf_counter() - recovery_started
             summary = self._startup_recovery_summary
             if self._observability is not None:
-                self._observability.sync_session_count_values(summary.status_counts)
+                self._observability.record_startup_recovery(
+                    self._startup_recovery_seconds,
+                    summary,
+                    target=self._target_queue_ids,
+                )
             log_event(
                 logger,
                 logging.INFO,
                 "startup_recovery_summary",
+                duration=self._startup_recovery_seconds,
                 total_sessions=summary.total_persisted_sessions,
                 valid_queue_ids=summary.valid_queue_ids,
+                lost_queue_ids=summary.lost_queue_ids,
                 leased_sessions=summary.leased_sessions,
                 expired_leases=summary.expired_leases,
                 sessions_due=summary.sessions_due,
@@ -99,14 +116,31 @@ class ApplicationRuntime:
             await self._stop_event.wait()
         finally:
             self.request_shutdown()
-            await self._finish_tasks()
-            await self._monitoring_scheduler.shutdown(
-                timeout_seconds=self._shutdown_timeout_seconds
+            # Each step is isolated so a failing database cannot prevent Chrome
+            # contexts from being closed, and vice versa.
+            await self._shutdown_step("tasks", self._finish_tasks())
+            await self._shutdown_step(
+                "monitoring",
+                self._monitoring_scheduler.shutdown(
+                    timeout_seconds=self._shutdown_timeout_seconds
+                ),
             )
-            await self._browser_manager.shutdown()
-            await self._repository.close()
+            await self._shutdown_step("browser", self._browser_manager.shutdown())
+            await self._shutdown_step("repository", self._repository.close())
             log_event(logger, logging.INFO, "application_runtime_stopped")
             self._remove_signal_handlers(loop, installed_signals)
+
+    async def _shutdown_step(self, operation: str, step: Awaitable[object]) -> None:
+        try:
+            await step
+        except Exception as exc:  # noqa: BLE001 - continue releasing other resources
+            log_event(
+                logger,
+                logging.ERROR,
+                "shutdown_step_failed",
+                operation=operation,
+                error_type=type(exc).__name__,
+            )
 
     async def _finish_tasks(self) -> None:
         if not self._tasks:

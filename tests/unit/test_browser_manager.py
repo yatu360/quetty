@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from typing import Any, cast
 
 import pytest
@@ -446,3 +447,120 @@ async def test_manager_async_context_guarantees_shutdown() -> None:
 
     assert playwright.stopped
     assert playwright.chromium.browsers[0].contexts[0].closed
+
+
+async def test_repeated_crashes_record_restart_duration_and_lost_contexts() -> None:
+    metrics = PrometheusMetrics()
+    manager, playwright = manager_and_playwright(
+        processes=2,
+        per_browser=3,
+        global_limit=6,
+        observability=metrics,
+    )
+    await manager.start()
+    healthy = await manager.create_context()
+    for crash in range(3):
+        lost = [await manager.create_context() for _ in range(2)]
+        victim = next(
+            browser
+            for browser in playwright.chromium.browsers
+            if browser.connected and healthy.context not in browser.contexts
+        )
+        victim.connected = False
+
+        assert await manager.restart_failed_browsers() == 1
+        assert all(context.closed for context in lost if context.browser_id != healthy.browser_id)
+        for context in lost:
+            await context.close()
+        assert not healthy.closed
+        assert manager.restart_count == crash + 1
+
+    capacity = await manager.capacity()
+    assert capacity.connected_processes == 2
+    assert capacity.active_contexts == 1
+    assert len(manager.restart_durations) == 3
+    assert metrics.registry.get_sample_value("browser_crashes_total") == 3
+    assert metrics.registry.get_sample_value("browser_restart_duration_seconds_count") == 3
+    assert metrics.registry.get_sample_value("browser_restart_failures_total") == 0
+    assert (metrics.registry.get_sample_value("browser_contexts_lost_total") or 0) >= 3
+    await healthy.close()
+    await manager.shutdown()
+    assert (await_capacity_after_shutdown(manager)) == 0
+
+
+def await_capacity_after_shutdown(manager: BrowserManager) -> int:
+    return sum(len(slot.contexts) for slot in manager._slots)
+
+
+async def test_cancelled_close_under_lock_contention_releases_capacity() -> None:
+    manager, _ = manager_and_playwright()
+    await manager.start()
+    owned = await manager.create_context()
+    release_lock = asyncio.Event()
+
+    async def hold_allocation_lock() -> None:
+        async with manager._lock:
+            await release_lock.wait()
+
+    holder = asyncio.create_task(hold_allocation_lock())
+    await asyncio.sleep(0)
+    closing = asyncio.create_task(owned.close())
+    await asyncio.sleep(0)
+    closing.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await closing
+    release_lock.set()
+    await holder
+
+    assert owned.closed
+    assert (await manager.capacity()).active_contexts == 0
+    await manager.shutdown()
+
+
+class HangingBrowser(FakeBrowser):
+    def __init__(self, process_id: int) -> None:
+        super().__init__(process_id)
+        self.hang_new_context = False
+        self.hang_close = False
+
+    async def new_context(self, **options: object) -> FakeContext:
+        if self.hang_new_context:
+            await asyncio.Event().wait()
+        return await super().new_context(**options)
+
+
+class HangingContext(FakeContext):
+    async def close(self) -> None:
+        await asyncio.Event().wait()
+
+
+async def test_hung_context_creation_is_bounded_and_releases_lock() -> None:
+    manager, _ = manager_and_playwright()
+    manager._operation_timeout_seconds = 0.05
+    await manager.start()
+    hanging = HangingBrowser(0)
+    hanging.hang_new_context = True
+    manager._slots[0].browser = cast(Any, hanging)
+
+    with pytest.raises(TimeoutError):
+        await manager.create_context()
+
+    hanging.hang_new_context = False
+    recovered = await asyncio.wait_for(manager.create_context(), timeout=1)
+    await recovered.close()
+    await manager.shutdown()
+
+
+async def test_hung_context_close_is_bounded() -> None:
+    metrics = PrometheusMetrics()
+    manager, _ = manager_and_playwright(observability=metrics)
+    manager._close_timeout_seconds = 0.05
+    await manager.start()
+    owned = await manager.create_context()
+    owned._context = cast(Any, HangingContext({}))
+
+    await asyncio.wait_for(owned.close(), timeout=1)
+
+    assert (await manager.capacity()).active_contexts == 0
+    assert metrics.registry.get_sample_value("browser_cleanup_failures_total") == 1
+    await manager.shutdown()

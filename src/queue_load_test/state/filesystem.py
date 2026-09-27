@@ -15,6 +15,7 @@ from queue_load_test.state.base import (
     StateSessionMismatchError,
     StateUnreadableError,
 )
+from queue_load_test.utils.asyncio_tools import run_to_completion
 
 _SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -120,7 +121,11 @@ class FileSystemStateStore:
         # sessions retain full concurrency.
         lock = self._save_locks.setdefault(session_id, asyncio.Lock())
         async with lock:
-            await asyncio.to_thread(self._save, path, document)
+            # On cancellation the write still completes (atomically) before the
+            # CancelledError propagates, so callers can clean up deterministically.
+            await run_to_completion(
+                asyncio.ensure_future(asyncio.to_thread(self._save, path, document))
+            )
         return path
 
     @staticmethod

@@ -12,9 +12,10 @@ from queue_load_test.metrics import (
     PrometheusMetrics,
     log_event,
 )
+from queue_load_test.metrics.prometheus import REPOSITORY_ERROR_OPERATIONS
 from queue_load_test.metrics.status import ObservabilityHttpServer, StatusSummaryProvider
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
-from queue_load_test.repository import SQLiteSessionRepository
+from queue_load_test.repository import PROGRESS_BUCKETS, SQLiteSessionRepository
 
 
 def session(session_id: str, status: QueueStatus) -> QueueSession:
@@ -169,9 +170,16 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     assert "queue-progress" not in exposition
     assert "secret-session" not in exposition
     assert "queue_id=" not in exposition
+    allowed_values = {
+        "bucket": set(PROGRESS_BUCKETS),
+        "operation": set(REPOSITORY_ERROR_OPERATIONS),
+    }
     for family in metrics.registry.collect():
         for sample in family.samples:
-            assert set(sample.labels) <= {"le"}
+            assert set(sample.labels) <= {"le", *allowed_values}
+            for name, value in sample.labels.items():
+                if name in allowed_values:
+                    assert value in allowed_values[name]
 
 
 async def test_status_summary_and_http_endpoints_are_readable(tmp_path: Path) -> None:

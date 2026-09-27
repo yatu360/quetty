@@ -1,3 +1,4 @@
+import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
 from queue_load_test.repository import SQLiteSessionRepository
-from queue_load_test.state import FileSystemStateStore
+from queue_load_test.state import FileSystemStateStore, StateUnreadableError
 from queue_load_test.transfer import (
     QueueSessionRestorer,
     RestoreFailure,
@@ -388,4 +389,94 @@ async def test_hybrid_fallback_rejects_unexpected_queue_id(tmp_path: Path) -> No
     assert persisted is not None
     assert persisted.queue_id == "queue-expected"
     assert len(await repository.list()) == 1
+    await repository.close()
+
+
+class UnreadableStateStore(FileSystemStateStore):
+    async def load(self, session_id: str) -> Any:
+        raise StateUnreadableError(f"Could not read browser state for {session_id!r}")
+
+
+class UnwritableStateStore(FileSystemStateStore):
+    async def save(self, session_id: str, state: Any) -> Path:
+        raise OSError("state volume unavailable")
+
+
+async def test_state_store_interruption_is_transient_not_corrupt(tmp_path: Path) -> None:
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [unavailable_result()],
+    )
+    restorer._state_store = UnreadableStateStore(tmp_path / "state")
+
+    result = await restorer.restore(expected)
+
+    assert not result.success
+    assert result.failure is RestoreFailure.STATE_UNAVAILABLE
+    persisted = await repository.get(expected.session_id)
+    assert persisted is not None
+    assert persisted.queue_id == "queue-expected"
+    assert persisted.last_error == "restore:STATE_UNAVAILABLE"
+    await repository.close()
+
+
+async def test_state_refresh_failure_is_counted_separately_from_restore(tmp_path: Path) -> None:
+    metrics = PrometheusMetrics()
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+    )
+    restorer._state_store = UnwritableStateStore(tmp_path / "state")
+    restorer._observability = metrics
+
+    result = await restorer.restore(expected)
+
+    assert result.failure is RestoreFailure.STATE_REFRESH_FAILED
+    assert result.identity_match is True
+    assert result.progress is not None
+    assert metrics.registry.get_sample_value("state_refresh_failures_total") == 1
+    assert metrics.registry.get_sample_value("transfer_restore_failures_total") == 0
+    assert metrics.registry.get_sample_value("state_restore_failures_total") == 0
+    await repository.close()
+
+
+class HangingPageContext(FakeContext):
+    async def new_page(self) -> FakePage:
+        # Playwright can leave new_page pending forever after Chrome is killed.
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+class HangingBrowserManager(FakeBrowserManager):
+    @asynccontextmanager
+    async def context(self, *, storage_state: object | None = None):
+        context = HangingPageContext()
+        self.contexts.append(context)
+        try:
+            yield context
+        finally:
+            context.closed = True
+
+
+async def test_hung_browser_call_is_bounded_and_context_released(tmp_path: Path) -> None:
+    metrics = PrometheusMetrics()
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.TRANSFER_ONLY,
+        [matching_result()],
+    )
+    manager = HangingBrowserManager()
+    restorer._browser_manager = cast(BrowserManager, manager)
+    restorer._attempt_timeout_seconds = 0.05
+    restorer._observability = metrics
+
+    result = await asyncio.wait_for(restorer.restore(expected), timeout=2)
+
+    assert result.failure is RestoreFailure.NAVIGATION_FAILED
+    assert all(context.closed for context in manager.contexts)
+    assert metrics.registry.get_sample_value("browser_operation_timeouts_total") == 1
+    persisted = await repository.get(expected.session_id)
+    assert persisted is not None and persisted.queue_id == "queue-expected"
     await repository.close()

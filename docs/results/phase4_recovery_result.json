@@ -1,0 +1,784 @@
+{
+  "generated_at": "2026-09-27T01:18:31.503082+00:00",
+  "population": 10000,
+  "platform": "darwin / Python 3.14.7",
+  "chrome_available": true,
+  "scenarios": [
+    {
+      "key": "shutdown_during_creation",
+      "title": "Application shutdown (forced cancellation) during creation, then resume",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "original_identities_unchanged": true,
+        "no_contexts_after_forced_cancel": true,
+        "no_contexts_after_resume": true,
+        "committed_ids_survive_interruption": true,
+        "resume_reaches_effective_target": true,
+        "no_overshoot": true,
+        "lost_identities_not_replaced": true,
+        "no_orphaned_or_missing_state": true
+      },
+      "measurements": {
+        "valid_before": 9860,
+        "lost_identities_before": 40,
+        "effective_target_with_replacement_limit_0": 9960,
+        "ids_committed_before_interrupt": 30,
+        "in_flight_at_cancel": 10,
+        "forced_cancel_seconds": 0.0404,
+        "resume_seconds": 5.052,
+        "ids_created_by_resume": 70,
+        "valid_after": 9960,
+        "creation_attempts_total": 110.0,
+        "state_audit_findings": {
+          "corrupt_state_file": 20
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "shutdown_during_monitoring",
+      "title": "Application shutdown during browser-backed monitoring",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "no_contexts_after_scheduler_shutdown": true,
+        "no_chrome_processes_after_browser_shutdown": true,
+        "no_leases_left_by_stopped_scheduler": true,
+        "no_rows_created": true
+      },
+      "measurements": {
+        "checks_before_shutdown": 324,
+        "in_flight_at_shutdown": 20,
+        "queued_at_shutdown": 48,
+        "forced_cancel_timeout_seconds": 0.5,
+        "scheduler_shutdown_seconds": 0.616,
+        "browser_shutdown_seconds": 0.0861,
+        "contexts_after_scheduler_shutdown": 0,
+        "chrome_processes_after_shutdown": 0,
+        "leases_left_by_scheduler": 0,
+        "expired_leases_recovered_during_run": 200,
+        "due_backlog_after_shutdown": 4694
+      },
+      "notes": []
+    },
+    {
+      "key": "restart_with_persisted_population",
+      "title": "Restart with 10,000 persisted sessions",
+      "evidence": "local SQLite + local state files (synthetic identities)",
+      "outcome": "PASS",
+      "checks": {
+        "cycle_1_identity_digest_unchanged": true,
+        "cycle_1_row_count_unchanged": true,
+        "cycle_1_terminal_states_unchanged": true,
+        "cycle_2_identity_digest_unchanged": true,
+        "cycle_2_row_count_unchanged": true,
+        "cycle_2_terminal_states_unchanged": true,
+        "cycle_3_identity_digest_unchanged": true,
+        "cycle_3_row_count_unchanged": true,
+        "cycle_3_terminal_states_unchanged": true,
+        "cycle_4_identity_digest_unchanged": true,
+        "cycle_4_row_count_unchanged": true,
+        "cycle_4_terminal_states_unchanged": true,
+        "cycle_5_identity_digest_unchanged": true,
+        "cycle_5_row_count_unchanged": true,
+        "cycle_5_terminal_states_unchanged": true,
+        "first_claim_returns_bounded_batch": true,
+        "valid_queue_ids_match_layout": true,
+        "summary_stable_across_restarts": true,
+        "state_audit_clean": true
+      },
+      "measurements": {
+        "persisted_sessions": 10000,
+        "valid_queue_ids": 9900,
+        "restart_repetitions": 5,
+        "startup_initialize_plus_summary_seconds": {
+          "count": 5,
+          "p50": 0.0065,
+          "p95": 0.0069,
+          "max": 0.0069,
+          "mean": 0.0066
+        },
+        "startup_to_first_claim_seconds": {
+          "count": 5,
+          "p50": 0.007,
+          "p95": 0.0074,
+          "max": 0.0075,
+          "mean": 0.0071
+        },
+        "due_backlog_at_restart": 4998,
+        "expired_leases_at_restart": 200,
+        "active_leases_at_restart": 200,
+        "terminal_sessions": 400,
+        "full_state_audit_seconds": 0.3927,
+        "state_files_audited": 9900
+      },
+      "notes": []
+    },
+    {
+      "key": "restart_resume_monitoring",
+      "title": "Restart and resume monitoring of 10,000 persisted sessions",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "identity_digest_unchanged": true,
+        "sweep_completed_before_timeout": true,
+        "all_resumed_sessions_checked": true,
+        "no_unexpected_permanent_failures": true,
+        "pre_existing_terminal_states_preserved": true,
+        "no_rows_created": true,
+        "no_contexts_after_shutdown": true,
+        "no_chrome_processes_after_shutdown": true,
+        "only_untouched_live_leases_remain": true
+      },
+      "measurements": {
+        "startup_recovery_seconds": 0.0069,
+        "browser_start_seconds": 0.5251,
+        "due_backlog_after_restart": 4864,
+        "expired_leases_at_restart": 0,
+        "sessions_resumed_checked": 4934,
+        "sweep_seconds": 394.224,
+        "checks_per_second": 12.52,
+        "check_duration_seconds_average": 1.5716,
+        "restore_duration_average_seconds": 1.518,
+        "peak_active_contexts": 20,
+        "maximum_queue_depth": 50,
+        "maximum_concurrent_checks": 20,
+        "final_status_counts": {
+          "PRE_QUEUE": 2367,
+          "ACTIVE_QUEUE": 3627,
+          "PARKED": 1108,
+          "SERVICED_SOON": 2368,
+          "ADMITTED": 200,
+          "CONNECTION_LOST": 90,
+          "EXPIRED": 100,
+          "FAILED": 140
+        },
+        "valid_queue_ids_after": 9860,
+        "lost_queue_ids_after": 40,
+        "progress_samples": [
+          {
+            "t": 1.0,
+            "checked": 0.0,
+            "contexts": 20.0,
+            "backlog": 4794.0
+          },
+          {
+            "t": 10.02,
+            "checked": 33.0,
+            "contexts": 13.0,
+            "backlog": 4761.0
+          },
+          {
+            "t": 19.05,
+            "checked": 108.0,
+            "contexts": 4.0,
+            "backlog": 4686.0
+          },
+          {
+            "t": 28.07,
+            "checked": 139.0,
+            "contexts": 3.0,
+            "backlog": 4655.0
+          },
+          {
+            "t": 37.09,
+            "checked": 185.0,
+            "contexts": 5.0,
+            "backlog": 4610.0
+          },
+          {
+            "t": 46.11,
+            "checked": 307.0,
+            "contexts": 4.0,
+            "backlog": 4487.0
+          },
+          {
+            "t": 55.13,
+            "checked": 431.0,
+            "contexts": 5.0,
+            "backlog": 4363.0
+          },
+          {
+            "t": 64.15,
+            "checked": 540.0,
+            "contexts": 6.0,
+            "backlog": 4254.0
+          },
+          {
+            "t": 73.18,
+            "checked": 652.0,
+            "contexts": 7.0,
+            "backlog": 4142.0
+          },
+          {
+            "t": 82.19,
+            "checked": 768.0,
+            "contexts": 4.0,
+            "backlog": 4026.0
+          },
+          {
+            "t": 91.23,
+            "checked": 879.0,
+            "contexts": 7.0,
+            "backlog": 3915.0
+          },
+          {
+            "t": 100.25,
+            "checked": 1003.0,
+            "contexts": 6.0,
+            "backlog": 3792.0
+          },
+          {
+            "t": 110.01,
+            "checked": 1127.0,
+            "contexts": 10.0,
+            "backlog": 3667.0
+          },
+          {
+            "t": 119.03,
+            "checked": 1253.0,
+            "contexts": 3.0,
+            "backlog": 3542.0
+          },
+          {
+            "t": 128.05,
+            "checked": 1372.0,
+            "contexts": 7.0,
+            "backlog": 3422.0
+          },
+          {
+            "t": 137.09,
+            "checked": 1496.0,
+            "contexts": 6.0,
+            "backlog": 3298.0
+          },
+          {
+            "t": 146.11,
+            "checked": 1611.0,
+            "contexts": 14.0,
+            "backlog": 3183.0
+          },
+          {
+            "t": 155.14,
+            "checked": 1725.0,
+            "contexts": 7.0,
+            "backlog": 3069.0
+          },
+          {
+            "t": 164.16,
+            "checked": 1845.0,
+            "contexts": 6.0,
+            "backlog": 2949.0
+          },
+          {
+            "t": 173.18,
+            "checked": 1966.0,
+            "contexts": 6.0,
+            "backlog": 2828.0
+          },
+          {
+            "t": 182.2,
+            "checked": 2093.0,
+            "contexts": 5.0,
+            "backlog": 2701.0
+          },
+          {
+            "t": 191.21,
+            "checked": 2220.0,
+            "contexts": 4.0,
+            "backlog": 2577.0
+          },
+          {
+            "t": 200.23,
+            "checked": 2345.0,
+            "contexts": 6.0,
+            "backlog": 2449.0
+          },
+          {
+            "t": 209.01,
+            "checked": 2459.0,
+            "contexts": 6.0,
+            "backlog": 2335.0
+          },
+          {
+            "t": 218.03,
+            "checked": 2583.0,
+            "contexts": 7.0,
+            "backlog": 2211.0
+          },
+          {
+            "t": 230.05,
+            "checked": 2749.0,
+            "contexts": 7.0,
+            "backlog": 2046.0
+          },
+          {
+            "t": 239.07,
+            "checked": 2873.0,
+            "contexts": 6.0,
+            "backlog": 1921.0
+          },
+          {
+            "t": 248.09,
+            "checked": 2987.0,
+            "contexts": 16.0,
+            "backlog": 1807.0
+          },
+          {
+            "t": 257.1,
+            "checked": 3111.0,
+            "contexts": 14.0,
+            "backlog": 1683.0
+          },
+          {
+            "t": 266.12,
+            "checked": 3240.0,
+            "contexts": 4.0,
+            "backlog": 1555.0
+          },
+          {
+            "t": 279.02,
+            "checked": 3377.0,
+            "contexts": 10.0,
+            "backlog": 1417.0
+          },
+          {
+            "t": 288.04,
+            "checked": 3503.0,
+            "contexts": 5.0,
+            "backlog": 1362.0
+          },
+          {
+            "t": 297.06,
+            "checked": 3624.0,
+            "contexts": 4.0,
+            "backlog": 1241.0
+          },
+          {
+            "t": 306.08,
+            "checked": 3747.0,
+            "contexts": 6.0,
+            "backlog": 1117.0
+          },
+          {
+            "t": 315.1,
+            "checked": 3870.0,
+            "contexts": 4.0,
+            "backlog": 997.0
+          },
+          {
+            "t": 324.12,
+            "checked": 3991.0,
+            "contexts": 6.0,
+            "backlog": 873.0
+          },
+          {
+            "t": 333.17,
+            "checked": 4102.0,
+            "contexts": 7.0,
+            "backlog": 762.0
+          },
+          {
+            "t": 342.22,
+            "checked": 4227.0,
+            "contexts": 6.0,
+            "backlog": 637.0
+          },
+          {
+            "t": 351.02,
+            "checked": 4347.0,
+            "contexts": 5.0,
+            "backlog": 517.0
+          },
+          {
+            "t": 360.06,
+            "checked": 4467.0,
+            "contexts": 7.0,
+            "backlog": 397.0
+          },
+          {
+            "t": 369.12,
+            "checked": 4591.0,
+            "contexts": 6.0,
+            "backlog": 273.0
+          },
+          {
+            "t": 378.16,
+            "checked": 4715.0,
+            "contexts": 5.0,
+            "backlog": 149.0
+          },
+          {
+            "t": 387.19,
+            "checked": 4835.0,
+            "contexts": 7.0,
+            "backlog": 29.0
+          }
+        ]
+      },
+      "notes": []
+    },
+    {
+      "key": "chrome_process_crashes",
+      "title": "Chrome process crash, repeated over time",
+      "evidence": "installed Chrome + local simulator + local SQLite/state (SIGKILL of a Chrome browser process)",
+      "outcome": "PASS",
+      "checks": {
+        "all_kills_delivered": true,
+        "every_crash_detected": true,
+        "every_restart_succeeded": true,
+        "monitoring_continued": true,
+        "identities_unchanged": true,
+        "no_contexts_leaked": true
+      },
+      "measurements": {
+        "chrome_kills": 5,
+        "kill_times_seconds_into_sweep": [
+          85.454,
+          147.363,
+          206.489,
+          266.376,
+          328.876
+        ],
+        "browser_crashes_detected": 5.0,
+        "browser_restart_seconds": {
+          "count": 5,
+          "p50": 1.1642,
+          "p95": 1.4869,
+          "max": 1.5345,
+          "mean": 1.0971
+        },
+        "contexts_lost": 16.0,
+        "navigation_failures_total": 483.0
+      },
+      "notes": []
+    },
+    {
+      "key": "context_creation_failure",
+      "title": "Context creation failure (Chrome rejects restored storage_state)",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "all_checked": true,
+        "expected_status": true,
+        "failure_observable_in_last_error": true,
+        "no_replacement_rows": true
+      },
+      "measurements": {
+        "sessions": 20,
+        "statuses": {
+          "CONNECTION_LOST": 20
+        },
+        "last_errors": {
+          "restore:STATE_CONTEXT_FAILED": 20
+        },
+        "context_creation_failures_total": 63.0
+      },
+      "notes": []
+    },
+    {
+      "key": "navigation_failure",
+      "title": "Navigation failure (empty response) and navigation timeout",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "all_checked": true,
+        "expected_status": true,
+        "failure_observable_in_last_error": true,
+        "no_replacement_rows": true
+      },
+      "measurements": {
+        "sessions": 50,
+        "statuses": {
+          "CONNECTION_LOST": 50
+        },
+        "last_errors": {
+          "restore:STATE_CONTEXT_FAILED": 50
+        },
+        "navigation_timeouts_total": 60.0,
+        "timeout_sessions": 10
+      },
+      "notes": []
+    },
+    {
+      "key": "transfer_restore_failure",
+      "title": "Transfer restore failure with storage_state fallback",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "all_checked": true,
+        "expected_status": true,
+        "no_replacement_rows": true
+      },
+      "measurements": {
+        "sessions": 40,
+        "statuses": {
+          "PRE_QUEUE": 10,
+          "ACTIVE_QUEUE": 20,
+          "SERVICED_SOON": 10
+        },
+        "last_errors": {
+          "none": 40
+        },
+        "transfer_restore_failures_total": 368.0
+      },
+      "notes": []
+    },
+    {
+      "key": "storage_state_restore_failure",
+      "title": "storage_state restore failure (corrupt file permanent, unreadable file transient)",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "all_checked": true,
+        "expected_status": true,
+        "no_replacement_rows": true,
+        "corrupt_state_fails_permanently": true,
+        "unreadable_state_stays_retryable": true
+      },
+      "measurements": {
+        "sessions": 40,
+        "statuses": {
+          "FAILED": 20,
+          "CONNECTION_LOST": 20
+        },
+        "last_errors": {
+          "restore:STATE_CORRUPT": 20,
+          "restore:STATE_UNAVAILABLE": 20
+        },
+        "state_restore_failures_total": 310.0
+      },
+      "notes": []
+    },
+    {
+      "key": "identity_mismatch",
+      "title": "Identity mismatch",
+      "evidence": "installed Chrome + local simulator + local SQLite/state",
+      "outcome": "PASS",
+      "checks": {
+        "queue_ids_unchanged": true,
+        "all_checked": true,
+        "expected_status": true,
+        "failure_observable_in_last_error": true,
+        "no_replacement_rows": true,
+        "mismatch_metric_counted": true
+      },
+      "measurements": {
+        "sessions": 20,
+        "statuses": {
+          "FAILED": 20
+        },
+        "last_errors": {
+          "restore:IDENTITY_MISMATCH": 20
+        },
+        "identity_mismatches_total": 20.0
+      },
+      "notes": []
+    },
+    {
+      "key": "database_interruption",
+      "title": "Database connection interruption",
+      "evidence": "installed Chrome + local simulator + local SQLite/state (severed handle + injected OperationalError window)",
+      "outcome": "PASS",
+      "checks": {
+        "outage_injected": true,
+        "connection_reopened": true,
+        "scheduler_survived": true,
+        "identities_unchanged": true,
+        "orphaned_leases_recovered": true
+      },
+      "measurements": {
+        "outage_window_seconds_into_sweep": [
+          272.15,
+          275.151
+        ],
+        "injected_operation_failures": 215,
+        "scheduler_schedule_failures": 6,
+        "lease_release_failures": 70,
+        "repository_reconnects": 1,
+        "first_successful_schedule_after_outage_seconds": 0.1092,
+        "lease_recoveries_total": 0.0,
+        "own_expired_leases_reclaimed_after_outage": 132,
+        "repository_errors": {
+          "schedule": 6.0,
+          "release": 70.0,
+          "repark": 70.0,
+          "status": 0.0
+        }
+      },
+      "notes": []
+    },
+    {
+      "key": "state_storage_interruption",
+      "title": "State-storage interruption (save and load outage window)",
+      "evidence": "installed Chrome + local simulator + local SQLite/state (injected OSError/StateUnreadableError window)",
+      "outcome": "PASS",
+      "checks": {
+        "outage_injected": true,
+        "no_session_failed_by_outage": true,
+        "identities_unchanged": true
+      },
+      "measurements": {
+        "outage_window_seconds_into_sweep": [
+          224.792,
+          227.793
+        ],
+        "injected_save_failures": 31,
+        "injected_load_failures": 60,
+        "state_refresh_failures_total": 32.0
+      },
+      "notes": []
+    },
+    {
+      "key": "expired_leases",
+      "title": "Expired leases become available for recovery",
+      "evidence": "local SQLite, bounded scheduler, synthetic check handler",
+      "outcome": "PASS",
+      "checks": {
+        "all_expired_leases_rechecked": true,
+        "recovered_count_matches_expired": true,
+        "metric_matches": true,
+        "live_leases_untouched": true,
+        "no_scheduler_leases_left": true
+      },
+      "measurements": {
+        "expired_leases_before": 200,
+        "expired_leases_recovered": 200,
+        "live_leases_left_untouched": 200,
+        "time_to_recover_all_seconds": 0.137,
+        "checks_to_recover_all": 200
+      },
+      "notes": []
+    },
+    {
+      "key": "worker_process_crash",
+      "title": "Worker process crash (single machine, SIGKILL)",
+      "evidence": "separate OS process with installed Chrome + local simulator + SQLite",
+      "outcome": "PASS",
+      "checks": {
+        "child_made_progress": true,
+        "database_integrity_ok": true,
+        "child_leases_bounded_by_queue_and_workers": true,
+        "no_orphan_chrome_processes": true,
+        "identities_unchanged": true
+      },
+      "measurements": {
+        "child_checks_before_kill": 150,
+        "leases_held_by_killed_worker": 28,
+        "orphan_chrome_processes_after_5s": 0,
+        "child_chrome_processes": 1,
+        "sqlite_integrity_check": "ok"
+      },
+      "notes": []
+    },
+    {
+      "key": "worker_process_restart",
+      "title": "Worker process restart and lease recovery",
+      "evidence": "separate OS process killed; new process recovers leases",
+      "outcome": "PASS",
+      "checks": {
+        "expired_leases_recovered": true,
+        "remaining_work_completed": true,
+        "reactivated_sessions_all_checked": true,
+        "no_session_failed": true,
+        "identities_unchanged": true,
+        "no_contexts_after_shutdown": true
+      },
+      "measurements": {
+        "lease_seconds": 10.0,
+        "expired_leases_recovered": 28,
+        "restart_to_all_leases_recovered_seconds": 4.706,
+        "kill_to_all_leases_recovered_seconds": 10.157,
+        "checks_by_restarted_worker": 850,
+        "reactivated_sessions": 1000
+      },
+      "notes": []
+    }
+  ],
+  "not_applicable": {
+    "distributed_worker_crash": "Phase 4 is single-machine (docs/phase4_distributed_worker_decision.md); no distributed worker exists, so node-level loss was not executed.",
+    "distributed_node_restart": "No multi-node deployment exists; only single-machine process restart ran.",
+    "real_queue_it_recovery": "No authorised staging configuration; every scenario used a local simulator."
+  },
+  "observability": {
+    "metrics_series": 242,
+    "label_names": [
+      "bucket",
+      "le",
+      "operation"
+    ],
+    "forbidden_labels_present": [],
+    "queue_ids_in_exposition": false,
+    "session_ids_in_exposition": false,
+    "transfer_urls_in_exposition": false,
+    "status_rows": {
+      "Mode": "HYBRID",
+      "Target Queue IDs": "10000",
+      "Queue IDs acquired": "9860",
+      "Remaining": "140",
+      "Creating": "0",
+      "Pre-queue": "2367",
+      "Active queue": "3627",
+      "Parked": "1108",
+      "Serviced soon": "2368",
+      "Turn started": "0",
+      "Ready": "0",
+      "Admitted": "200",
+      "Expired": "100",
+      "Failed": "140",
+      "Connection lost": "90",
+      "Lost Queue IDs": "40",
+      "Persisted sessions": "10000",
+      "Active contexts": "0",
+      "Chrome processes": "2",
+      "Workers (monitor/create)": "20/10",
+      "Checks/sec": "12.50",
+      "Creation rate": "0.00/s",
+      "Queue depth": "0",
+      "Due backlog": "0",
+      "Oldest overdue age": "0.0s",
+      "Average check duration": "1.572s",
+      "Leases active/expired": "200/0",
+      "Restore failures": "678",
+      "State refresh failures": "32",
+      "Identity mismatches": "20",
+      "Browser crashes": "5",
+      "Navigation timeouts": "60",
+      "Lease recoveries": "0",
+      "Repository errors": "146",
+      "Progress buckets": "unknown=2427 0-10=680 10-25=1068 25-50=1771 50-75=1777 75-90=1059 90-100=778"
+    },
+    "log": {
+      "lines": 16496,
+      "bytes": 4966059,
+      "transfer_urls_present": false,
+      "lines_with_session_id": 10798,
+      "lines_with_run_id": 16496,
+      "events": {
+        "browser_context_created": 5603,
+        "session_restore_completed": 5348,
+        "queue_check_completed": 5168,
+        "expired_leases_recovered": 74,
+        "queue_check_failed": 70,
+        "monitoring_worker_failed": 70,
+        "monitoring_repark_failed": 70,
+        "monitoring_lease_release_failed": 70,
+        "monitoring_schedule_failed": 6,
+        "browser_process_restarting": 5,
+        "browser_process_restarted": 5,
+        "browser_manager_started": 2
+      }
+    }
+  },
+  "seed_seconds": 1.485,
+  "total_seconds": 563.388,
+  "summary": {
+    "PASS": 15
+  }
+}

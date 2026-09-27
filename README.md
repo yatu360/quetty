@@ -71,7 +71,19 @@ event logs.
 `ObservabilityHttpServer` exposes a compact text summary at `/status` and
 Prometheus exposition at `/metrics` on `PROMETHEUS_PORT` (default `9090`). The
 metrics use only aggregate values and bounded histogram buckets; Queue IDs and
-session IDs are never labels.
+session IDs are never labels. The only labels are the fixed `bucket` progress ranges,
+the fixed `operation` names on `repository_errors_total`, and histogram `le`, so the
+series count does not grow with the persisted population. `/metrics` keeps serving the
+last values (and counts a `status` repository error) while the database is unavailable.
+
+JSON log messages and field values have every absolute URL replaced with
+`<redacted-url>`, including third-party messages such as Playwright navigation errors.
+`configure_structured_logging(run_id=...)` adds a per-run correlation ID to every line.
+
+An importable Grafana dashboard for the Phase 4 metrics is in
+[`docs/dashboards/queue_load_test_phase4.json`](docs/dashboards/queue_load_test_phase4.json).
+The project does not ship a Grafana or Prometheus deployment; point an existing
+Prometheus at `/metrics` and import the file, or read `/status` directly.
 
 ## Test
 
@@ -124,6 +136,9 @@ controlled evidence and the staging assumptions that remain unknown.
 - `MAX_ACTIVE_CONTEXTS=50`
 - `CREATION_WORKERS=1`
 - `CREATION_QUEUE_CAPACITY=5`
+- `IDENTITY_REPLACEMENT_LIMIT=0` — acquired Queue IDs that later become `FAILED` (for
+  example after an identity mismatch) are not refilled with new identities beyond this
+  many replacements; creation stops and sets `queue_identity_replacement_blocked`
 - `MONITOR_WORKERS=1`
 - `MONITOR_QUEUE_CAPACITY=5`
 - `MONITOR_CLAIM_BATCH_SIZE=5`
@@ -268,6 +283,18 @@ queue-load-test-phase4-monitoring --database phase4-monitoring-synthetic.sqlite3
 
 See [`docs/phase4_monitoring.md`](docs/phase4_monitoring.md) for measured local results
 and the real-staging UNKNOWN boundary.
+
+The Phase 4 controlled recovery harness runs 15 failure scenarios over a 10,000-session
+population using real SQLite, real state files, `SIGKILL`-ed worker and Chrome processes,
+and installed Chrome driven against a **local** Queue-it-like simulator. It sends no
+staging traffic and needs the `benchmark` extra (`psutil`):
+
+```powershell
+queue-load-test-phase4-recovery --report phase4-recovery-benchmark.json
+```
+
+See [`docs/phase4_recovery.md`](docs/phase4_recovery.md) for the measured outcomes and
+the boundary between local evidence and real Queue-it recovery, which remains UNKNOWN.
 
 Normal runtime startup uses one aggregate SQLite recovery query and does not scan all
 state files. Missing/corrupt state counts require the explicit state consistency scan.

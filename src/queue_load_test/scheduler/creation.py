@@ -1,6 +1,7 @@
 """Bounded Queue-it session creation and target acquisition."""
 
 import asyncio
+import contextlib
 import logging
 import random
 import time
@@ -135,6 +136,9 @@ class CreationMetrics:
     maximum_queue_depth: int = 0
     total_creation_duration_seconds: float = 0.0
     elapsed_seconds: float = 0.0
+    lost_queue_ids: int = 0
+    effective_target: int = 0
+    replacement_blocked: bool = False
     worker_completed: dict[int, int] = field(default_factory=dict)
     worker_successes: dict[int, int] = field(default_factory=dict)
     worker_failures: dict[int, int] = field(default_factory=dict)
@@ -183,6 +187,9 @@ class QueueSessionCreator:
         self._sleep = sleep
         self._jitter = jitter
         self._observability = observability
+        self._attempt_timeout_seconds = (
+            navigation_timeout_ms / 1_000 + live_page_timeout_seconds + 10.0
+        )
 
     async def create(self, work_item: CreationWorkItem) -> CreationOutcome:
         outcome = await self._create(work_item)
@@ -219,7 +226,10 @@ class QueueSessionCreator:
                 attempt=attempt,
             )
             try:
-                return await self._attempt(work_item, attempt, started, temporary_failures)
+                # A Playwright call can stay pending forever when Chrome dies mid-call;
+                # the builtin TimeoutError is an OSError and is retried as transient.
+                async with asyncio.timeout(self._attempt_timeout_seconds):
+                    return await self._attempt(work_item, attempt, started, temporary_failures)
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()
@@ -315,6 +325,12 @@ class QueueSessionCreator:
                     if self._observability is not None:
                         self._observability.record_state_persistence_failure()
                     raise TransientCreationError("state_persistence_failed") from exc
+                except asyncio.CancelledError:
+                    # The write completed before cancellation propagated; no session
+                    # row references it yet, so remove it instead of orphaning it.
+                    with contextlib.suppress(Exception):
+                        await self._state_store.delete(work_item.session_id)
+                    raise
                 state_saved = True
 
             observed_at = datetime.now(UTC)
@@ -348,7 +364,9 @@ class QueueSessionCreator:
                     failure_code="duplicate_queue_id",
                 )
             except BaseException:
-                if state_saved:
+                # A cancelled create may still have committed in its worker thread.
+                # Deleting that session's state would strand a valid identity.
+                if state_saved and not await self._session_committed(work_item.session_id):
                     await self._state_store.delete(work_item.session_id)
                 raise
             return CreationOutcome(
@@ -359,6 +377,14 @@ class QueueSessionCreator:
                 session=session,
                 progress=progress,
             )
+
+    async def _session_committed(self, session_id: str) -> bool:
+        """Return whether the session row exists; assume it does when unknowable."""
+
+        try:
+            return await self._repository.get(session_id) is not None
+        except Exception:  # noqa: BLE001 - keep state rather than risk stranding it
+            return True
 
     async def _wait_for_live_queue(
         self,
@@ -419,7 +445,10 @@ class SessionCreationController:
         worker_count: int,
         queue_capacity: int | None = None,
         observability: PrometheusMetrics | None = None,
+        identity_replacement_limit: int | None = None,
     ) -> None:
+        if identity_replacement_limit is not None and identity_replacement_limit < 0:
+            raise ValueError("identity_replacement_limit cannot be negative")
         if target_queue_ids < 1:
             raise ValueError("target_queue_ids must be at least 1")
         if worker_count < 1:
@@ -431,6 +460,7 @@ class SessionCreationController:
         self._target = target_queue_ids
         self._worker_count = worker_count
         self._queue_capacity = queue_capacity or worker_count
+        self._identity_replacement_limit = identity_replacement_limit
         self.metrics = CreationMetrics()
         self._observability = observability
         if observability is not None:
@@ -452,6 +482,7 @@ class SessionCreationController:
             worker_count=settings.creation_workers,
             queue_capacity=settings.creation_queue_capacity,
             observability=observability,
+            identity_replacement_limit=settings.identity_replacement_limit,
         )
 
     async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
@@ -475,12 +506,13 @@ class SessionCreationController:
             existing = await self._repository.count_successful_queue_ids()
             self.metrics.initial_successful_unique_ids = existing
             self.metrics.successful_unique_ids = existing
+            target = await self._effective_target()
             self._set_creation_activity(work_queue)
             while not (stop_event is not None and stop_event.is_set()):
-                while self.metrics.successful_unique_ids < self._target and not (
+                while self.metrics.successful_unique_ids < target and not (
                     stop_event is not None and stop_event.is_set()
                 ):
-                    deficit = self._target - self.metrics.successful_unique_ids
+                    deficit = target - self.metrics.successful_unique_ids
                     desired_in_flight = min(self._worker_count, deficit)
                     while in_flight < desired_in_flight:
                         sequence += 1
@@ -503,7 +535,8 @@ class SessionCreationController:
                 self.metrics.successful_unique_ids = (
                     await self._repository.count_successful_queue_ids()
                 )
-                if self.metrics.successful_unique_ids >= self._target or (
+                target = await self._effective_target()
+                if self.metrics.successful_unique_ids >= target or (
                     stop_event is not None and stop_event.is_set()
                 ):
                     break
@@ -533,6 +566,38 @@ class SessionCreationController:
                     self.metrics.sessions_created_per_second
                 )
         return self.metrics
+
+    async def _effective_target(self) -> int:
+        """Return how many valid IDs may be pursued without mass identity replacement.
+
+        A Queue ID that later becomes FAILED (for example after an identity
+        mismatch) no longer counts as valid. Without a limit, the deficit would be
+        refilled with brand-new identities; a systemic fault could then replace a
+        large part of the population. Replacements are capped by
+        ``identity_replacement_limit``; ``None`` keeps the uncapped behavior.
+        """
+
+        if self._identity_replacement_limit is None:
+            self.metrics.effective_target = self._target
+            return self._target
+        lost = await self._repository.count_lost_queue_ids()
+        effective = min(self._target, self._target + self._identity_replacement_limit - lost)
+        blocked = effective < self._target
+        if blocked and not self.metrics.replacement_blocked:
+            log_event(
+                logger,
+                logging.ERROR,
+                "identity_replacement_limit_reached",
+                lost_queue_ids=lost,
+                count=self._identity_replacement_limit,
+                valid_queue_ids=self.metrics.successful_unique_ids,
+            )
+        self.metrics.lost_queue_ids = lost
+        self.metrics.effective_target = effective
+        self.metrics.replacement_blocked = blocked
+        if self._observability is not None:
+            self._observability.set_identity_replacement_blocked(blocked)
+        return effective
 
     async def _worker(
         self,

@@ -2543,3 +2543,102 @@ Phase 4 Prompt 7 — Scale Resilience, Recovery, and Observability
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: Phase 4 monitoring harness, tests, aggregate result, and project records
+
+## 2026-09-27 — Phase 4 Prompt 7 — Scale Resilience, Recovery, and Observability
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Validate resilience and observability at a 10,000-session persisted population without
+silently destroying or replacing Queue-it identities, and measure recovery behavior.
+
+### Changes Made
+
+- Added `queue-load-test-phase4-recovery`, which runs 15 controlled scenarios against a
+  10,000-session population. It uses real SQLite and state files, SIGKILLs Chrome and
+  worker processes, and drives installed Chrome against a new `LocalQueueSimulator`.
+  There is no staging traffic.
+- Fixed hung Playwright calls after a Chrome kill (`new_page` never settled). Restore and
+  creation attempts and BrowserManager context creation, close, and restart are now
+  deadline-bounded. Added `browser_operation_timeouts_total`.
+- Fixed a forced-shutdown BrowserContext capacity leak. `close_context` now releases
+  capacity synchronously and shields and bounds the Chrome close.
+- Added `STATE_UNAVAILABLE` (retryable). An unreadable state file no longer fails an
+  identity permanently.
+- A verified observation whose state refresh failed is now kept, with no storage
+  fallback and no monitor retry. It is counted separately.
+- SQLite operations and state saves now finish their thread work before propagating
+  cancellation. Creation cleanup no longer deletes the state of a committed session.
+- The SQLite repository now reconnects after connection interruption. The scheduler loop
+  backs off through repository errors. Queued-lease release and runtime shutdown steps
+  are isolated.
+- Added `IDENTITY_REPLACEMENT_LIMIT` (default 0) and lost-identity accounting. This
+  prevents mass replacement of identities that fail after acquisition.
+- Lease recovery is now owner-aware (`ClaimedSessions`): takeovers from a stopped owner
+  are distinct from a scheduler re-claiming its own expired lease.
+- Added low-cardinality Prometheus metrics, fixed progress buckets, an extended
+  `/status`, a Grafana dashboard definition, and URL-redacted JSON logs with `run_id`.
+- Added bulk `create_many` for seeding and startup recovery timing in `ApplicationRuntime`.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase4_recovery.py`
+- `src/queue_load_test/harness/local_queue_simulator.py`
+- `src/queue_load_test/utils/asyncio_tools.py`
+- `tests/unit/test_phase4_resilience.py`
+- `tests/unit/test_phase4_recovery.py`
+- `docs/phase4_recovery.md`
+- `docs/results/phase4_recovery_result.json`
+- `docs/dashboards/queue_load_test_phase4.json`
+
+### Files Modified
+
+- `.env.example`, `.gitignore`, `pyproject.toml`, `README.md`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+- `src/queue_load_test/config.py`, `runtime.py`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/metrics/logging.py`, `prometheus.py`, `status.py`, `__init__.py`
+- `src/queue_load_test/repository/base.py`, `sqlite.py`, `__init__.py`
+- `src/queue_load_test/scheduler/creation.py`, `monitoring.py`
+- `src/queue_load_test/state/filesystem.py`
+- `src/queue_load_test/transfer/restoration.py`
+- `tests/unit/test_browser_manager.py`, `test_observability.py`, `test_restoration.py`
+
+### Tests Run
+
+- Baseline `python -m pytest -q` before changes: 327 passed, 4 deselected.
+- Final `python -m pytest -q`: 364 passed, 4 gated staging tests deselected in 30.16 s.
+- `python -m ruff check src tests`: passed. `python -m mypy src`: no issues in 55 files.
+- Controlled recovery harness at 1,000 sessions (debugging) and at 10,000 sessions
+  (reported): 15/15 PASS in 563.4 s.
+
+### Staging Tests
+
+- NOT RUN. No authorised staging configuration exists. Every scenario used the local
+  simulator, so real Queue-it recovery remains UNKNOWN.
+
+### Important Decisions
+
+- Single-machine deployment retained; distributed worker/node scenarios are UNKNOWN,
+  not simulated.
+- No Grafana/Prometheus stack added; only a dashboard definition file.
+- Replacement of lost identities requires explicit operator opt-in.
+
+### Known Issues
+
+- Real Queue-it restore, crash, and mismatch behavior is UNKNOWN.
+- Hard-kill recovery is bounded by lease expiry (default 120 s).
+- A HYBRID navigation failure reports `STATE_CONTEXT_FAILED` after the fallback fails.
+- The rare deadline-during-commit retry reuses `session_id` and fails observably.
+
+### Follow-Up
+
+Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`

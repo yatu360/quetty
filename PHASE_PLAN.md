@@ -375,7 +375,7 @@ Planned prompt breakdown:
 
 ## Phase 4 — 10,000 Sessions
 
-**Status: Prompts 1–6 implemented; 10,000-session staging acquisition and monitoring
+**Status: Prompts 1–7 implemented; 10,000-session staging acquisition and monitoring
 NOT RUN.**
 
 Target: `TARGET_QUEUE_IDS=10000` with browser capacity remaining explicitly bounded.
@@ -443,10 +443,18 @@ Planned prompt breakdown:
    oldest-overdue age, and ended at zero. Process CPU averaged/peaked at 59.00/81.8%
    and RSS at 68.08/76.54 MB. Browser restore, identity, navigation, Chrome resources,
    and sustainable live cadence remain UNKNOWN. See `docs/phase4_monitoring.md`.
-7. **Scale resilience, recovery, and observability (next)** — exercise lease expiry, process/node
-   loss, restart, state-store faults, and identity preservation.
-8. **Production observability and Phase 4 acceptance** — finalize dashboards/alerts and
-   produce the full PASS/FAIL/UNKNOWN scale report.
+7. **Phase 4 Prompt 7 — Scale resilience, recovery, and observability** — **completed
+   locally on 2026-09-27; Queue-it recovery NOT RUN.** 15 controlled scenarios over
+   10,000 persisted sessions (real SQLite/state, SIGKILLed Chrome and worker processes,
+   installed Chrome against a local simulator) all PASS as local evidence; distributed
+   node loss and real Queue-it recovery are UNKNOWN. Six defects were fixed (hung
+   Playwright calls, forced-shutdown context leak, transient state errors failing
+   identities, redundant fallback navigation, cancellation-unsafe writes, scheduler
+   death on database errors) and a mass-replacement guard was added. Low-cardinality
+   metrics, a Grafana dashboard definition, and URL-redacted logs were added. See
+   `docs/phase4_recovery.md`.
+8. **Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report (next)** — produce the
+   full PASS/FAIL/UNKNOWN scale report.
 
 ## Scaling Gates
 

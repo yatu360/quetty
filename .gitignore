@@ -175,6 +175,8 @@ phase4-acquisition-benchmark*.json
 phase4-acquisition-preflight*.json
 phase4-monitoring-benchmark*.json
 phase4-monitoring-synthetic*.sqlite3
+phase4-recovery-benchmark*.json
+phase4-recovery-run*/
 .phase2-concurrency-runs/
 .venv
 env/

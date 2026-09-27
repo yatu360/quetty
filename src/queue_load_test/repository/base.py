@@ -1,6 +1,7 @@
 """Persistence boundary for queue sessions."""
 
 import builtins
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -22,6 +23,41 @@ class QueueIdConflictError(RepositoryError):
 
 class LeaseOwnershipError(RepositoryError):
     """Raised when stale leased work attempts to overwrite a newer owner."""
+
+
+class ClaimedSessions(list[QueueSession]):
+    """Claimed sessions plus how many of them were taken over from expired leases.
+
+    It is still a ``list`` so existing callers are unaffected. A recovered lease
+    means the previous owner stopped without releasing it (crash, kill, or a
+    shutdown that could not reach the database).
+    """
+
+    recovered_expired_leases: int
+    reclaimed_own_expired_leases: int
+
+    def __init__(
+        self,
+        sessions: Iterable[QueueSession] = (),
+        *,
+        recovered_expired_leases: int = 0,
+        reclaimed_own_expired_leases: int = 0,
+    ) -> None:
+        super().__init__(sessions)
+        self.recovered_expired_leases = recovered_expired_leases
+        self.reclaimed_own_expired_leases = reclaimed_own_expired_leases
+
+
+PROGRESS_BUCKETS: tuple[str, ...] = (
+    "unknown",
+    "0-10",
+    "10-25",
+    "25-50",
+    "50-75",
+    "75-90",
+    "90-100",
+)
+"""Fixed progress-percentage buckets; the set never grows with the population."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +88,8 @@ class RecoverySummary:
     status_counts: dict[QueueStatus, int]
     missing_state_files: int | None = None
     corrupt_state_files: int | None = None
+    lost_queue_ids: int = 0
+    """Distinct Queue IDs whose sessions later became FAILED (not counted as valid)."""
 
     @property
     def state_scan_performed(self) -> bool:
@@ -82,6 +120,10 @@ class SessionRepository(Protocol):
     ) -> builtins.list[QueueSession]: ...
 
     async def count_successful_queue_ids(self) -> int: ...
+
+    async def count_lost_queue_ids(self) -> int: ...
+
+    async def progress_distribution(self) -> dict[str, int]: ...
 
     async def recovery_summary(self, *, now: datetime) -> RecoverySummary: ...
 

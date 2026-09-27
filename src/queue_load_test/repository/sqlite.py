@@ -3,7 +3,7 @@
 import asyncio
 import builtins
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
@@ -16,12 +16,15 @@ from queue_load_test.models import (
     validate_transition,
 )
 from queue_load_test.repository.base import (
+    PROGRESS_BUCKETS,
+    ClaimedSessions,
     DueSessionSummary,
     LeaseOwnershipError,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
 )
+from queue_load_test.utils.asyncio_tools import run_to_completion
 
 _T = TypeVar("_T")
 
@@ -82,6 +85,29 @@ CREATE TABLE IF NOT EXISTS queue_progress (
     manual_update_warning TEXT
 );
 """
+
+
+def _is_connection_interruption(exc: sqlite3.Error) -> bool:
+    """Classify errors after which the cached connection should not be reused.
+
+    Constraint violations and lock contention leave the connection healthy.
+    A closed handle, I/O failure, or unopenable file does not.
+    """
+
+    if isinstance(exc, sqlite3.IntegrityError):
+        return False
+    if isinstance(exc, sqlite3.ProgrammingError):
+        return True
+    message = str(exc).casefold()
+    if "locked" in message or "busy" in message:
+        return False
+    return isinstance(exc, sqlite3.OperationalError | sqlite3.DatabaseError)
+
+
+def _progress_bucket_sql() -> str:
+    edges = ((10, "0-10"), (25, "10-25"), (50, "25-50"), (75, "50-75"), (90, "75-90"))
+    cases = " ".join(f"WHEN p.progress_percentage < {edge} THEN '{label}'" for edge, label in edges)
+    return f"CASE WHEN p.progress_percentage IS NULL THEN 'unknown' {cases} ELSE '90-100' END"
 
 
 def _database_path(database: str | Path) -> str:
@@ -237,6 +263,7 @@ class SQLiteSessionRepository:
         self._database = _database_path(database)
         self._connection: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
+        self._reconnects = 0
 
     async def initialize(self) -> None:
         """Create the database schema if needed."""
@@ -286,9 +313,39 @@ class SQLiteSessionRepository:
     def _initialize(self) -> None:
         self._connect()
 
+    @property
+    def reconnects(self) -> int:
+        """Connections discarded after an interruption and reopened on demand."""
+
+        return self._reconnects
+
     async def _run(self, operation: Callable[[], _T]) -> _T:
         async with self._lock:
-            return await asyncio.to_thread(operation)
+            try:
+                # Holding the lock until the thread finishes keeps the shared
+                # connection serialized even during a forced (cancelling) shutdown.
+                return await run_to_completion(asyncio.ensure_future(asyncio.to_thread(operation)))
+            except sqlite3.Error as exc:
+                if _is_connection_interruption(exc):
+                    await asyncio.to_thread(self._discard_connection)
+                raise
+
+    def _discard_connection(self) -> None:
+        """Drop a broken connection so the next operation reconnects.
+
+        Nothing is committed here: SQLite rolls back an open transaction when
+        its connection closes, so partially applied claims cannot persist.
+        """
+
+        connection = self._connection
+        self._connection = None
+        if connection is None:
+            return
+        self._reconnects += 1
+        try:
+            connection.close()
+        except sqlite3.Error:
+            pass
 
     async def create(
         self,
@@ -315,6 +372,38 @@ class SQLiteSessionRepository:
                     raise QueueIdConflictError("Queue ID already exists") from exc
                 raise
             return session
+
+        return await self._run(operation)
+
+    async def create_many(
+        self,
+        sessions: Iterable[tuple[QueueSession, QueueProgress | None]],
+    ) -> int:
+        """Insert many new sessions in one transaction (benchmark and import seeding)."""
+
+        rows = tuple(sessions)
+        for session, progress in rows:
+            if progress is not None and progress.session_id != session.session_id:
+                raise ValueError("Progress session_id must match the session")
+
+        def operation() -> int:
+            connection = self._connect()
+            try:
+                connection.executemany(
+                    f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (_session_values(session) for session, _ in rows),
+                )
+                for _, progress in rows:
+                    if progress is not None:
+                        _save_progress(connection, progress)
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                if "queue_sessions.queue_id" in str(exc):
+                    raise QueueIdConflictError("Queue ID already exists") from exc
+                raise
+            return len(rows)
 
         return await self._run(operation)
 
@@ -372,17 +461,19 @@ class SQLiteSessionRepository:
 
     async def get(self, session_id: str) -> QueueSession | None:
         def operation() -> QueueSession | None:
-            row = self._connect().execute(
-                f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
+            row = (
+                self._connect()
+                .execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                )
+                .fetchone()
+            )
             return _row_to_session(row) if row is not None else None
 
         return await self._run(operation)
 
-    async def list(
-        self, status: QueueStatus | None = None
-    ) -> builtins.list[QueueSession]:
+    async def list(self, status: QueueStatus | None = None) -> builtins.list[QueueSession]:
         def operation() -> builtins.list[QueueSession]:
             connection = self._connect()
             if status is None:
@@ -402,15 +493,64 @@ class SQLiteSessionRepository:
 
     async def count_successful_queue_ids(self) -> int:
         def operation() -> int:
-            row = self._connect().execute(
-                """
+            row = (
+                self._connect()
+                .execute(
+                    """
                 SELECT COUNT(DISTINCT queue_id) AS total
                 FROM queue_sessions
                 WHERE queue_id IS NOT NULL AND status != ?
                 """,
-                (QueueStatus.FAILED.value,),
-            ).fetchone()
+                    (QueueStatus.FAILED.value,),
+                )
+                .fetchone()
+            )
             return int(row["total"])
+
+        return await self._run(operation)
+
+    async def count_lost_queue_ids(self) -> int:
+        """Count acquired identities that are no longer valid because they FAILED."""
+
+        def operation() -> int:
+            row = (
+                self._connect()
+                .execute(
+                    """
+                SELECT COUNT(DISTINCT queue_id) AS total
+                FROM queue_sessions
+                WHERE queue_id IS NOT NULL AND status = ?
+                """,
+                    (QueueStatus.FAILED.value,),
+                )
+                .fetchone()
+            )
+            return int(row["total"])
+
+        return await self._run(operation)
+
+    async def progress_distribution(self) -> dict[str, int]:
+        """Bucket last observed progress of non-terminal sessions into fixed ranges."""
+
+        def operation() -> dict[str, int]:
+            rows = (
+                self._connect()
+                .execute(
+                    f"""
+                SELECT {_progress_bucket_sql()} AS bucket, COUNT(*) AS total
+                FROM queue_sessions AS s
+                LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
+                WHERE s.queue_id IS NOT NULL
+                  AND s.status NOT IN ('ADMITTED', 'EXPIRED', 'FAILED')
+                GROUP BY bucket
+                """
+                )
+                .fetchall()
+            )
+            counts = dict.fromkeys(PROGRESS_BUCKETS, 0)
+            for row in rows:
+                counts[str(row["bucket"])] = int(row["total"])
+            return counts
 
         return await self._run(operation)
 
@@ -432,13 +572,18 @@ class SQLiteSessionRepository:
         )
 
         def operation() -> RecoverySummary:
-            row = self._connect().execute(
-                f"""
+            row = (
+                self._connect()
+                .execute(
+                    f"""
                 SELECT
                     COUNT(*) AS total_persisted_sessions,
                     COUNT(DISTINCT CASE
                         WHEN queue_id IS NOT NULL AND status != ? THEN queue_id
                     END) AS valid_queue_ids,
+                    COUNT(DISTINCT CASE
+                        WHEN queue_id IS NOT NULL AND status = ? THEN queue_id
+                    END) AS lost_queue_ids,
                     SUM(CASE WHEN lease_until > ? THEN 1 ELSE 0 END) AS leased_sessions,
                     SUM(CASE WHEN lease_until IS NOT NULL AND lease_until <= ? THEN 1 ELSE 0 END)
                         AS expired_leases,
@@ -456,19 +601,21 @@ class SQLiteSessionRepository:
                     {status_columns}
                 FROM queue_sessions
                 """,
-                (
-                    QueueStatus.FAILED.value,
-                    now_storage,
-                    now_storage,
-                    now_storage,
-                    now_storage,
-                    *terminal_statuses,
-                    *terminal_statuses,
-                ),
-            ).fetchone()
+                    (
+                        QueueStatus.FAILED.value,
+                        QueueStatus.FAILED.value,
+                        now_storage,
+                        now_storage,
+                        now_storage,
+                        now_storage,
+                        *terminal_statuses,
+                        *terminal_statuses,
+                    ),
+                )
+                .fetchone()
+            )
             status_counts = {
-                status: int(row[f"status_{status.value.lower()}"] or 0)
-                for status in QueueStatus
+                status: int(row[f"status_{status.value.lower()}"] or 0) for status in QueueStatus
             }
             return RecoverySummary(
                 generated_at=now,
@@ -480,6 +627,7 @@ class SQLiteSessionRepository:
                 sessions_requiring_retry=int(row["sessions_requiring_retry"] or 0),
                 terminal_sessions=int(row["terminal_sessions"] or 0),
                 status_counts=status_counts,
+                lost_queue_ids=int(row["lost_queue_ids"] or 0),
             )
 
         return await self._run(operation)
@@ -501,10 +649,14 @@ class SQLiteSessionRepository:
 
     async def get_progress(self, session_id: str) -> QueueProgress | None:
         def operation() -> QueueProgress | None:
-            row = self._connect().execute(
-                "SELECT * FROM queue_progress WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
+            row = (
+                self._connect()
+                .execute(
+                    "SELECT * FROM queue_progress WHERE session_id = ?",
+                    (session_id,),
+                )
+                .fetchone()
+            )
             return _row_to_progress(row) if row is not None else None
 
         return await self._run(operation)
@@ -522,14 +674,18 @@ class SQLiteSessionRepository:
             raise ValueError("now is required")
 
         def operation() -> DueSessionSummary:
-            row = self._connect().execute(
-                f"""
+            row = (
+                self._connect()
+                .execute(
+                    f"""
                 SELECT COUNT(*) AS total, MIN({_DUE_TIME_SQL}) AS oldest_due_at
                 FROM queue_sessions
                 WHERE {_DUE_FILTER_SQL}
                 """,
-                (now_storage, now_storage),
-            ).fetchone()
+                    (now_storage, now_storage),
+                )
+                .fetchone()
+            )
             oldest = row["oldest_due_at"]
             return DueSessionSummary(
                 count=int(row["total"]),
@@ -557,7 +713,7 @@ class SQLiteSessionRepository:
         if lease_storage <= now_storage:
             raise ValueError("lease_until must be later than now")
 
-        def operation() -> builtins.list[QueueSession]:
+        def operation() -> ClaimedSessions:
             connection = self._connect()
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -572,6 +728,13 @@ class SQLiteSessionRepository:
                     (now_storage, now_storage, limit),
                 ).fetchall()
                 session_ids = [row["session_id"] for row in rows]
+                # A due row that still carries a lease can only have been selected
+                # because that lease expired: its previous owner never released it.
+                # A claimer renewing its own lease (a slow local check) is not a
+                # recovery from a stopped owner.
+                expired = [row["worker_id"] for row in rows if row["lease_until"] is not None]
+                recovered = sum(owner != worker_id for owner in expired)
+                reclaimed_own = len(expired) - recovered
                 if session_ids:
                     placeholders = ", ".join("?" for _ in session_ids)
                     connection.execute(
@@ -589,7 +752,11 @@ class SQLiteSessionRepository:
             except Exception:
                 connection.rollback()
                 raise
-            return [_row_to_session(row) for row in rows]
+            return ClaimedSessions(
+                (_row_to_session(row) for row in rows),
+                recovered_expired_leases=recovered,
+                reclaimed_own_expired_leases=reclaimed_own,
+            )
 
         return await self._run(operation)
 
@@ -608,8 +775,10 @@ class SQLiteSessionRepository:
             raise ValueError("now is required")
 
         def operation() -> tuple[str, ...]:
-            rows = self._connect().execute(
-                f"""
+            rows = (
+                self._connect()
+                .execute(
+                    f"""
                 EXPLAIN QUERY PLAN
                 SELECT session_id
                 FROM queue_sessions
@@ -617,8 +786,10 @@ class SQLiteSessionRepository:
                 ORDER BY {_DUE_ORDER_SQL}
                 LIMIT ?
                 """,
-                (now_storage, now_storage, limit),
-            ).fetchall()
+                    (now_storage, now_storage, limit),
+                )
+                .fetchall()
+            )
             return tuple(str(row["detail"]) for row in rows)
 
         return await self._run(operation)

@@ -9,10 +9,26 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: Phase 4; Prompts 1–6 are implemented. Both the authorised 10,000-ID
-  acquisition and browser-backed 10,000-session monitoring run are **NOT RUN**.
-- Last completed work: the bounded 10,000-row monitoring/backlog harness and measured
-  local report, `docs/phase4_monitoring.md`.
+- Current phase: Phase 4; Prompts 1–7 are implemented. Both the authorised 10,000-ID
+  acquisition and browser-backed 10,000-session Queue-it monitoring run are **NOT RUN**.
+- Last completed work: Phase 4 Prompt 7 scale resilience, recovery, and observability,
+  `docs/phase4_recovery.md` and `docs/results/phase4_recovery_result.json`.
+- Phase 4 recovery: 15 controlled scenarios over 10,000 persisted sessions **all PASS as
+  local evidence** (real SQLite/state files, SIGKILLed Chrome and worker processes,
+  installed Chrome against a local simulator, no staging traffic). Distributed
+  worker/node loss and real Queue-it recovery are **UNKNOWN**. Queue IDs were unchanged,
+  only the 40 deliberate permanent failures became FAILED, no replacements were created,
+  and no context, Chrome process, or scheduler lease leaked after any shutdown.
+- Recovery measurements (local host): startup summary p95 6.9 ms, first claim p95 7.4
+  ms, Chrome restart p50/max 1.16/1.53 s, 4,934 resumed browser checks at 12.5 checks/s,
+  killed-worker leases recovered 10.16 s after kill with a 10 s lease, database outage
+  resume 0.109 s.
+- Prompt 7 fixed six real defects: hung Playwright calls after a Chrome kill (now
+  deadline-bounded), a context-capacity leak on forced shutdown, transient state I/O
+  errors becoming permanent FAILED identities, a refresh failure triggering redundant
+  fallback navigation, cancellation-unsafe SQLite/state writes, and a scheduler/shutdown
+  that stopped on database errors. `IDENTITY_REPLACEMENT_LIMIT` (default 0) now blocks
+  mass replacement of identities that fail after acquisition.
 - Acceptance result: **20 PASS, 1 FAIL, 11 UNKNOWN**. Local configuration,
   bounded-concurrency, SQLite query/lease/scheduler, state storage, restart recovery,
   and short installed-Chrome capacity mechanisms are supported by evidence. No Phase 3
@@ -69,9 +85,9 @@ live monitoring.
   25 contexts per process, 50 globally, and 10 creation workers/queue slots, and emits
   aggregate JSON with post-run identity count, context, lease, and state-consistency
   verification. Transfer URLs and Queue IDs are absent from the report.
-- Next planned work: **Phase 4 Prompt 7 — Scale Resilience, Recovery, and
-  Observability**. A real Queue-it monitoring sweep remains blocked until an authorised
-  10,000-session population exists.
+- Next planned work: **Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report**. A
+  real Queue-it monitoring sweep remains blocked until an authorised 10,000-session
+  population exists.
 
 Unresolved Phase 1 work is evidence collection, not additional scaling: run the opt-in
 10-session harness against the real authorised staging event through its timed states,
@@ -378,6 +394,16 @@ generated intervals.
 
 ## Observability
 
+- Phase 4 additions: target/valid/remaining/lost Queue ID gauges, gauges for every
+  lifecycle status, active/expired lease gauges, lease-recovery counter, checks/s and
+  average-check gauges, worker configuration gauges, `repository_errors_total{operation}`,
+  state-refresh failures, Chrome restart duration/failures/lost contexts, browser
+  operation timeouts, startup recovery gauges, replacement-blocked gauge, and a fixed
+  seven-range `queue_sessions_progress_bucket{bucket}` distribution. At 10,000 sessions
+  the exposition had 242 series with only `bucket`, `operation`, and `le` labels.
+  `docs/dashboards/queue_load_test_phase4.json` is an importable Grafana dashboard; no
+  metrics stack is deployed. JSON logs redact every absolute URL and carry `run_id`.
+
 - `JsonLogFormatter` emits timestamp, level, logger, message, and approved contextual
   fields (`session_id`, `queue_id`, status, worker/browser, attempt, restore method,
   duration, and error type). Transfer URLs are not approved log fields.
@@ -438,8 +464,10 @@ generated intervals.
   `python -m pytest -o addopts="" -m staging tests/staging`.
 - Marker: `staging` means an opt-in test that sends browser traffic to an authorised
   staging environment. The test also has a runtime environment-variable gate.
-- Latest result on 2026-09-27: `python -m pytest -q` reported **325 passed, 2 skipped,
-  and 4 gated staging tests deselected in 355.93 seconds**. The focused monitoring/
+- Latest result on 2026-09-27 (macOS): `python -m pytest -q` reported **364 passed and 4 gated staging
+  tests deselected in 30.16 seconds**, including the checked-in recovery result audit.
+  Ruff and strict mypy pass. The earlier Windows run reported 325 passed, 2 skipped,
+  and 4 gated staging tests deselected in 355.93 seconds. The focused monitoring/
   repository/metrics suite reported 47 passed in 58.18 seconds; its 10,000-row test was
   included. Ruff and strict mypy pass for 52 source files.
 
@@ -630,6 +658,11 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase4_monitoring.md` and `docs/results/phase4_monitoring_result.json` — local
   10,000-row deliberate/adaptive scheduler measurements and the browser/staging UNKNOWN
   boundary.
+- `docs/phase4_recovery.md` and `docs/results/phase4_recovery_result.json` — 15
+  controlled 10,000-session recovery scenarios, defects fixed, measurements, and
+  UNKNOWN boundary; `src/queue_load_test/harness/phase4_recovery.py` and
+  `local_queue_simulator.py` are the harness and local page server.
+- `docs/dashboards/queue_load_test_phase4.json` — Grafana dashboard definition.
 - `src/queue_load_test/capacity.py` — pure theoretical-rate and observed-rate projection
   calculations with explicit utilization assumptions.
 - `benchmarks/phase2-concurrency-matrix.example.json` — explicit repeatable ten-case matrix.
@@ -771,6 +804,13 @@ Local synthetic Phase 4 10,000-session monitoring benchmark (dedicated empty dat
 queue-load-test-phase4-monitoring --database phase4-monitoring-synthetic.sqlite3 --report phase4-monitoring-benchmark.json --population 10000 --workers 20 --queue-capacity 50 --batch-size 50 --sweeps 2 --check-delay-seconds 0.001 --sample-interval-seconds 1
 ```
 
+Local controlled Phase 4 recovery scenarios (installed Chrome + local simulator; needs
+the `benchmark` extra):
+
+```powershell
+queue-load-test-phase4-recovery --report phase4-recovery-benchmark.json
+```
+
 Read-only state consistency report for an existing database:
 
 ```powershell
@@ -792,9 +832,9 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 4 Prompt 7 — Scale Resilience, Recovery, and Observability.** Preserve the
-bounded single-machine deployment and retain real Queue-it outcomes as UNKNOWN until
-an authorised population is actually exercised.
+**Phase 4 Prompt 8 — Final 10,000-Session Acceptance Report.** Consolidate Phase 4
+evidence into PASS/FAIL/UNKNOWN answers, preserve the single-machine deployment, and
+retain real Queue-it outcomes as UNKNOWN unless an authorised population is exercised.
 
 ## Instructions for Future AI Sessions
 

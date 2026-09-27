@@ -26,7 +26,12 @@ from queue_load_test.queue_monitor import (
     TerminalQueueState,
 )
 from queue_load_test.repository import SessionRepository
-from queue_load_test.state import BrowserState, StateStore, StateStoreError
+from queue_load_test.state import (
+    BrowserState,
+    StateStore,
+    StateStoreError,
+    StateUnreadableError,
+)
 from queue_load_test.transfer.extractor import (
     QueueItTransferExtractor,
     TransferExtractionResult,
@@ -57,6 +62,7 @@ class RestoreFailure(StrEnum):
     IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
     STATE_MISSING = "STATE_MISSING"
     STATE_CORRUPT = "STATE_CORRUPT"
+    STATE_UNAVAILABLE = "STATE_UNAVAILABLE"
     STATE_CONTEXT_FAILED = "STATE_CONTEXT_FAILED"
     STATE_REFRESH_FAILED = "STATE_REFRESH_FAILED"
     INVALID_TRANSFER_URL = "INVALID_TRANSFER_URL"
@@ -94,6 +100,12 @@ class SessionRestoreResult:
     admitted: bool = False
     expired: bool = False
     attempts: tuple[RestoreAttempt, ...] = ()
+
+
+def _is_restore_failure(attempt: RestoreAttempt) -> bool:
+    """A failed refresh after a verified restore is a storage fault, not a restore fault."""
+
+    return not attempt.success and attempt.failure is not RestoreFailure.STATE_REFRESH_FAILED
 
 
 class TransferExtractor(Protocol):
@@ -134,7 +146,10 @@ class QueueSessionRestorer:
         observation_interval_seconds: float = 0.25,
         sleep: Sleep = asyncio.sleep,
         observability: PrometheusMetrics | None = None,
+        attempt_timeout_seconds: float | None = None,
     ) -> None:
+        if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
+            raise ValueError("attempt_timeout_seconds must be positive")
         if navigation_timeout_ms <= 0:
             raise ValueError("navigation_timeout_ms must be positive")
         if observation_timeout_seconds < 0:
@@ -158,6 +173,14 @@ class QueueSessionRestorer:
         self._observation_interval_seconds = observation_interval_seconds
         self._sleep = sleep
         self._observability = observability
+        # Bound the whole attempt: some Playwright calls (for example new_page after
+        # the Chrome process is killed) never settle and have no timeout of their own.
+        self._attempt_timeout_seconds = attempt_timeout_seconds or (
+            navigation_timeout_ms / 1_000
+            + observation_timeout_seconds
+            + admission_wait_timeout_ms / 1_000
+            + 10.0
+        )
 
     @classmethod
     def from_settings(
@@ -215,11 +238,16 @@ class QueueSessionRestorer:
                     attempt.identity_match is False for attempt in result.attempts
                 ),
                 transfer_failures=sum(
-                    not attempt.success and attempt.method is RestoreMethod.TRANSFER
+                    _is_restore_failure(attempt) and attempt.method is RestoreMethod.TRANSFER
                     for attempt in result.attempts
                 ),
                 state_failures=sum(
-                    not attempt.success and attempt.method is RestoreMethod.STORAGE_STATE
+                    _is_restore_failure(attempt)
+                    and attempt.method is RestoreMethod.STORAGE_STATE
+                    for attempt in result.attempts
+                ),
+                state_refresh_failures=sum(
+                    attempt.failure is RestoreFailure.STATE_REFRESH_FAILED
                     for attempt in result.attempts
                 ),
             )
@@ -318,7 +346,14 @@ class QueueSessionRestorer:
             method=RestoreMethod.TRANSFER,
         )
         attempts.append(transfer_attempt)
-        if transfer_attempt.success or session.mode is SessionMode.TRANSFER_ONLY:
+        # A verified transfer whose only fault was saving refreshed state must not
+        # fall back: the identity was already observed, and a storage-state retry
+        # would add browser load while the state store is unavailable.
+        if (
+            transfer_attempt.success
+            or transfer_attempt.failure is RestoreFailure.STATE_REFRESH_FAILED
+            or session.mode is SessionMode.TRANSFER_ONLY
+        ):
             result = self._result(transfer_attempt, expected_queue_id, attempts)
             await self._record(session, result)
             return result
@@ -337,6 +372,14 @@ class QueueSessionRestorer:
     ) -> RestoreAttempt:
         try:
             state = await self._state_store.load(session.session_id)
+        except (StateUnreadableError, OSError):
+            # An I/O or permission interruption says nothing about the stored
+            # document, so it stays retryable rather than failing the identity.
+            return RestoreAttempt(
+                method=RestoreMethod.STORAGE_STATE,
+                success=False,
+                failure=RestoreFailure.STATE_UNAVAILABLE,
+            )
         except StateStoreError:
             return RestoreAttempt(
                 method=RestoreMethod.STORAGE_STATE,
@@ -363,6 +406,41 @@ class QueueSessionRestorer:
         method: RestoreMethod,
         storage_state: ContextStorageState | None = None,
         refresh_state: bool = True,
+    ) -> RestoreAttempt:
+        try:
+            async with asyncio.timeout(self._attempt_timeout_seconds):
+                return await self._unbounded_browser_attempt(
+                    session,
+                    method=method,
+                    storage_state=storage_state,
+                    refresh_state=refresh_state,
+                )
+        except TimeoutError:
+            if self._observability is not None:
+                self._observability.record_browser_operation_timeout()
+            log_event(
+                logger,
+                logging.WARNING,
+                "browser_attempt_timed_out",
+                session_id=session.session_id,
+                queue_id=session.queue_id,
+                restore_method=method.value,
+                duration=self._attempt_timeout_seconds,
+            )
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
+
+    async def _unbounded_browser_attempt(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod,
+        storage_state: ContextStorageState | None,
+        refresh_state: bool,
     ) -> RestoreAttempt:
         try:
             async with self._browser_manager.context(storage_state=storage_state) as context:

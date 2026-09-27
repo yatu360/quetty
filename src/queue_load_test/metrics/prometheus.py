@@ -8,8 +8,20 @@ from dataclasses import dataclass
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus
+from queue_load_test.repository import PROGRESS_BUCKETS, RecoverySummary
 
 _DURATION_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
+
+REPOSITORY_ERROR_OPERATIONS: tuple[str, ...] = (
+    "schedule",
+    "release",
+    "repark",
+    "status",
+    "other",
+)
+"""Fixed label values for repository errors; unknown operations collapse to ``other``."""
+
+FORBIDDEN_LABEL_NAMES = frozenset({"queue_id", "session_id", "transfer_url", "state_path"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +250,128 @@ class PrometheusMetrics:
             buckets=(0, 1, 10, 100, 1_000, 10_000, 100_000),
             registry=self.registry,
         )
+        self.queue_ids_valid = Gauge(
+            "queue_ids_valid",
+            "Persisted unique Queue IDs that currently count toward the target.",
+            registry=self.registry,
+        )
+        self.queue_ids_remaining = Gauge(
+            "queue_ids_remaining",
+            "Queue IDs still required to reach the configured target.",
+            registry=self.registry,
+        )
+        self.queue_ids_lost = Gauge(
+            "queue_ids_lost",
+            "Acquired Queue IDs whose sessions later became FAILED.",
+            registry=self.registry,
+        )
+        self.queue_sessions_persisted = Gauge(
+            "queue_sessions_persisted",
+            "All persisted session rows, including failed creation attempts.",
+            registry=self.registry,
+        )
+        self.queue_sessions_requiring_retry = Gauge(
+            "queue_sessions_requiring_retry",
+            "Non-terminal sessions with a recorded error or incomplete creation.",
+            registry=self.registry,
+        )
+        self.queue_identity_replacement_blocked = Gauge(
+            "queue_identity_replacement_blocked",
+            "1 when creation stopped because replacing lost identities hit its limit.",
+            registry=self.registry,
+        )
+        self.queue_sessions_progress_bucket = Gauge(
+            "queue_sessions_progress_bucket",
+            "Non-terminal persisted sessions by last observed progress range.",
+            ["bucket"],
+            registry=self.registry,
+        )
+        self.monitoring_leases_active = Gauge(
+            "monitoring_leases_active",
+            "Persisted sessions holding an unexpired monitoring lease.",
+            registry=self.registry,
+        )
+        self.monitoring_leases_expired = Gauge(
+            "monitoring_leases_expired",
+            "Persisted sessions whose lease expired without release.",
+            registry=self.registry,
+        )
+        self.monitoring_lease_recoveries_total = Counter(
+            "monitoring_lease_recoveries_total",
+            "Expired leases taken over by a new claim after the owner stopped.",
+            registry=self.registry,
+        )
+        self.monitoring_checks_per_second = Gauge(
+            "monitoring_checks_per_second",
+            "Average parked-session checks per second since process start.",
+            registry=self.registry,
+        )
+        self.monitoring_check_duration_average_seconds = Gauge(
+            "monitoring_check_duration_average_seconds",
+            "Average end-to-end check duration since process start.",
+            registry=self.registry,
+        )
+        self.monitoring_workers_configured = Gauge(
+            "monitoring_workers_configured",
+            "Fixed monitoring worker tasks in this single-machine process.",
+            registry=self.registry,
+        )
+        self.creation_workers_configured = Gauge(
+            "creation_workers_configured",
+            "Fixed creation worker tasks in this single-machine process.",
+            registry=self.registry,
+        )
+        self.repository_errors_total = Counter(
+            "repository_errors_total",
+            "Repository operations that raised, by fixed operation name.",
+            ["operation"],
+            registry=self.registry,
+        )
+        self.state_refresh_failures_total = Counter(
+            "state_refresh_failures_total",
+            "Verified observations whose HYBRID storage-state refresh could not be saved.",
+            registry=self.registry,
+        )
+        self.browser_restart_duration_seconds = Histogram(
+            "browser_restart_duration_seconds",
+            "Time to replace one disconnected Chrome process.",
+            buckets=_DURATION_BUCKETS,
+            registry=self.registry,
+        )
+        self.browser_restart_failures_total = Counter(
+            "browser_restart_failures_total",
+            "Chrome process replacements that failed to launch or install.",
+            registry=self.registry,
+        )
+        self.browser_operation_timeouts_total = Counter(
+            "browser_operation_timeouts_total",
+            "Browser attempts abandoned because a Playwright call exceeded its deadline.",
+            registry=self.registry,
+        )
+        self.browser_contexts_lost_total = Counter(
+            "browser_contexts_lost_total",
+            "BrowserContexts invalidated because their Chrome process disconnected.",
+            registry=self.registry,
+        )
+        self.startup_recovery_duration_seconds = Gauge(
+            "startup_recovery_duration_seconds",
+            "Duration of the aggregate startup recovery query.",
+            registry=self.registry,
+        )
+        self.startup_expired_leases = Gauge(
+            "startup_expired_leases",
+            "Expired leases found at startup and awaiting recovery.",
+            registry=self.registry,
+        )
+        self.startup_due_backlog = Gauge(
+            "startup_due_backlog",
+            "Claimable due sessions found at startup.",
+            registry=self.registry,
+        )
+        for operation in REPOSITORY_ERROR_OPERATIONS:
+            self.repository_errors_total.labels(operation=operation)
+        for bucket in PROGRESS_BUCKETS:
+            self.queue_sessions_progress_bucket.labels(bucket=bucket).set(0)
         self._session_gauges = self._create_session_gauges()
         self._started_at = time.monotonic()
         self._check_count = 0
@@ -247,10 +381,14 @@ class PrometheusMetrics:
 
     def _create_session_gauges(self) -> dict[QueueStatus, Gauge]:
         names = {
+            QueueStatus.NEW: "queue_sessions_new",
             QueueStatus.CREATING: "queue_sessions_creating",
             QueueStatus.PRE_QUEUE: "queue_sessions_prequeue",
             QueueStatus.ACTIVE_QUEUE: "queue_sessions_active",
             QueueStatus.PARKED: "queue_sessions_parked",
+            QueueStatus.CHECKING: "queue_sessions_checking",
+            QueueStatus.PAUSED: "queue_sessions_paused",
+            QueueStatus.CONNECTION_LOST: "queue_sessions_connection_lost",
             QueueStatus.SERVICED_SOON: "queue_sessions_serviced_soon",
             QueueStatus.TURN_STARTED: "queue_sessions_turn_started",
             QueueStatus.READY: "queue_sessions_ready",
@@ -312,8 +450,11 @@ class PrometheusMetrics:
         identity_mismatch: bool,
         transfer_failures: int | None = None,
         state_failures: int | None = None,
+        state_refresh_failures: int = 0,
     ) -> None:
         self.session_restore_duration_seconds.observe(duration_seconds)
+        if state_refresh_failures:
+            self.state_refresh_failures_total.inc(state_refresh_failures)
         if transfer_failures is not None or state_failures is not None:
             self.transfer_restore_failures_total.inc(transfer_failures or 0)
             self.state_restore_failures_total.inc(state_failures or 0)
@@ -422,6 +563,77 @@ class PrometheusMetrics:
             self._session_gauges[previous].dec()
         if current in self._session_gauges:
             self._session_gauges[current].inc()
+
+    def sync_recovery_summary(self, summary: RecoverySummary, *, target: int) -> None:
+        """Set population gauges from one aggregate repository query."""
+
+        self.set_target(target)
+        self.queue_ids_valid.set(summary.valid_queue_ids)
+        self.queue_ids_remaining.set(max(0, target - summary.valid_queue_ids))
+        self.queue_ids_lost.set(summary.lost_queue_ids)
+        self.queue_sessions_persisted.set(summary.total_persisted_sessions)
+        self.queue_sessions_requiring_retry.set(summary.sessions_requiring_retry)
+        self.monitoring_leases_active.set(summary.leased_sessions)
+        self.monitoring_leases_expired.set(summary.expired_leases)
+        self.sync_session_count_values(summary.status_counts)
+
+    def set_progress_distribution(self, counts: dict[str, int]) -> None:
+        for bucket in PROGRESS_BUCKETS:
+            self.queue_sessions_progress_bucket.labels(bucket=bucket).set(counts.get(bucket, 0))
+
+    def record_startup_recovery(
+        self,
+        duration_seconds: float,
+        summary: RecoverySummary,
+        *,
+        target: int | None = None,
+    ) -> None:
+        self.startup_recovery_duration_seconds.set(duration_seconds)
+        self.startup_expired_leases.set(summary.expired_leases)
+        self.startup_due_backlog.set(summary.sessions_due)
+        if target is not None:
+            self.sync_recovery_summary(summary, target=target)
+        else:
+            self.sync_session_count_values(summary.status_counts)
+
+    def record_lease_recoveries(self, recovered: int) -> None:
+        if recovered > 0:
+            self.monitoring_lease_recoveries_total.inc(recovered)
+
+    def record_repository_error(self, operation: str) -> None:
+        label = operation if operation in REPOSITORY_ERROR_OPERATIONS else "other"
+        self.repository_errors_total.labels(operation=label).inc()
+
+    def record_browser_restart(
+        self,
+        duration_seconds: float,
+        *,
+        success: bool,
+        lost_contexts: int,
+    ) -> None:
+        self.browser_restart_duration_seconds.observe(duration_seconds)
+        if not success:
+            self.browser_restart_failures_total.inc()
+        if lost_contexts:
+            self.browser_contexts_lost_total.inc(lost_contexts)
+
+    def record_browser_operation_timeout(self) -> None:
+        self.browser_operation_timeouts_total.inc()
+
+    def set_worker_configuration(self, *, monitoring_workers: int, creation_workers: int) -> None:
+        self.monitoring_workers_configured.set(monitoring_workers)
+        self.creation_workers_configured.set(creation_workers)
+
+    def set_identity_replacement_blocked(self, blocked: bool) -> None:
+        self.queue_identity_replacement_blocked.set(1 if blocked else 0)
+
+    def refresh_rate_gauges(self) -> CheckStatistics:
+        statistics = self.check_statistics()
+        self.monitoring_checks_per_second.set(statistics.checks_per_second)
+        self.monitoring_check_duration_average_seconds.set(
+            statistics.average_check_duration_seconds
+        )
+        return statistics
 
     def check_statistics(self) -> CheckStatistics:
         with self._lock:
