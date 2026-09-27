@@ -7,7 +7,6 @@ fails with the exact supported install command.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -18,7 +17,8 @@ from queue_load_test.browser.backend import (
     PLAYWRIGHT_VERSION,
     CamoufoxBackend,
 )
-from queue_load_test.browser.manager import BrowserManager
+from queue_load_test.browser.manager import BrowserManager, OwnedBrowserContext
+from queue_load_test.utils.asyncio_tools import await_bounded
 
 CAMOUFOX_FETCH_COMMAND = f"camoufox fetch official/stable/{CAMOUFOX_BROWSER_VERSION}"
 _LOCAL_PAGE = "data:text/html,<title>quetty-camoufox-preflight</title><p>local</p>"
@@ -125,21 +125,26 @@ async def run_camoufox_preflight(*, timeout_seconds: float = 60.0) -> CamoufoxPr
     local_navigation = context_closed = False
     active_after_close = 0
     error: str | None = None
-    owned = None
+    owned: OwnedBrowserContext | None = None
+
+    async def exercise() -> None:
+        nonlocal async_launch, browser_installed, observed, owned, context_opened
+        nonlocal local_navigation, context_closed, active_after_close
+        await manager.start()
+        async_launch = browser_installed = True
+        observed = manager.backend_diagnostics().browser_version
+        owned = await manager.create_context()
+        context_opened = True
+        page = await owned.context.new_page()
+        await page.goto(_LOCAL_PAGE)
+        local_navigation = await page.title() == "quetty-camoufox-preflight"
+        await owned.close()
+        context_closed = owned.closed
+        active_after_close = manager.active_context_count
+
     if package_imports and supported_versions:
         try:
-            async with asyncio.timeout(timeout_seconds):
-                await manager.start()
-                async_launch = browser_installed = True
-                observed = manager.backend_diagnostics().browser_version
-                owned = await manager.create_context()
-                context_opened = True
-                page = await owned.context.new_page()
-                await page.goto(_LOCAL_PAGE)
-                local_navigation = await page.title() == "quetty-camoufox-preflight"
-                await owned.close()
-                context_closed = owned.closed
-                active_after_close = manager.active_context_count
+            await await_bounded(exercise(), timeout=timeout_seconds)
         except Exception as exc:  # noqa: BLE001 - structured failure evidence
             error = f"{type(exc).__name__}: {exc}"[:500]
         finally:

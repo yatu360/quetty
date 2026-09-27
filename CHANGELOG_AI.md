@@ -3988,3 +3988,77 @@ Chrome remains supported (`BROWSER_BACKEND=chrome`) and regression-tested.
 ### Next task
 
 **Phase 6 Prompt 7 — Phase 6 Acceptance.**
+
+## 2026-09-27 — Phase 6 Prompt 7 — Phase 6 Acceptance
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Outcome
+
+**Phase 6 accepted on local evidence** (`docs/phase6_acceptance.md`).
+- Camoufox is accepted as a supported backend and as the default for new runs, and
+  Chrome is retained as a tested fallback.
+- Queue-session continuity was proven locally across repeated reconstruction, browser
+  process restart, application restart, and browser failure/recovery, with 0 Queue ID
+  changes or replacements.
+- Fingerprint continuity remains FAIL / unsupported, and it is explicitly not required.
+- Staging remains **UNKNOWN / NOT RUN**.
+
+### Defect found during acceptance and fixed (with the user's approval)
+
+The first acceptance run hung application shutdown for more than 20 minutes during
+Camoufox "shutdown under load". `python -m asyncio pstree` located it: a manual
+final-inspection `Locator.count` was stuck in Playwright's `Connection._abort` wait. Four
+causes were fixed:
+1. **Single-cancellation deadlines are not bounds under Playwright 1.62.** Its first
+   cancellation sends an abort and waits, without a limit, for the browser's
+   acknowledgement. Added `utils.asyncio_tools.await_bounded`: it re-cancels until the
+   call stops, or abandons it with a strong reference and late results discarded. It
+   replaces `asyncio.timeout`/`wait_for` in restorer attempts, manual inspect/adopt, the
+   unidentified open, creator attempts, manager launch/context creation/restart
+   close/shutdown close/Playwright stop, and the preflight.
+2. **A stuck `Playwright.stop()`** (the driver waiting on a wedged browser) now kills the
+   driver as a last resort. Playwright's own cleanup then fails pending calls, so the
+   event loop cannot wait forever at exit.
+3. **Prompt 4 regression:** releasing the Camoufox lease when a close *started* allowed
+   create/close overlap on one process, which is the churn that wedges Camoufox. The
+   lease is now released when the close completes. A close that misses its deadline
+   marks the process for replacement (`BrowserManager.report_abandoned_operation` / the
+   close-timeout path), and the replacement gets a fresh lease.
+4. **Latent scheduler bug:** after the runtime deadline cancelled `scheduler.run()`, the
+   next shutdown step re-raised the cancelled workers' `CancelledError`. Now only live
+   workers get stop sentinels, and the gather uses `return_exceptions`.
+
+Regression tests were added:
+- the Playwright-like abort-wait hang, which fails instead of hanging the suite;
+- abandonment with late-result discard;
+- hung browser close and hung Playwright stop with driver kill;
+- the lease held across a hung close;
+- the scheduler tolerating externally cancelled workers.
+
+After the fix, a clean 10-run loop of manual/pause/shutdown (5 headless, 5 headed, both
+backends; 60 scenario runs, 20 shutdown-under-load) had 0 hangs, crashes, or failures.
+The unresponsive-restart and driver-kill safety nets never had to fire, because the lease
+fix removed the overlap.
+
+### Final validation
+
+- Full non-staging suite: **513 passed, 4 staging deselected**.
+- Ruff, strict mypy (70 files), `pip check`, and the Camoufox preflight: PASS.
+- Controlled workflow, Camoufox headed: **63/63**. Chrome: **63/63**.
+- Full benchmark (capacity plus recovery, both backends, headed): **22/22 scenarios,
+  282/282 checks**, 0 leftover processes. Results are in
+  `docs/results/phase6_acceptance_*.json` (aggregate only, scanned for identities, URLs,
+  state, and fingerprints).
+- Staging: **NOT RUN**.
+
+### Docs
+
+Added `docs/phase6_acceptance.md` and the three result files. Updated PROJECT_CONTEXT,
+PHASE_PLAN, README, and the migration doc.
+
+### Next task
+
+Phase 6 complete

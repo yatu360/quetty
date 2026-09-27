@@ -86,8 +86,12 @@ Camoufox 0.5.6 runs one live context per managed process. This means:
 - `MONITOR_WORKERS` beyond that number wait for a free process;
 - the headed manual pool gives each open window its own process, up to
   `MAX_MANUAL_OPEN_SESSIONS`, while Chrome shares one headed process;
-- a connected Camoufox process whose navigations time out 3 times in a row is
-  restarted automatically.
+- a connected Camoufox process is restarted automatically when 3 navigations in a row
+  time out, when a context close misses its deadline, or when a browser call ignores
+  repeated cancellation;
+- every browser call is bounded by re-cancellation (Playwright 1.62 can otherwise wait
+  forever for a wedged browser), so no Camoufox operation can block shutdown
+  indefinitely.
 
 The local recovery and capacity benchmark, run against the simulator only, is:
 

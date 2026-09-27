@@ -706,9 +706,15 @@ class ParkedSessionScheduler:
             await asyncio.gather(*self._workers, return_exceptions=True)
             await self._release_queued_leases()
         else:
-            for _ in self._workers:
+            # A worker may already have been cancelled from outside (for example the
+            # runtime cancelling scheduler.run() at its shutdown deadline cancels the
+            # gather below, and with it every worker). Only live workers can take a
+            # stop sentinel from the bounded queue, and a cancelled worker must not
+            # abort the rest of the ordered shutdown.
+            live = [worker for worker in self._workers if not worker.done()]
+            for _ in live:
                 await self._queue.put(_STOP)
-            await asyncio.gather(*self._workers)
+            await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
         self.metrics.queue_depth = 0
         self.metrics.currently_checking = 0

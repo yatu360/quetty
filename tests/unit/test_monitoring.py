@@ -841,3 +841,36 @@ def test_stale_update_detection_does_not_treat_missing_timestamp_as_failure() ->
         now=NOW,
         stale_after_seconds=60,
     )
+
+
+async def test_shutdown_tolerates_workers_cancelled_from_outside(tmp_path: Path) -> None:
+    """Regression: a runtime deadline cancelling run() cancels every worker; the
+    following shutdown step must still finish and release the in-flight lease."""
+
+    repository = SQLiteSessionRepository(tmp_path / "cancelled-workers.sqlite3")
+    await repository.create(make_session("due-0"))
+    handler = BlockingHandler()
+    scheduler = ParkedSessionScheduler(
+        repository=repository,
+        handler=handler,
+        worker_count=2,
+        queue_capacity=2,
+        claim_batch_size=2,
+        lease_seconds=60,
+        failure_delay_seconds=30,
+        clock=lambda: NOW,
+        scheduler_id="cancelled-scheduler",
+    )
+    await scheduler.start()
+    assert await scheduler.schedule_due() == 1
+    await handler.started.wait()
+    for worker in scheduler._workers:
+        worker.cancel()
+    await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(scheduler.shutdown(timeout_seconds=1), timeout=5)
+
+    persisted = await repository.get("due-0")
+    assert persisted is not None and persisted.worker_id is None
+    assert persisted.queue_id == "queue-due-0"
+    await repository.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -22,6 +23,7 @@ from queue_load_test.browser.backend import ContextStorageState as BackendContex
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
+from queue_load_test.utils.asyncio_tools import AbandonedOperationError, await_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,28 @@ class OwnedBrowserContext:
             self._manager._release_shared_capacity()
 
 
+def _kill_playwright_driver(playwright: Playwright) -> None:
+    """Last resort when ``Playwright.stop()`` misses its deadline.
+
+    ``stop()`` closes the driver's stdin and waits for the Node driver to exit, and
+    only then fails every pending Playwright call. A driver stuck closing a wedged
+    browser never exits, so abandoned calls (and the event loop's own shutdown,
+    which waits for every task) would wait forever. Killing the driver ends its
+    pipe; Playwright's own cleanup then fails all pending calls and the transport
+    finishes. This reaches private Playwright 1.62 attributes, defensively.
+    """
+
+    transport = getattr(
+        getattr(getattr(playwright, "_impl_obj", None), "_connection", None), "_transport", None
+    )
+    process = getattr(transport, "_proc", None)
+    if process is None or getattr(process, "returncode", 0) is not None:
+        return
+    with contextlib.suppress(ProcessLookupError, OSError):
+        process.kill()
+        log_event(logger, logging.WARNING, "playwright_driver_killed")
+
+
 async def _start_playwright() -> Playwright:
     return await async_playwright().start()
 
@@ -295,14 +319,7 @@ class BrowserManager:
         threshold = self._unresponsive_threshold
         if threshold is None:
             return
-        slot = next(
-            (
-                candidate
-                for candidate in self._slots
-                if any(owned.context is context for owned in candidate.contexts)
-            ),
-            None,
-        )
+        slot = self._slot_for_context(context)
         if slot is None or slot.restart_task is not None or slot.unresponsive:
             return
         if responsive:
@@ -322,6 +339,52 @@ class BrowserManager:
             browser_id=slot.index,
             count=slot.consecutive_navigation_timeouts,
         )
+
+    def report_abandoned_operation(self, context: BrowserContext) -> None:
+        """Mark ``context``'s process for replacement after an unstoppable call.
+
+        A Playwright call that ignores repeated cancellation means the browser has
+        stopped answering, whatever the backend, so the slot is restarted through
+        the ordinary bounded path (which also releases its lost contexts' capacity).
+        """
+
+        slot = self._slot_for_context(context)
+        if slot is None or slot.restart_task is not None or slot.unresponsive:
+            return
+        slot.unresponsive = True
+        self._unresponsive_restarts += 1
+        if self._observability is not None:
+            self._observability.record_browser_unresponsive()
+        log_event(
+            logger,
+            logging.WARNING,
+            "browser_process_unresponsive",
+            browser_id=slot.index,
+            error_type="AbandonedOperation",
+        )
+
+    def _slot_for_context(self, context: BrowserContext) -> _BrowserSlot | None:
+        return next(
+            (
+                candidate
+                for candidate in self._slots
+                if any(owned.context is context for owned in candidate.contexts)
+            ),
+            None,
+        )
+
+    async def _discard_context(self, context: BrowserContext) -> None:
+        """Close a context whose creation finished after its deadline (never owned)."""
+
+        await self._bounded_close(self._backend.close_context(context), -1)
+
+    async def _discard_browser(self, browser: Browser) -> None:
+        """Close a browser whose launch finished after its deadline (never managed)."""
+
+        with contextlib.suppress(Exception):
+            await await_bounded(
+                self._backend.close_browser(browser), timeout=self._close_timeout_seconds
+            )
 
     @property
     def backend_name(self) -> str:
@@ -388,9 +451,10 @@ class BrowserManager:
     async def _launch_browser(self) -> Browser:
         if self._playwright is None:
             raise BrowserManagerNotStartedError("Playwright is not running")
-        return await asyncio.wait_for(
+        return await await_bounded(
             self._backend.launch(self._playwright, headless=self._headless),
             timeout=self._operation_timeout_seconds,
+            discard=self._discard_browser,
         )
 
     def _active_context_count(self) -> int:
@@ -459,13 +523,20 @@ class BrowserManager:
                                 raise BrowserCapacityError(
                                     "Global browser context capacity is exhausted"
                                 )
-                        context = await asyncio.wait_for(
+                        context = await await_bounded(
                             self._new_context(slot.browser, storage_state),
                             timeout=self._operation_timeout_seconds,
+                            discard=self._discard_context,
                         )
-                    except Exception:
+                    except Exception as exc:
                         if shared_capacity_reserved and self._shared_capacity is not None:
                             self._shared_capacity.release()
+                        if isinstance(exc, AbandonedOperationError) and not slot.unresponsive:
+                            # The process ignored repeated cancellation: replace it.
+                            slot.unresponsive = True
+                            self._unresponsive_restarts += 1
+                            if self._observability is not None:
+                                self._observability.record_browser_unresponsive()
                         creation_duration = time.perf_counter() - creation_started
                         if self._observability is not None:
                             self._observability.record_context_creation_failure()
@@ -578,8 +649,33 @@ class BrowserManager:
         except TimeoutError as exc:
             close.add_done_callback(lambda task: self._record_background_close(task, browser_id))
             self._record_close_failure(exc, browser_id)
+            self._mark_slot_unresponsive(browser_id, reason="ContextCloseTimeout")
         except Exception as exc:  # noqa: BLE001
             self._record_close_failure(exc, browser_id)
+
+    def _mark_slot_unresponsive(self, browser_id: int, *, reason: str) -> None:
+        """A context close that misses its deadline means a wedged process.
+
+        Only backends with an unresponsive-restart policy (Camoufox) act on it; the
+        slot is then replaced through the ordinary bounded restart path.
+        """
+
+        if self._unresponsive_threshold is None:
+            return
+        slot = next((item for item in self._slots if item.index == browser_id), None)
+        if slot is None or slot.restart_task is not None or slot.unresponsive:
+            return
+        slot.unresponsive = True
+        self._unresponsive_restarts += 1
+        if self._observability is not None:
+            self._observability.record_browser_unresponsive()
+        log_event(
+            logger,
+            logging.WARNING,
+            "browser_process_unresponsive",
+            browser_id=slot.index,
+            error_type=reason,
+        )
 
     def _record_background_close(self, task: asyncio.Future[None], browser_id: int) -> None:
         if task.cancelled():
@@ -651,7 +747,7 @@ class BrowserManager:
                 slot.index,
             )
         try:
-            await asyncio.wait_for(
+            await await_bounded(
                 self._backend.close_browser(old_browser),
                 timeout=self._close_timeout_seconds,
             )
@@ -799,7 +895,7 @@ class BrowserManager:
                 )
         for slot in self._slots:
             try:
-                await asyncio.wait_for(
+                await await_bounded(
                     self._backend.close_browser(slot.browser),
                     timeout=self._close_timeout_seconds,
                 )
@@ -816,7 +912,7 @@ class BrowserManager:
         self._slots.clear()
         if self._playwright is not None:
             try:
-                await asyncio.wait_for(
+                await await_bounded(
                     self._playwright.stop(),
                     timeout=self._close_timeout_seconds,
                 )
@@ -829,6 +925,7 @@ class BrowserManager:
                     "playwright_shutdown_failed",
                     error_type=type(exc).__name__,
                 )
+                _kill_playwright_driver(self._playwright)
             self._playwright = None
 
     def _update_capacity_metrics(self) -> None:

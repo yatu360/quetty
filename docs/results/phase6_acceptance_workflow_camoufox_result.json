@@ -1,0 +1,532 @@
+{
+  "measured_at": "2026-09-27T22:39:54.226991+01:00",
+  "target": "LocalQueueSimulator on 127.0.0.1 (not Queue-it)",
+  "passed": 63,
+  "failed": 0,
+  "evidence": {
+    "browser_backend": "camoufox",
+    "headed_manual_browser": true,
+    "requested": 4,
+    "acquisition_seconds": 4.91,
+    "valid_samples": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "dashboard_rows_seen": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "identities_created_before_restart": 8,
+    "partial_resume": {
+      "requested": 6,
+      "valid_at_shutdown": 3,
+      "valid_after_restart": 6
+    }
+  },
+  "checks": [
+    {
+      "name": "first_boot_shows_setup",
+      "passed": true,
+      "detail": {
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "invalid_url_rejected",
+      "passed": true,
+      "detail": {
+        "status": 422,
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "credential_url_rejected",
+      "passed": true,
+      "detail": {
+        "status": 422,
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "zero_count_rejected",
+      "passed": true,
+      "detail": {
+        "status": 422,
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "non_integer_count_rejected",
+      "passed": true,
+      "detail": {
+        "status": 422,
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "over_limit_count_rejected",
+      "passed": true,
+      "detail": {
+        "status": 422,
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "invalid_setup_persists_nothing",
+      "passed": true,
+      "detail": {
+        "t_seconds": 0.03
+      }
+    },
+    {
+      "name": "valid_setup_persists_and_redirects",
+      "passed": true,
+      "detail": {
+        "t_seconds": 1.39
+      }
+    },
+    {
+      "name": "setup_tasks_bounded",
+      "passed": true,
+      "detail": {
+        "task_delta": 4,
+        "t_seconds": 1.39
+      }
+    },
+    {
+      "name": "bounded_acquisition_reaches_target",
+      "passed": true,
+      "detail": {
+        "seconds": 4.91,
+        "browser_processes": 2,
+        "t_seconds": 4.95
+      }
+    },
+    {
+      "name": "dashboard_shows_sessions_as_they_appear",
+      "passed": true,
+      "detail": {
+        "rows_seen": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "t_seconds": 4.95
+      }
+    },
+    {
+      "name": "browser_processes_bounded_during_acquisition",
+      "passed": true,
+      "detail": {
+        "browser_processes": 2,
+        "bound": 2,
+        "t_seconds": 4.97
+      }
+    },
+    {
+      "name": "auto_refresh_shows_monitored_progress",
+      "passed": true,
+      "detail": {
+        "seconds": 2.12,
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "dashboard_shows_ids_status_progress",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "dashboard_hides_transfer_and_state",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "search_by_session_and_queue_id",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "lifecycle_filter",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "summary_aggregates_match_database",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.09
+      }
+    },
+    {
+      "name": "polling_is_read_only",
+      "passed": true,
+      "detail": {
+        "active_contexts_while_idle": "1",
+        "t_seconds": 7.11
+      }
+    },
+    {
+      "name": "pause_persisted",
+      "passed": true,
+      "detail": {
+        "t_seconds": 7.12
+      }
+    },
+    {
+      "name": "pause_stops_new_claims",
+      "passed": true,
+      "detail": {
+        "t_seconds": 12.62
+      }
+    },
+    {
+      "name": "due_backlog_visible_while_paused",
+      "passed": true,
+      "detail": {
+        "due_backlog": 4,
+        "t_seconds": 12.62
+      }
+    },
+    {
+      "name": "pause_keeps_queue_ids_and_status",
+      "passed": true,
+      "detail": {
+        "t_seconds": 12.62
+      }
+    },
+    {
+      "name": "resume_restarts_monitoring",
+      "passed": true,
+      "detail": {
+        "seconds": 0.71,
+        "t_seconds": 13.33
+      }
+    },
+    {
+      "name": "open_in_browser_restores_existing_identity",
+      "passed": true,
+      "detail": {
+        "headed": true,
+        "browser_processes": 4,
+        "t_seconds": 15.41
+      }
+    },
+    {
+      "name": "open_in_browser_is_not_queue_status",
+      "passed": true,
+      "detail": {
+        "persisted_status": "ACTIVE_QUEUE",
+        "t_seconds": 15.41
+      }
+    },
+    {
+      "name": "scheduler_skips_open_session",
+      "passed": true,
+      "detail": {
+        "t_seconds": 18.31
+      }
+    },
+    {
+      "name": "refresh_and_delete_refused_while_open",
+      "passed": true,
+      "detail": {
+        "t_seconds": 18.32
+      }
+    },
+    {
+      "name": "manual_contexts_bounded",
+      "passed": true,
+      "detail": {
+        "active_contexts": 2,
+        "t_seconds": 18.32
+      }
+    },
+    {
+      "name": "close_releases_ownership_and_persists_latest_state",
+      "passed": true,
+      "detail": {
+        "progress_after_close": 58.0,
+        "rescheduled_by_close_inspection": true,
+        "t_seconds": 18.36
+      }
+    },
+    {
+      "name": "closed_session_returns_to_monitoring",
+      "passed": true,
+      "detail": {
+        "seconds": 2.33,
+        "t_seconds": 20.69
+      }
+    },
+    {
+      "name": "identity_mismatch_preserves_expected_queue_id",
+      "passed": true,
+      "detail": {
+        "message": [
+          "Identity Mismatch"
+        ],
+        "persisted_status": "ACTIVE_QUEUE",
+        "t_seconds": 21.45
+      }
+    },
+    {
+      "name": "refresh_now_works_while_paused",
+      "passed": true,
+      "detail": {
+        "seconds": 0.4,
+        "t_seconds": 21.86
+      }
+    },
+    {
+      "name": "refresh_keeps_queue_id",
+      "passed": true,
+      "detail": {
+        "t_seconds": 21.86
+      }
+    },
+    {
+      "name": "browser_crash_recovers_monitoring_without_replacement",
+      "passed": true,
+      "detail": {
+        "killed_processes": 4,
+        "seconds": 2.26,
+        "browser_processes": 1,
+        "t_seconds": 24.15
+      }
+    },
+    {
+      "name": "browser_processes_bounded_after_crash_recovery",
+      "passed": true,
+      "detail": {
+        "browser_processes": 1,
+        "t_seconds": 24.17
+      }
+    },
+    {
+      "name": "add_creates_exactly_one_despite_duplicate_submit",
+      "passed": true,
+      "detail": {
+        "statuses": [
+          200,
+          200
+        ],
+        "t_seconds": 26.49
+      }
+    },
+    {
+      "name": "add_keeps_requested_target",
+      "passed": true,
+      "detail": {
+        "t_seconds": 26.49
+      }
+    },
+    {
+      "name": "managed_count_may_exceed_requested",
+      "passed": true,
+      "detail": {
+        "t_seconds": 26.49
+      }
+    },
+    {
+      "name": "replace_creates_new_independent_identity_then_removes_old",
+      "passed": true,
+      "detail": {
+        "t_seconds": 26.9
+      }
+    },
+    {
+      "name": "replace_preserves_population_size",
+      "passed": true,
+      "detail": {
+        "t_seconds": 26.9
+      }
+    },
+    {
+      "name": "replace_leaves_unrelated_sessions",
+      "passed": true,
+      "detail": {
+        "t_seconds": 26.9
+      }
+    },
+    {
+      "name": "delete_removes_session_progress_and_state",
+      "passed": true,
+      "detail": {
+        "state_file_existed": true,
+        "t_seconds": 27.0
+      }
+    },
+    {
+      "name": "delete_leaves_unrelated_sessions",
+      "passed": true,
+      "detail": {
+        "t_seconds": 27.0
+      }
+    },
+    {
+      "name": "repeat_delete_is_idempotent",
+      "passed": true,
+      "detail": {
+        "t_seconds": 27.01
+      }
+    },
+    {
+      "name": "no_id_open_adopts_first_unique_queue_identity",
+      "passed": true,
+      "detail": {
+        "seconds": 2.12,
+        "t_seconds": 31.0
+      }
+    },
+    {
+      "name": "manual_window_loss_releases_ownership_and_parks",
+      "passed": true,
+      "detail": {
+        "seconds": 0.1,
+        "t_seconds": 31.11
+      }
+    },
+    {
+      "name": "duplicate_no_id_adoption_is_rejected_without_replacing_existing_identity",
+      "passed": true,
+      "detail": {
+        "t_seconds": 33.54
+      }
+    },
+    {
+      "name": "shutdown_zero_contexts_owners_and_browser_processes",
+      "passed": true,
+      "detail": {
+        "owners": 0,
+        "browser_processes": 0,
+        "t_seconds": 34.0
+      }
+    },
+    {
+      "name": "shutdown_deleted_or_replaced_nothing",
+      "passed": true,
+      "detail": {
+        "sessions": 6,
+        "t_seconds": 34.0
+      }
+    },
+    {
+      "name": "restart_skips_setup",
+      "passed": true,
+      "detail": {
+        "t_seconds": 34.58
+      }
+    },
+    {
+      "name": "restart_preserves_run_config",
+      "passed": true,
+      "detail": {
+        "t_seconds": 34.58
+      }
+    },
+    {
+      "name": "target_cannot_be_changed_for_existing_population",
+      "passed": true,
+      "detail": {
+        "t_seconds": 34.59
+      }
+    },
+    {
+      "name": "restart_preserves_paused_state",
+      "passed": true,
+      "detail": {
+        "t_seconds": 34.59
+      }
+    },
+    {
+      "name": "restart_preserves_sessions_and_queue_ids",
+      "passed": true,
+      "detail": {
+        "sessions": 6,
+        "t_seconds": 36.09
+      }
+    },
+    {
+      "name": "restart_preserves_operator_population_adjustment",
+      "passed": true,
+      "detail": {
+        "adjustment": 0,
+        "t_seconds": 36.09
+      }
+    },
+    {
+      "name": "restart_creates_no_refill_after_add_and_delete",
+      "passed": true,
+      "detail": {
+        "new_identities": 8,
+        "t_seconds": 36.09
+      }
+    },
+    {
+      "name": "restart_resume_monitoring_checks_again",
+      "passed": true,
+      "detail": {
+        "seconds": 1.21,
+        "t_seconds": 37.31
+      }
+    },
+    {
+      "name": "stop_and_reset_clears_run_sessions_state_and_ownership",
+      "passed": true,
+      "detail": {
+        "state_files": 0,
+        "browser_processes": 0,
+        "t_seconds": 38.09
+      }
+    },
+    {
+      "name": "stop_and_reset_returns_to_setup",
+      "passed": true,
+      "detail": {
+        "t_seconds": 38.09
+      }
+    },
+    {
+      "name": "final_shutdown_clean",
+      "passed": true,
+      "detail": {
+        "owners": 0,
+        "t_seconds": 38.1
+      }
+    },
+    {
+      "name": "partial_acquisition_interrupted",
+      "passed": true,
+      "detail": {
+        "valid_at_shutdown": 3,
+        "t_seconds": 43.57
+      }
+    },
+    {
+      "name": "partial_restart_resumes_only_deficit",
+      "passed": true,
+      "detail": {
+        "valid_before_restart": 3,
+        "valid_after_restart": 6,
+        "t_seconds": 51.42
+      }
+    }
+  ]
+}

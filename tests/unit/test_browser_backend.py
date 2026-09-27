@@ -174,7 +174,7 @@ class HangingCloseContext(FakeContext):
         await asyncio.Event().wait()
 
 
-async def test_camoufox_context_lease_is_per_process_and_released_when_close_starts(
+async def test_camoufox_lease_is_per_process_and_held_until_close_finishes(
     monkeypatch: Any,
 ) -> None:
     contexts: list[FakeContext] = [HangingCloseContext(), FakeContext(), FakeContext()]
@@ -192,11 +192,17 @@ async def test_camoufox_context_lease_is_per_process_and_released_when_close_sta
 
     closing = asyncio.create_task(backend.close_context(hanging))
     await asyncio.sleep(0)
-    # The close is still pending, but the process lease is already available.
-    replacement = await asyncio.wait_for(backend.new_context(cast(Any, first_browser)), 1)
-
-    assert not closing.done()
+    # No new context may overlap a close still in progress on the same process.
+    waiting = asyncio.create_task(backend.new_context(cast(Any, first_browser)))
+    done, _ = await asyncio.wait({waiting}, timeout=0.1)
+    assert not done
+    # Replacing the wedged process gives the replacement a fresh lease.
+    waiting.cancel()
     closing.cancel()
+    await backend.close_browser(cast(Any, first_browser))
+    replacement_browser = FakeBrowser()
+    replacement = await asyncio.wait_for(backend.new_context(cast(Any, replacement_browser)), 1)
+
     await backend.close_context(other)
     await backend.close_context(replacement)
 
@@ -299,3 +305,82 @@ async def test_chrome_ignores_navigation_timeouts_for_restart(monkeypatch: Any) 
     assert len(launched) == 1 and not owned.closed
     await owned.close()
     await manager.shutdown()
+
+
+async def test_shutdown_is_bounded_when_browser_close_ignores_first_cancellation(
+    monkeypatch: Any,
+) -> None:
+    manager, launched = await _fake_camoufox_manager(monkeypatch, CamoufoxBackend())
+    stopped: list[bool] = []
+
+    async def wedged_close() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.append(True)
+            raise
+
+    launched[0].close = wedged_close
+    manager._close_timeout_seconds = 0.05
+
+    task = asyncio.ensure_future(manager.shutdown())
+    done, _ = await asyncio.wait({task}, timeout=5)
+    assert task in done, "shutdown did not return"
+
+    assert stopped == [True]
+    assert manager.managed_process_count == 0
+
+
+async def test_hung_playwright_stop_kills_the_driver_so_pending_calls_end(
+    monkeypatch: Any,
+) -> None:
+    killed: list[bool] = []
+
+    class FakeDriver:
+        returncode = None
+
+        def kill(self) -> None:
+            killed.append(True)
+            self.returncode = -9
+
+    class HangingPlaywright:
+        def __init__(self) -> None:
+            transport = type("Transport", (), {"_proc": FakeDriver()})()
+            connection = type("Connection", (), {"_transport": transport})()
+            self._impl_obj = type("Impl", (), {"_connection": connection})()
+
+        async def stop(self) -> None:
+            while True:  # a driver that never exits while a browser is wedged
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    if killed:
+                        raise
+                    continue
+
+    async def fake_new_browser(*args: object, **kwargs: object) -> object:
+        return FakeBrowser()
+
+    async def starter() -> Any:
+        return HangingPlaywright()
+
+    monkeypatch.setattr(backend_module, "AsyncNewBrowser", fake_new_browser)
+    manager = BrowserManager(
+        chrome_process_count=1,
+        max_contexts_per_browser=1,
+        max_active_contexts=1,
+        playwright_starter=cast(PlaywrightStarter, starter),
+        backend=CamoufoxBackend(),
+        close_timeout_seconds=0.05,
+    )
+    await manager.start()
+
+    task = asyncio.ensure_future(manager.shutdown())
+    done, _ = await asyncio.wait({task}, timeout=10)
+
+    assert task in done, "shutdown did not return"
+    assert killed == [True]
+    assert not manager.started

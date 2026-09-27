@@ -9,6 +9,28 @@ Camoufox backend for live monitoring.
 
 ## Current Status
 
+- **Phase 6 is complete** (Prompt 7 acceptance, `docs/phase6_acceptance.md`).
+  Camoufox is accepted as a supported backend and as the default for new runs, on
+  local simulator evidence. Chrome is retained as a tested fallback. The Queue-it
+  staging boundary remains UNKNOWN / NOT RUN.
+  - **Final validation:**
+    - 513 non-staging tests; Ruff, strict mypy, `pip check`, and the preflight pass;
+    - Camoufox headed controlled workflow 63/63 and Chrome 63/63;
+    - full benchmark 22/22 scenarios and 282/282 checks with 0 leftover processes;
+    - 0 Queue ID changes or replacements.
+  - **Defects found and fixed during acceptance:** the first acceptance run hung
+    application shutdown for more than 20 minutes (Camoufox shutdown under load).
+    - Playwright 1.62 turns a single cancellation into an unbounded abort-ack wait.
+      `utils.asyncio_tools.await_bounded` re-cancels or abandons, and now bounds every
+      browser call.
+    - A stuck `Playwright.stop()` kills the driver as a last resort.
+    - The Prompt 4 lease released at close *start* allowed the create/close overlap that
+      wedges Camoufox. The lease is now held until the close completes, and a close
+      timeout marks the process for replacement.
+    - Scheduler shutdown no longer lets externally cancelled workers abort ordered
+      shutdown.
+    - After the fixes, a 10-run manual/pause/shutdown loop (60 scenario runs) had 0 hangs
+      or failures. Camoufox shutdown under load took 10.4–20.5 s.
 - Phase 6 Prompt 6 (Camoufox default migration and operational polish) is complete.
   **Camoufox is now the default browser backend for NEW runs**
   (`BROWSER_BACKEND=camoufox`), and Chrome remains a supported, regression-tested
@@ -287,7 +309,7 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 Prompt 7 — Phase 6 Acceptance.**
+- Exact next task: **Phase 6 complete**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1162,7 +1184,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 Prompt 7 — Phase 6 Acceptance.
+Phase 6 complete
 
 ## Instructions for Future AI Sessions
 

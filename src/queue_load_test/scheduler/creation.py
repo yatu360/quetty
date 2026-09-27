@@ -36,6 +36,7 @@ from queue_load_test.transfer import (
     TransferExtractionResult,
     TransferFailure,
 )
+from queue_load_test.utils.asyncio_tools import await_bounded
 
 type Sleep = Callable[[float], Awaitable[None]]
 type Jitter = Callable[[float, float], float]
@@ -236,8 +237,12 @@ class QueueSessionCreator:
             try:
                 # A Playwright call can stay pending forever when Chrome dies mid-call;
                 # the builtin TimeoutError is an OSError and is retried as transient.
-                async with asyncio.timeout(self._attempt_timeout_seconds):
-                    return await self._attempt(work_item, attempt, started, temporary_failures)
+                # await_bounded re-cancels: Playwright can otherwise wait forever for a
+                # wedged browser to acknowledge the first cancellation.
+                return await await_bounded(
+                    self._attempt(work_item, attempt, started, temporary_failures),
+                    timeout=self._attempt_timeout_seconds,
+                )
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()

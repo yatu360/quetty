@@ -782,3 +782,48 @@ async def test_adopt_open_is_bounded_and_leaves_session_unidentified(tmp_path: P
     assert result is None
     assert unidentified.queue_id is None
     await repository.close()
+
+
+class PlaywrightLikeHangingExtractor:
+    """Playwright 1.62 on a wedged browser: cancellation waits for an abort ack."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    async def extract(self, _: object, *, session_id: str) -> QueueProgress:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            try:
+                await asyncio.Event().wait()  # the abort is never acknowledged
+            finally:
+                self.stopped = True
+            raise
+        raise AssertionError("unreachable")
+
+
+async def test_final_inspection_survives_playwright_abort_wait(tmp_path: Path) -> None:
+    """Regression: one cancellation could not stop this, and shutdown hung forever."""
+
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [matching_result()],
+    )
+    extractor = PlaywrightLikeHangingExtractor()
+    restorer._live_extractor = cast(Any, extractor)
+    restorer._attempt_timeout_seconds = 0.05
+    context = FakeContext()
+
+    # asyncio.wait (not wait_for) so a regression fails instead of hanging the suite.
+    task = asyncio.ensure_future(
+        restorer.inspect_open(expected, context=cast(Any, context), page=cast(Any, context.page))
+    )
+    done, _ = await asyncio.wait({task}, timeout=5)
+    assert task in done, "final inspection did not return: shutdown would hang"
+    result = task.result()
+
+    assert result.failure is RestoreFailure.NAVIGATION_FAILED
+    assert result.expected_queue_id == expected.queue_id
+    assert extractor.stopped
+    await repository.close()

@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 7 — Phase 6 Acceptance.
+**Next:** Phase 6 complete
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -531,9 +531,10 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 6 completed on 2026-09-27. Camoufox is the default backend for NEW
-runs on local evidence. Chrome remains a supported fallback, and existing runs keep
-their persisted backend.**
+**Status: Phase 6 COMPLETE on 2026-09-27** (`docs/phase6_acceptance.md`). Camoufox is
+accepted as a supported backend and as the default for NEW runs on local evidence.
+Chrome remains a tested fallback, and existing runs keep their persisted backend.
+Queue-it staging remains UNKNOWN / NOT RUN.
 See `docs/phase6_camoufox_context_strategy.md`, `docs/phase6_runtime_integration.md`,
 `docs/phase6_camoufox_benchmark.md`, and `docs/phase6_operational_migration.md`.
 
@@ -674,12 +675,21 @@ or one browser process/profile per persisted session.
      Camoufox concurrency = processes). Shutdown stages remain separately bounded;
      their composition is documented.
 
-7. **Phase 6 Acceptance** — next. Require bounded
-   multi-context/process evidence, app/process restart identity round trips, local
-   HYBRID and TRANSFER_ONLY workflows, headed behavior on supported hosts, provenance
-   fail-closed tests, exact packaging/fetch evidence, and authorised Queue-it staging
-   continuity with zero silent identity replacement before considering Camoufox the
-   default for new runs.
+7. **Phase 6 Acceptance** — **completed on 2026-09-27** (`docs/phase6_acceptance.md`).
+   - Every local acceptance question is PASS, except that staging questions are UNKNOWN
+     and Camoufox fetch artifact integrity is UNKNOWN.
+   - Final results: 513 tests; both controlled workflows 63/63; benchmark 22/22
+     scenarios and 282/282 checks; 0 Queue ID changes.
+   - Fixed an acceptance-found shutdown hang with four causes:
+     - Playwright's unbounded abort-ack wait, now handled by `await_bounded`;
+     - a stuck Playwright driver, now killed as a last resort;
+     - the Prompt 4 create/close lease overlap, fixed by holding the lease until the
+       close completes;
+     - the scheduler's cancelled-worker gather.
+
+     A clean 10-run loop confirmed the fix.
+   - Staging continuity was deliberately not run: no authorised traffic was sent. It
+     stays UNKNOWN.
 
 ## Scaling Gates
 

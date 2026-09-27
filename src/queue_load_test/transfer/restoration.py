@@ -37,6 +37,7 @@ from queue_load_test.transfer.extractor import (
     TransferExtractionResult,
     TransferFailure,
 )
+from queue_load_test.utils.asyncio_tools import AbandonedOperationError, await_bounded
 
 type Sleep = Callable[[float], Awaitable[None]]
 
@@ -345,23 +346,31 @@ class QueueSessionRestorer:
         storage_state: ContextStorageState | None = None
         if session.mode is SessionMode.HYBRID:
             storage_state, _ = await self._load_storage_state(session)
-        owned: OwnedBrowserContext | None = None
-        try:
-            async with asyncio.timeout(self._attempt_timeout_seconds):
-                owned = await self._browser_manager.create_context(storage_state=storage_state)
+
+        async def navigate() -> tuple[OwnedBrowserContext, Page]:
+            owned = await self._browser_manager.create_context(storage_state=storage_state)
+            try:
                 page = await owned.context.new_page()
                 await page.goto(
                     navigation_url,
                     wait_until="domcontentloaded",
                     timeout=self._navigation_timeout_ms,
                 )
-        except (asyncio.CancelledError, BrowserCapacityError):
-            if owned is not None:
+            except BaseException:
                 await owned.close()
+                raise
+            return owned, page
+
+        async def discard(opened: tuple[OwnedBrowserContext, Page]) -> None:
+            await opened[0].close()
+
+        try:
+            owned, page = await await_bounded(
+                navigate(), timeout=self._attempt_timeout_seconds, discard=discard
+            )
+        except (asyncio.CancelledError, BrowserCapacityError):
             raise
         except Exception:  # noqa: BLE001 - browser adapter boundary, includes timeouts
-            if owned is not None:
-                await owned.close()
             return OpenedSessionRestore(
                 self._result(
                     RestoreAttempt(
@@ -395,13 +404,22 @@ class QueueSessionRestorer:
 
         original = (session.queue_id, session.transfer_url, session.last_error)
         try:
-            async with asyncio.timeout(self._attempt_timeout_seconds):
-                return await self._adopt_open(session, context=context, page=page)
-        except TimeoutError:
-            if self._observability is not None:
-                self._observability.record_browser_operation_timeout()
+            return await await_bounded(
+                self._adopt_open(session, context=context, page=page),
+                timeout=self._attempt_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            self._record_live_page_timeout(context, exc)
             session.queue_id, session.transfer_url, session.last_error = original
             return None
+
+    def _record_live_page_timeout(self, context: BrowserContext, exc: TimeoutError) -> None:
+        """Count a live-page timeout; an unstoppable call means the process is wedged."""
+
+        if self._observability is not None:
+            self._observability.record_browser_operation_timeout()
+        if isinstance(exc, AbandonedOperationError):
+            self._browser_manager.report_abandoned_operation(context)
 
     async def _adopt_open(
         self,
@@ -453,14 +471,17 @@ class QueueSessionRestorer:
         timeout is a transient observation failure; the expected Queue ID is kept.
         """
 
+
+        async def inspect() -> RestoreAttempt:
+            attempt = await self._observe(page, session, RestoreMethod.TRANSFER)
+            if attempt.success and session.mode is SessionMode.HYBRID:
+                attempt = await self._refresh_state(session, context, attempt)
+            return attempt
+
         try:
-            async with asyncio.timeout(self._attempt_timeout_seconds):
-                attempt = await self._observe(page, session, RestoreMethod.TRANSFER)
-                if attempt.success and session.mode is SessionMode.HYBRID:
-                    attempt = await self._refresh_state(session, context, attempt)
-        except TimeoutError:
-            if self._observability is not None:
-                self._observability.record_browser_operation_timeout()
+            attempt = await await_bounded(inspect(), timeout=self._attempt_timeout_seconds)
+        except TimeoutError as exc:
+            self._record_live_page_timeout(context, exc)
             attempt = RestoreAttempt(
                 method=RestoreMethod.TRANSFER,
                 success=False,
@@ -668,13 +689,15 @@ class QueueSessionRestorer:
         refresh_state: bool = True,
     ) -> RestoreAttempt:
         try:
-            async with asyncio.timeout(self._attempt_timeout_seconds):
-                return await self._unbounded_browser_attempt(
+            return await await_bounded(
+                self._unbounded_browser_attempt(
                     session,
                     method=method,
                     storage_state=storage_state,
                     refresh_state=refresh_state,
-                )
+                ),
+                timeout=self._attempt_timeout_seconds,
+            )
         except TimeoutError:
             if self._observability is not None:
                 self._observability.record_browser_operation_timeout()
@@ -701,13 +724,20 @@ class QueueSessionRestorer:
         method: RestoreMethod,
         storage_state: ContextStorageState | None = None,
     ) -> OpenedSessionRestore:
+        async def discard(opened: OpenedSessionRestore) -> None:
+            if opened.owned_context is not None:
+                await opened.owned_context.close()
+
         try:
-            async with asyncio.timeout(self._attempt_timeout_seconds):
-                return await self._unbounded_open_browser_attempt(
+            return await await_bounded(
+                self._unbounded_open_browser_attempt(
                     session,
                     method=method,
                     storage_state=storage_state,
-                )
+                ),
+                timeout=self._attempt_timeout_seconds,
+                discard=discard,
+            )
         except TimeoutError:
             if self._observability is not None:
                 self._observability.record_browser_operation_timeout()

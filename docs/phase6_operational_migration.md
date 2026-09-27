@@ -124,6 +124,11 @@ The three Camoufox-side pins live in `pyproject.toml` and
   change. The headed-mode process bound now accounts for the separate headed creation
   pool.
 
+**Updated in Prompt 7 (acceptance):** the restart also triggers when a context close
+misses its deadline or when a call ignores repeated cancellation. Every browser call is
+now bounded by `await_bounded`, the Camoufox lease is held until a close completes, and
+a stuck Playwright driver is killed at shutdown. See `docs/phase6_acceptance.md`.
+
 ## Persisted backend semantics
 
 - `run_config.browser_backend` and `queue_sessions.browser_backend` are set when the

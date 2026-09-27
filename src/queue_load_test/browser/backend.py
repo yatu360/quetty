@@ -110,8 +110,9 @@ class CamoufoxBackend:
     calls pending.  Keep that version-specific constraint below the backend
     boundary: when ``serialize_contexts`` is set, one context is live per
     managed Camoufox process, while the application's fixed workers and global
-    capacity coordinator stay bounded.  The lease is released as soon as a close
-    starts so a hung close or a lost process cannot strand the slot.
+    capacity coordinator stay bounded.  The lease is released when a close
+    finishes; a close that hangs marks the process for replacement instead of
+    letting a new context overlap it.
     ``serialize_contexts=False`` exists only for controlled capacity measurement;
     Phase 6 evidence shows overlapping create/navigate/close churn on one
     unserialized process can wedge it while it still reports connected.
@@ -174,10 +175,16 @@ class CamoufoxBackend:
         return browser.is_connected()
 
     async def close_context(self, context: BrowserContext) -> None:
+        # Release only once the close has finished: creating the next context while
+        # the previous one is still closing is the overlapping churn that wedges a
+        # Camoufox 0.5.6 process. A close that never finishes keeps the lease, and
+        # the manager replaces that process (a replacement gets a fresh lease).
         lease = self._context_leases.pop(id(context), None)
-        if lease is not None:
-            lease.release()
-        await context.close()
+        try:
+            await context.close()
+        finally:
+            if lease is not None:
+                lease.release()
 
     async def close_browser(self, browser: Browser) -> None:
         self._process_leases.pop(id(browser), None)
