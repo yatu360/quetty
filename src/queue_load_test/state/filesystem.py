@@ -172,6 +172,22 @@ class FileSystemStateStore:
             return False
         return True
 
+    async def clear(self) -> int:
+        """Delete every state document and abandoned temporary write; return the count."""
+
+        return await asyncio.to_thread(self._clear, self.directory)
+
+    @staticmethod
+    def _clear(directory: Path) -> int:
+        if not directory.is_dir():
+            return 0
+        removed = 0
+        for pattern in ("*.json", ".*.json.*.tmp"):
+            for path in directory.glob(pattern):
+                if path.is_file() and FileSystemStateStore._delete(path):
+                    removed += 1
+        return removed
+
 
 def _fsync_directory(directory: Path) -> None:
     """Persist the replaced directory entry where directory handles support fsync."""

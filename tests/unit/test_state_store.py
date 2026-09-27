@@ -226,3 +226,18 @@ async def test_concurrent_saves_of_one_session_leave_one_complete_version(
 
     assert await store.load("session-1") in versions
     assert list(store.directory.glob("*.tmp")) == []
+
+
+async def test_clear_removes_documents_and_abandoned_writes(tmp_path: Path) -> None:
+    store = FileSystemStateStore(tmp_path / "browser-state")
+    assert await store.clear() == 0
+    await store.save("session-a", {"cookies": [], "origins": []})
+    await store.save("session-b", {"cookies": [], "origins": []})
+    (store.directory / ".session-c.json.x1.tmp").write_text("partial")
+    unrelated = store.directory / "notes.txt"
+    unrelated.write_text("keep")
+
+    assert await store.clear() == 3
+
+    assert await store.load("session-a") is None
+    assert sorted(path.name for path in store.directory.iterdir()) == ["notes.txt"]

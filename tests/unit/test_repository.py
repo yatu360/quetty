@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    RunConfig,
+    SessionMode,
+)
 from queue_load_test.repository import (
     LeaseOwnershipError,
     ManualSessionBusyError,
@@ -617,4 +623,42 @@ async def test_update_never_rewrites_created_at(tmp_path: Path) -> None:
     assert persisted is not None
     assert persisted.created_at == original
     assert persisted.last_error == "changed"
+    await repository.close()
+
+
+async def test_reset_all_removes_run_sessions_progress_and_controls(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "reset.sqlite3")
+    run = RunConfig(
+        run_id="old-run",
+        target_url="https://staging.example.test/queue",
+        requested_sessions=2,
+        created_at=NOW,
+    )
+    await repository.create_run(run)
+    await repository.create(
+        make_session("one", queue_id="queue-one", status=QueueStatus.PARKED),
+        QueueProgress(session_id="one", progress_percentage=10.0),
+    )
+    await repository.create(make_session("two"))
+    await repository.set_monitoring_paused(True)
+    await repository.adjust_operator_population(3)
+
+    await repository.reset_all()
+
+    assert await repository.get_active_run() is None
+    assert await repository.get("one") is None
+    assert await repository.get_progress("one") is None
+    assert await repository.list() == []
+    assert not await repository.is_monitoring_paused()
+    assert await repository.get_operator_population_adjustment() == 0
+    # Setup's empty-database guard passes again, and a queue ID can be reused.
+    await repository.create_run(
+        RunConfig(
+            run_id="new-run",
+            target_url=run.target_url,
+            requested_sessions=1,
+            created_at=NOW,
+        )
+    )
+    await repository.create(make_session("three", queue_id="queue-one"))
     await repository.close()

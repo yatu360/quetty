@@ -406,6 +406,31 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def reset_all(self) -> None:
+        """Delete the run, every session and its progress, and reset runtime controls.
+
+        Only rows are removed; the schema stays, so setup can create a new run.
+        Callers must stop every browser owner first.
+        """
+
+        def operation() -> None:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute("DELETE FROM queue_progress")
+                connection.execute("DELETE FROM queue_sessions")
+                connection.execute("DELETE FROM run_config")
+                connection.execute(
+                    "UPDATE runtime_control SET monitoring_paused = 0, "
+                    "operator_population_adjustment = 0 WHERE singleton = 1"
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+        await self._run(operation)
+
     async def is_monitoring_paused(self) -> bool:
         """Return the persisted global automatic-monitoring control state."""
 

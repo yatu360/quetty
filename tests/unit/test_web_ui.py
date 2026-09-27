@@ -38,6 +38,7 @@ class FakeRuntime:
         self.actions: list[OperatorAction] = []
         self.tokens: list[str | None] = []
         self.stopped_accepting = False
+        self.reset_calls = 0
 
     async def start_run(self, run: RunConfig) -> None:
         self.started.append(run)
@@ -110,6 +111,11 @@ class FakeRuntime:
 
     def latest_add_action(self) -> OperatorAction | None:
         return next((item for item in reversed(self.actions) if item.session_id is None), None)
+
+    async def reset(self) -> None:
+        self.reset_calls += 1
+        if self.repository is not None:
+            await self.repository.reset_all()
 
     async def close(self) -> None:
         self.closed += 1
@@ -550,3 +556,55 @@ def test_operator_action_routes_render_controls_and_survive_partial_refresh(
         assert added.status_code == 200
         assert "Add requested" in added.text
         assert runtime.actions[-1].kind is OperatorActionKind.ADD
+
+
+def test_dashboard_reset_wipes_run_and_redirects_to_setup(tmp_path: Path) -> None:
+    database = tmp_path / "reset-ui.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(repository)
+    app = create_app(settings=settings(database), repository=repository, runtime=runtime)
+
+    with TestClient(app) as client:
+        client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/queue", "requested_sessions": "1"},
+        )
+        dashboard = client.get("/dashboard")
+        assert "Stop &amp; Reset Run" in dashboard.text
+
+        response = client.post("/run/reset", headers={"HX-Request": "true"})
+        assert response.status_code == 204
+        assert response.headers["HX-Redirect"] == "/setup"
+        assert runtime.reset_calls == 1
+        assert client.get("/", follow_redirects=False).headers["location"] == "/setup"
+
+        # Without a run there is nothing to reset; a plain post just lands on setup.
+        again = client.post("/run/reset", follow_redirects=False)
+        assert again.status_code == 303 and again.headers["location"] == "/setup"
+        assert runtime.reset_calls == 1
+
+
+def test_failed_dashboard_reset_keeps_run_and_accepts_later_actions(tmp_path: Path) -> None:
+    database = tmp_path / "reset-failed.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(repository)
+    app = create_app(settings=settings(database), repository=repository, runtime=runtime)
+
+    async def fail_reset() -> None:
+        raise RuntimeError("controlled reset failure")
+
+    runtime.reset = fail_reset  # type: ignore[method-assign]
+    with TestClient(app) as client:
+        client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/queue", "requested_sessions": "1"},
+        )
+
+        response = client.post("/run/reset", headers={"HX-Request": "true"})
+
+        assert "Reset failed; sessions were not deleted" in response.text
+        assert "controlled reset failure" not in response.text
+        assert client.get("/", follow_redirects=False).headers["location"] == "/dashboard"
+        paused = client.post("/monitoring/pause")
+        assert paused.status_code == 200
+        assert runtime.pause_calls == 1

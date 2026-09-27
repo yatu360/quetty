@@ -12,6 +12,7 @@ label { font-size: .85rem; font-weight: 650; }
 input, select, button { font: inherit; border-radius: 7px; border: 1px solid #bdc9c0; padding: .65rem .75rem; }
 button { background: #183f2a; color: #fff; border-color: #183f2a; cursor: pointer; font-weight: 700; }
 button:disabled { background: #8c9990; border-color: #8c9990; cursor: not-allowed; }
+button.danger { background: #9b1c1c; border-color: #9b1c1c; }
 .error { color: #8d1d1d; background: #fff0f0; border-left: 3px solid #b52b2b; padding: .75rem; }
 .notice { color: #285a3a; background: #eef8f0; border-left: 3px solid #3f8558; padding: .75rem; }
 .run-heading { display: flex; gap: 2rem; justify-content: space-between; flex-wrap: wrap; }

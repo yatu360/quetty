@@ -712,6 +712,73 @@ async def test_failed_add_leaves_no_orphan_or_population_drift(
     assert ownership_rows(database) == 0
 
 
+# ------------------------------------------------------------------------ run reset
+
+
+async def test_reset_stops_everything_wipes_data_and_allows_a_fresh_run(
+    tmp_path: Path, world: World
+) -> None:
+    database = tmp_path / "reset.sqlite3"
+    await seed(database, requested=2, sessions=(parked(0), parked(1)), paused=True)
+    state_directory = tmp_path / "state"
+    state_directory.mkdir()
+    (state_directory / "persisted-0.json").write_text("{}")
+    (state_directory / ".persisted-1.json.abc.tmp").write_text("{}")
+    app, repository, runtime = build(database)
+
+    async with running(app) as client:
+        await client.post("/sessions/persisted-0/open")
+        assert world.open_contexts == 1
+
+        response = await client.post("/run/reset", headers={"HX-Request": "true"})
+
+        assert response.status_code == 204
+        assert response.headers["HX-Redirect"] == "/setup"
+        assert world.open_contexts == 0
+        assert queue_ids(database) == {}
+        assert list(state_directory.iterdir()) == []
+        assert await repository.get_active_run() is None
+        assert not await repository.is_monitoring_paused()
+        assert population_adjustment(database) == 0
+        assert all(not manager.started for manager in world.managers)
+        landing = await client.get("/")
+        assert landing.headers["location"] == "/setup"
+
+        setup = await client.post(
+            "/setup", data={"target_url": TARGET, "requested_sessions": "1"}
+        )
+        assert setup.status_code == 303
+        fresh = await repository.get_active_run()
+        assert fresh is not None and fresh.run_id != "reliability-run"
+        assert fresh.requested_sessions == 1
+    assert runtime.error() is None
+
+
+async def test_reset_whose_wipe_fails_restarts_the_existing_run(
+    tmp_path: Path, world: World
+) -> None:
+    database = tmp_path / "reset-fail.sqlite3"
+    await seed(database, requested=1, sessions=(parked(0),))
+    before = queue_ids(database)
+    app, repository, _ = build(database)
+
+    async def fail_reset_all() -> None:
+        raise sqlite3.OperationalError("controlled wipe failure")
+
+    repository.reset_all = fail_reset_all  # type: ignore[method-assign]
+    async with running(app) as client:
+        response = await client.post("/run/reset", headers={"HX-Request": "true"})
+        assert "Reset failed; sessions were not deleted and the run was restarted" in (
+            response.text
+        )
+        assert queue_ids(database) == before
+        # The restarted runtime serves headed opens again.
+        opened = await client.post("/sessions/persisted-0/open")
+        assert "Opened in Chrome" in opened.text
+        assert world.open_contexts == 1
+    assert ownership_rows(database) == 0
+
+
 # -------------------------------------------------------------------------- helpers
 
 

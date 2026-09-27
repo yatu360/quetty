@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -14,6 +15,7 @@ from queue_load_test.browser import BrowserContextCapacity, BrowserManager
 from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
+from queue_load_test.metrics.logging import log_event
 from queue_load_test.models import RunConfig
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import SessionRepository
@@ -34,6 +36,8 @@ from queue_load_test.web.actions import (
     OperatorActionManager,
 )
 from queue_load_test.web.manual import ManualChromeSessionManager, ManualOpenResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +75,8 @@ class RunRuntime(Protocol):
     def session_action(self, session_id: str) -> OperatorAction | None: ...
 
     def latest_add_action(self) -> OperatorAction | None: ...
+
+    async def reset(self) -> None: ...
 
     async def close(self) -> None: ...
 
@@ -337,6 +343,34 @@ class ApplicationRunRuntime:
             )
         if self._manual_sessions is not None:
             await self._manual_sessions.close()
+
+    async def reset(self) -> None:
+        """Stop everything, then delete the run, all sessions, and saved browser state.
+
+        The ordered ``close`` runs first so no worker or headed window still owns a
+        row being deleted. If the database wipe fails the run is still persisted,
+        so the runtime is restarted rather than left stopped.
+        """
+
+        await self.close()
+        async with self._lock:
+            self._task = None
+            self._runtime = None
+            self._browser_manager = None
+            self._monitoring_scheduler = None
+            self._manual_sessions = None
+            self._shared_capacity = None
+            self._headed_browser_manager = None
+            self._operator_actions = None
+        try:
+            await self._repository.reset_all()
+        except Exception:
+            active = await self._repository.get_active_run()
+            if active is not None:
+                await self.start_run(active)
+            raise
+        removed = await FileSystemStateStore(self._base_settings.state_directory).clear()
+        log_event(logger, logging.INFO, "run_reset_completed", count=removed)
 
 
 @dataclass(frozen=True, slots=True)

@@ -118,6 +118,9 @@ class ReadOnlyRuntime:
     def latest_add_action(self) -> OperatorAction | None:
         return None
 
+    async def reset(self) -> None:
+        raise AssertionError("dashboard reads must never reset the run")
+
     async def close(self) -> None:
         return None
 

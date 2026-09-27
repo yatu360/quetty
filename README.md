@@ -78,9 +78,13 @@ normal navigation reaches that URL, so entering the Queue-it waiting-room URL it
 would make every observation look admitted. The setup page states this.
 
 Restarting `queue-load-test-ui` loads the same persisted run, skips setup, counts valid
-persisted Queue IDs, and resumes only the remaining acquisition deficit. Target changes
-are intentionally unsupported; the disabled **Start New Run** control is
-a placeholder and existing identities are never silently retargeted.
+persisted Queue IDs, and resumes only the remaining acquisition deficit. Existing
+identities are never silently retargeted. To start over, use **Stop & Reset Run** on the
+dashboard. After you confirm, it runs the normal ordered shutdown (creation, monitoring,
+operator work, headed Chrome, then the automatic browsers). It then deletes the run, every
+session and its progress, and all saved browser state, and resets the pause and population
+controls. The UI returns to setup, and a restart also opens on setup. Nothing is cancelled
+at Queue-it. If the database wipe fails, nothing is deleted and the existing run restarts.
 
 The dashboard shows run/acquisition/monitoring aggregates and a database-paginated
 50-row session view. Search supports `session_id` and `queue_id`; filters cover Queue-it

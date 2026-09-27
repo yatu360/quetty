@@ -54,7 +54,7 @@ def create_app(
     run_runtime = runtime or ApplicationRunRuntime(settings=settings, repository=repository)
     dashboard = DashboardService(repository, run_runtime)
     templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
-    lifecycle = {"accepting": False}
+    lifecycle = {"accepting": False, "resetting": False, "stopping": False}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -82,6 +82,7 @@ def create_app(
             finally:
                 # Uvicorn has stopped accepting connections and finished in-flight
                 # requests; refuse anything still arriving before tearing down.
+                lifecycle["stopping"] = True
                 lifecycle["accepting"] = False
                 run_runtime.stop_accepting()
                 try:
@@ -306,6 +307,41 @@ def create_app(
             return feedback(request, _SHUTTING_DOWN)
         await run_runtime.resume_monitoring()
         return await summary_response(request, run)
+
+    @app.post("/run/reset", response_class=HTMLResponse)
+    async def reset_run(request: Request) -> Response:
+        """Stop all work and delete the run so the next load starts at setup."""
+
+        if await require_run() is None:
+            return RedirectResponse("/setup", status_code=303)
+        if lifecycle["resetting"]:
+            return feedback(request, "Reset already in progress.")
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
+        lifecycle["resetting"] = True
+        lifecycle["accepting"] = False
+        try:
+            await run_runtime.reset()
+        except Exception as exc:  # noqa: BLE001 - reported without internal detail
+            log_event(
+                logger,
+                logging.ERROR,
+                "run_reset_failed",
+                error_type=type(exc).__name__,
+            )
+            restored = await repository.get_active_run() is not None
+            return feedback(
+                request,
+                "Reset failed; sessions were not deleted and the run was restarted."
+                if restored
+                else "Reset failed after the run was deleted; reload to continue at setup.",
+            )
+        finally:
+            lifecycle["accepting"] = not lifecycle["stopping"]
+            lifecycle["resetting"] = False
+        if request.headers.get("HX-Request") == "true":
+            return Response(status_code=204, headers={"HX-Redirect": "/setup"})
+        return RedirectResponse("/setup", status_code=303)
 
     @app.get("/partials/sessions", response_class=HTMLResponse)
     async def sessions_partial(

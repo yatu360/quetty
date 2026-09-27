@@ -44,8 +44,10 @@
           </select>
         </label>
         <button type="submit">Apply</button>
-        <button type="button" disabled title="Retargeting is not supported; use a new, empty database for a new target">
-          Start New Run
+        <button type="button" class="danger" hx-post="/run/reset" hx-target="#action-feedback"
+                hx-confirm="Stop everything and delete ALL sessions, the run and saved browser state? This cannot be undone and does not cancel anything at Queue-it."
+                title="Stop all work, close Chrome, and start fresh at setup">
+          Stop &amp; Reset Run
         </button>
       </form>
       {# Outside the polled region: automatic refresh never replaces action feedback. #}
