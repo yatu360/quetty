@@ -523,12 +523,84 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 5 complete — define Phase 6 only from the next operator/product
-requirement.
+**Next:** Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox Dependency
+Resolution.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
 Stop & Reset Run wipes the database and starts over.
+
+## Phase 6 — Camoufox Browser Integration
+
+**Status: Prompt 1 readiness completed on 2026-09-27; implementation has not started.
+Camoufox is NOT READY to become the default.** See
+`docs/phase6_camoufox_readiness.md`.
+
+The intended Phase 6 architecture remains:
+
+`one persisted Quetty session = one stable supported Camoufox identity descriptor`,
+while browser processes, contexts, workers, and tasks remain bounded and contexts stay
+temporary. Creation persists the Queue ID, transfer URL, storage state, identity
+descriptor, and browser provenance; restoration recreates a context with the same
+descriptor, verifies the expected Queue ID, refreshes state, and parks it again.
+
+This phase must not add proxy rotation, CAPTCHA solving, humanized-input tuning,
+WAF-specific bypass logic, traffic interception/evasion, undocumented Queue-it APIs,
+or one browser process/profile per persisted session.
+
+1. **Camoufox Readiness and Compatibility** — **completed on 2026-09-27; PARTIAL / NOT
+   READY for default.**
+   - Current project Python is `>=3.12`; Camoufox 0.5.6 supports
+     `>=3.10,<4.0`.
+   - The installed/validated Playwright is 1.63.0, but Camoufox 0.5.6 and reviewed
+     upstream 0.5.7 metadata require `playwright<1.63`. No unsupported combination or
+     downgrade was installed.
+   - Public `AsyncNewBrowser(playwright, ...)` allows the existing async controller and
+     bounded multi-browser lifecycle to be retained. One Camoufox browser can host
+     multiple isolated contexts.
+   - Public `AsyncNewContext` provides per-context fingerprints and accepts Playwright
+     context options, including storage state. However, in 0.5.6 a reused preset still
+     generates fresh identity components. There is no accepted complete, versioned,
+     deterministic per-context descriptor/export-import contract, so the preferred
+     identity strategy is blocked.
+   - Both directions of Chrome/Camoufox Queue-it storage-state compatibility are
+     UNKNOWN. Existing runs remain Chrome unless a future explicit migration is
+     separately evidenced.
+   - The minimum boundary keeps `BrowserManager` as capacity/slot/restart owner and
+     delegates only launch, identity creation, and context creation to a
+     `BrowserBackend`. No runtime behavior changed.
+   - Baseline: 463 tests passed, 4 staging tests deselected; Ruff and strict mypy
+     passed.
+
+2. **Browser Backend Boundary and Camoufox Dependency Resolution** — **next.**
+   Introduce the smallest Chrome-preserving `BrowserBackend` seam, retain compatibility
+   names where needed, and resolve a single explicit Playwright/Camoufox package set
+   without ignoring metadata or silently downgrading. Add exact browser-fetch and
+   missing-browser preflight behavior, but do not enable Camoufox sessions until the
+   stable identity descriptor gate passes.
+
+3. **Browser Provenance and Identity Artifact Schema** — planned. Add immutable run
+   backend selection and per-session backend/engine/package/browser/artifact
+   provenance. Migrate every existing run/session to Chrome/Chromium without changing
+   Queue IDs, transfer URLs, storage state, progress, schedules, leases, or ownership.
+   Define an identity payload only from a supported public Camoufox contract.
+
+4. **Camoufox Context Lifecycle and Restoration** — blocked pending the stable public
+   identity descriptor gate. When unblocked, implement disposable context creation,
+   transfer-first HYBRID restoration, TRANSFER_ONLY support, expected Queue ID
+   verification, refreshed artifact persistence, and browser-process restart using the
+   same per-session descriptor.
+
+5. **Camoufox Headed Open and Recovery** — planned after context lifecycle evidence.
+   Preserve manual ownership fencing, heartbeat, Close/window-close/crash release,
+   non-repairing liveness checks, final inspection, and shared global capacity.
+
+6. **Phase 6 Compatibility and Staging Acceptance** — planned. Require bounded
+   multi-context/process evidence, app/process restart identity round trips, local
+   HYBRID and TRANSFER_ONLY workflows, headed behavior on supported hosts, provenance
+   fail-closed tests, exact packaging/fetch evidence, and authorised Queue-it staging
+   continuity with zero silent identity replacement before considering Camoufox the
+   default for new runs.
 
 ## Scaling Gates
 

@@ -3512,3 +3512,90 @@ is persisted.
 ### Git State
 
 - Branch: `main`
+
+## 2026-09-27 — Phase 6 Prompt 1 — Camoufox readiness and compatibility
+
+### Agent / Model
+
+OpenAI Codex / GPT-5
+
+### Goal
+
+Determine the smallest safe architecture for adding Camoufox as a browser backend while
+preserving all Phase 5 invariants. This was a research/readiness prompt; runtime browser
+behavior was not changed.
+
+### Upstream and Dependency Findings
+
+- Reviewed the current Camoufox repository at
+  `0c6cc0a397da9ffcbca51df8efec6749c2a97f67`, the official Python documentation, the
+  current PyPI metadata, and the released 0.5.6 source distribution.
+- Current released Python package: Camoufox 0.5.6, Python `>=3.10,<4.0`, with
+  `playwright<1.63`.
+- This project declares `playwright>=1.46` and currently has Playwright 1.63.0
+  installed, matching its last recorded validation. A pip dry run for
+  `camoufox==0.5.6` selected Playwright 1.62.0. Nothing was installed or downgraded.
+- Reviewed upstream `main` identifies the package as 0.5.7 but is unreleased and retains
+  `playwright<1.63`; it was not treated as an installable contract.
+- The current official stable browser release available for an exact evaluated pin is
+  `152.0.4-beta.30`. Camoufox browser installation is separate from Playwright and uses
+  `camoufox fetch`; exact package, Playwright, and browser pins are required.
+
+### Architecture Findings
+
+- `AsyncNewBrowser` accepts an existing async Playwright controller, so Camoufox does
+  not require a separate controller/service after dependency resolution.
+- A Camoufox `Browser` can host multiple isolated disposable BrowserContexts. The
+  existing bounded process-slot/context architecture can remain and must never become
+  one process or persistent profile per session.
+- Normal `browser.new_context()` shares the launch-level Camoufox identity across the
+  process. `AsyncNewContext()` creates a per-context identity and accepts Playwright
+  context options such as `storage_state`.
+- Reusing an `AsyncNewContext(preset=...)` preset in 0.5.6 does not prove full identity
+  stability: fresh audio/canvas/font-spacing seeds, font lists, and voice lists are
+  generated. Persisting internal config/helper output or init scripts was rejected.
+- Strategy C—one supported stable identity descriptor per Quetty session—remains the
+  intended architecture but is **FAIL on current evidence** until Camoufox publishes a
+  complete deterministic, serializable, versioned context identity contract.
+- Both Chrome-to-Camoufox and Camoufox-to-Chrome Queue-it storage-state compatibility
+  are **UNKNOWN**. Existing runs must stay on Chrome and must not be silently migrated.
+- Proposed only a minimal `BrowserBackend` seam: `BrowserManager` keeps slots, bounds,
+  restart, ownership, cleanup, and metrics; a `ChromeBackend` or future
+  `CamoufoxBackend` supplies launch, new-identity, and new-context behavior.
+- Proposed immutable run backend selection plus per-session backend/engine/package/
+  browser/artifact provenance. Legacy/current data migrates to Chrome/Chromium without
+  changing Queue IDs or browser state.
+- Audited BrowserManager, creation, restoration, monitoring, state, runtime, headed
+  manual ownership, UI actions, tests, harnesses, and Chrome-named metrics. Scheduling,
+  leases, Queue ID verification, HYBRID transfer-first behavior, TRANSFER_ONLY,
+  ownership fencing, and operator actions can remain.
+
+### Files Added
+
+- `docs/phase6_camoufox_readiness.md`
+
+### Files Modified
+
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Validation
+
+- `.venv/bin/python -m pytest`: 463 passed, 4 staging tests deselected, one existing
+  Starlette/httpx deprecation warning.
+- `.venv/bin/python -m ruff check src tests`: passed.
+- `.venv/bin/python -m mypy src`: passed, 65 source files.
+- `.venv/bin/python -m pip install --dry-run 'camoufox==0.5.6'`: no installation;
+  confirmed resolver selection of Playwright 1.62.0.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it staging configuration was used and no Queue-it
+  traffic was sent.
+
+### Decision and Next Task
+
+- Readiness is **PARTIAL / NOT READY to make Camoufox the default**.
+- Exact next task: **Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox
+  Dependency Resolution.**

@@ -9,7 +9,30 @@ live monitoring.
 
 ## Current Status
 
-- Current phase: **Phase 5 is complete.** `docs/phase5_acceptance.md` records
+- Phase 6 Prompt 1 Camoufox readiness is complete. The decision is **PARTIAL / NOT
+  READY to make Camoufox the default**; no runtime browser behavior changed. See
+  `docs/phase6_camoufox_readiness.md`.
+  - The current released package is Camoufox 0.5.6 (`Python >=3.10,<4.0`) and it
+    requires `playwright<1.63`. This conflicts with the installed and previously
+    validated Playwright 1.63.0. A dry run selected Playwright 1.62.0; no downgrade or
+    Camoufox installation was performed.
+  - `AsyncNewBrowser` can use the existing async Playwright controller, and one
+    Camoufox `Browser` can own multiple isolated disposable contexts. The bounded
+    parked-session architecture is therefore viable without one process per session.
+  - The preferred one-stable-identity-descriptor-per-session design is blocked on
+    current public evidence. Camoufox 0.5.6 `AsyncNewContext(preset=...)` regenerates
+    identity components when reusing a preset, so the preset is not a proven complete
+    deterministic descriptor. Private/generated Camoufox config and init scripts must
+    not become persisted project contracts.
+  - Chrome-created state in Camoufox and Camoufox-created state in Chrome are both
+    **UNKNOWN** for Queue-it continuity. Existing runs must remain Chrome/Chromium and
+    must never be silently migrated.
+  - Proposed minimum seam: keep `BrowserManager` responsible for slots, capacity,
+    restart and cleanup; delegate launch, identity creation, and context creation to
+    `ChromeBackend` or `CamoufoxBackend`. Creation, restoration, monitoring,
+    scheduling, ownership, UI actions, and Queue ID verification stay browser-agnostic.
+  - Prompt 1 baseline: 463 passed, 4 staging deselected; Ruff and strict mypy passed.
+- Phase 5 remains complete. `docs/phase5_acceptance.md` records
   **PARTIAL: 108 PASS, 0 FAIL, 0 UNKNOWN** on local evidence. Eight separately listed
   Queue-it staging items (S1–S8) are **NOT RUN / UNKNOWN**; no Queue-it traffic was
   ever sent.
@@ -69,9 +92,9 @@ live monitoring.
   (`docs/results/phase5_workflow_result.json`). The real CLI was checked for default
   localhost bind, a Playwright double-click, SIGKILL-with-headed-window recovery, a
   refused second instance, and clean SIGTERM.
-- **Final checks:** 458 passed and 2 skipped (4 staging deselected) after the
-  follow-ups below. Ruff and mypy are clean on darwin/linux. On win32, mypy reports 2 pre-existing
-  `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
+- **Current checks:** 463 passed (4 staging deselected) at the Phase 6 readiness
+  baseline. Ruff and mypy are clean on darwin. Earlier win32 mypy evidence reported 2
+  pre-existing `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
 - **Known limitations:**
   - no staging validation;
   - harness CLIs do not take the instance lock;
@@ -157,8 +180,8 @@ live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 5 complete — define Phase 6 only from the next
-  operator/product requirement.**
+- Exact next task: **Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox
+  Dependency Resolution.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1031,7 +1054,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 5 complete — define Phase 6 only from the next operator/product requirement.
+Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox Dependency Resolution.
 
 ## Instructions for Future AI Sessions
 
