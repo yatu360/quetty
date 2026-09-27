@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import Field, HttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.session import SessionMode
 
 
@@ -16,6 +17,10 @@ class Settings(BaseSettings):
     staging_url: HttpUrl | None = Field(default=None, alias="STAGING_URL")
     target_queue_ids: int = Field(default=1000, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
+    browser_backend: BrowserBackendName = Field(
+        default=BrowserBackendName.CHROME,
+        alias="BROWSER_BACKEND",
+    )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
         default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25
@@ -134,6 +139,13 @@ class Settings(BaseSettings):
             # Pydantic reports ValueError as configuration validation failure.
             raise ValueError("SESSION_MODE must be a string")  # noqa: TRY004
         return SessionMode.parse(value)
+
+    @field_validator("browser_backend", mode="before")
+    @classmethod
+    def parse_browser_backend(cls, value: object) -> BrowserBackendName:
+        if not isinstance(value, str | BrowserBackendName):
+            raise ValueError("BROWSER_BACKEND must be a string")  # noqa: TRY004
+        return BrowserBackendName.parse(value)
 
     @model_validator(mode="after")
     def validate_capacity(self) -> "Settings":

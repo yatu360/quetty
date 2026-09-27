@@ -1,4 +1,4 @@
-"""Capacity-aware management of Chrome processes and isolated contexts."""
+"""Capacity-aware management of browser processes and isolated contexts."""
 
 from __future__ import annotations
 
@@ -8,11 +8,17 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Self
 
-from playwright.async_api import Browser, BrowserContext, Playwright, StorageState, async_playwright
+from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
 
+from queue_load_test.browser.backend import (
+    BrowserBackend,
+    BrowserBackendDiagnostics,
+    ChromeBackend,
+    create_browser_backend,
+)
+from queue_load_test.browser.backend import ContextStorageState as BackendContextStorageState
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
@@ -20,7 +26,7 @@ from queue_load_test.metrics.prometheus import PrometheusMetrics
 logger = logging.getLogger(__name__)
 
 type PlaywrightStarter = Callable[[], Awaitable[Playwright]]
-type ContextStorageState = str | Path | StorageState
+type ContextStorageState = BackendContextStorageState
 
 
 class BrowserManagerError(RuntimeError):
@@ -65,7 +71,7 @@ class BrowserContextCapacity:
 
 @dataclass(frozen=True, slots=True)
 class BrowserProcessCapacity:
-    """Capacity details for one managed Chrome process."""
+    """Capacity details for one managed browser process."""
 
     index: int
     connected: bool
@@ -77,12 +83,20 @@ class BrowserProcessCapacity:
 class BrowserCapacity:
     """Point-in-time resource accounting for the manager."""
 
+    # Historical Python API retained for Phase 5 callers. This is not a Prometheus
+    # metric name; new code should use browser_processes.
     chrome_processes: int
     connected_processes: int
     active_contexts: int
     available_contexts: int
     maximum_active_contexts: int
     processes: tuple[BrowserProcessCapacity, ...]
+
+    @property
+    def browser_processes(self) -> int:
+        """Return the number of managed processes for the selected backend."""
+
+        return self.chrome_processes
 
 
 @dataclass(slots=True)
@@ -134,13 +148,13 @@ class OwnedBrowserContext:
 
     @property
     def browser_id(self) -> int:
-        """Return the stable identifier of the Chrome slot owning this context."""
+        """Return the stable identifier of the browser slot owning this context."""
 
         return self._slot.index
 
     @property
     def creation_duration_seconds(self) -> float:
-        """Time spent asking Chrome to create this context."""
+        """Time spent asking the browser to create this context."""
 
         return self._creation_duration_seconds
 
@@ -173,7 +187,7 @@ async def _start_playwright() -> Playwright:
 
 
 class BrowserManager:
-    """Own shared Chrome processes and isolated visitor contexts."""
+    """Own shared browser processes and isolated visitor contexts."""
 
     def __init__(
         self,
@@ -187,6 +201,7 @@ class BrowserManager:
         operation_timeout_seconds: float = 30.0,
         close_timeout_seconds: float = 5.0,
         shared_capacity: BrowserContextCapacity | None = None,
+        backend: BrowserBackend | None = None,
     ) -> None:
         if operation_timeout_seconds <= 0 or close_timeout_seconds <= 0:
             raise ValueError("browser operation timeouts must be positive")
@@ -200,7 +215,7 @@ class BrowserManager:
         if max_active_contexts > total_capacity:
             raise ValueError("max_active_contexts cannot exceed total browser capacity")
 
-        self._chrome_process_count = chrome_process_count
+        self._browser_process_count = chrome_process_count
         self._max_contexts_per_browser = max_contexts_per_browser
         self._max_active_contexts = max_active_contexts
         self._headless = headless
@@ -212,12 +227,13 @@ class BrowserManager:
         self._running = False
         self._restart_count = 0
         self._restart_durations: list[float] = []
-        # Playwright calls against a Chrome process killed mid-call can stay pending
+        # Playwright calls against a browser process killed mid-call can stay pending
         # forever. Every browser call made while holding the allocation lock, or
         # during restart/shutdown, is therefore bounded.
         self._operation_timeout_seconds = operation_timeout_seconds
         self._close_timeout_seconds = close_timeout_seconds
         self._shared_capacity = shared_capacity
+        self._backend = backend or ChromeBackend()
 
     @classmethod
     def from_settings(
@@ -236,6 +252,7 @@ class BrowserManager:
             playwright_starter=playwright_starter,
             observability=observability,
             shared_capacity=shared_capacity,
+            backend=create_browser_backend(settings.browser_backend),
         )
 
     @property
@@ -244,7 +261,7 @@ class BrowserManager:
 
     @property
     def restart_count(self) -> int:
-        """Disconnected Chrome processes this manager has attempted to replace."""
+        """Disconnected browser processes this manager has attempted to replace."""
 
         return self._restart_count
 
@@ -254,8 +271,32 @@ class BrowserManager:
 
         return tuple(self._restart_durations)
 
+    @property
+    def backend_name(self) -> str:
+        """Configured backend name for diagnostics and tests."""
+
+        return self._backend.name.value
+
+    @property
+    def managed_process_count(self) -> int:
+        """Processes currently owned by this manager."""
+
+        return len(self._slots)
+
+    @property
+    def active_context_count(self) -> int:
+        """Contexts currently owned by this manager."""
+
+        return self._active_context_count()
+
+    def backend_diagnostics(self) -> BrowserBackendDiagnostics:
+        """Return package and live browser versions without mutating state."""
+
+        browser = self._slots[0].browser if self._slots else None
+        return self._backend.diagnostics(browser)
+
     async def start(self) -> None:
-        """Start Playwright and the configured number of Google Chrome processes."""
+        """Start Playwright and the configured number of browser processes."""
 
         async with self._lock:
             if self._running:
@@ -263,7 +304,7 @@ class BrowserManager:
             playwright = await self._playwright_starter()
             self._playwright = playwright
             try:
-                for index in range(self._chrome_process_count):
+                for index in range(self._browser_process_count):
                     browser = await self._launch_browser()
                     self._slots.append(_BrowserSlot(index=index, browser=browser))
             except BaseException:
@@ -276,10 +317,7 @@ class BrowserManager:
     async def _launch_browser(self) -> Browser:
         if self._playwright is None:
             raise BrowserManagerNotStartedError("Playwright is not running")
-        return await self._playwright.chromium.launch(
-            channel="chrome",
-            headless=self._headless,
-        )
+        return await self._backend.launch(self._playwright, headless=self._headless)
 
     def _active_context_count(self) -> int:
         return sum(len(slot.contexts) for slot in self._slots)
@@ -329,7 +367,7 @@ class BrowserManager:
                     slot
                     for slot in self._slots
                     if slot.restart_task is None
-                    and slot.browser.is_connected()
+                    and self._backend.is_connected(slot.browser)
                     and len(slot.contexts) < self._max_contexts_per_browser
                 ]
                 if candidates:
@@ -359,12 +397,12 @@ class BrowserManager:
                             self._observability.record_context_creation_duration(
                                 creation_duration
                             )
-                        if slot.browser.is_connected():
+                        if self._backend.is_connected(slot.browser):
                             raise
                         restart_tasks = self._schedule_failed_restarts_locked()
                         wait_for_restart = not any(
                             candidate.restart_task is None
-                            and candidate.browser.is_connected()
+                            and self._backend.is_connected(candidate.browser)
                             and len(candidate.contexts) < self._max_contexts_per_browser
                             for candidate in self._slots
                         )
@@ -402,7 +440,7 @@ class BrowserManager:
             # No healthy slot was available, or the chosen slot disconnected while
             # creating its context. Wait only when recovery is required to proceed.
             # When another slot is healthy the loop selects it without waiting for
-            # the failed Chrome process to relaunch.
+            # the failed browser process to relaunch.
             if wait_for_restart:
                 restart_results = await asyncio.gather(*restart_tasks)
                 if not any(restart_results):
@@ -410,14 +448,12 @@ class BrowserManager:
                         "No disconnected browser process could be restarted"
                     )
 
-    @staticmethod
     async def _new_context(
+        self,
         browser: Browser,
         storage_state: ContextStorageState | None,
     ) -> BrowserContext:
-        if storage_state is None:
-            return await browser.new_context()
-        return await browser.new_context(storage_state=storage_state)
+        return await self._backend.new_context(browser, storage_state=storage_state)
 
     @asynccontextmanager
     async def context(
@@ -445,20 +481,23 @@ class BrowserManager:
         owned_context._slot.contexts.discard(owned_context)
         owned_context._mark_closed()
         self._update_capacity_metrics()
-        await self._bounded_close(owned_context.context.close(), owned_context._slot.index)
+        await self._bounded_close(
+            self._backend.close_context(owned_context.context),
+            owned_context._slot.index,
+        )
 
     def _release_shared_capacity(self) -> None:
         if self._shared_capacity is not None:
             self._shared_capacity.release()
 
     async def _bounded_close(self, closing: Awaitable[None], browser_id: int) -> None:
-        """Close a Chrome resource without letting cancellation or a dead process hang us."""
+        """Close a browser resource without letting cancellation or a dead process hang us."""
 
         close = asyncio.ensure_future(closing)
         try:
             await asyncio.wait_for(asyncio.shield(close), timeout=self._close_timeout_seconds)
         except asyncio.CancelledError:
-            # Let Chrome finish closing in the background.
+            # Let the browser finish closing in the background.
             close.add_done_callback(lambda task: self._record_background_close(task, browser_id))
             raise
         except TimeoutError as exc:
@@ -498,7 +537,7 @@ class BrowserManager:
     def _schedule_failed_restarts_locked(self) -> tuple[asyncio.Task[bool], ...]:
         restart_tasks: list[asyncio.Task[bool]] = []
         for slot in self._slots:
-            if slot.browser.is_connected():
+            if self._backend.is_connected(slot.browser):
                 continue
             if slot.restart_task is None:
                 lost_contexts = tuple(slot.contexts)
@@ -532,9 +571,15 @@ class BrowserManager:
             lost_contexts=len(lost_contexts),
         )
         for owned_context in lost_contexts:
-            await self._bounded_close(owned_context.context.close(), slot.index)
+            await self._bounded_close(
+                self._backend.close_context(owned_context.context),
+                slot.index,
+            )
         try:
-            await asyncio.wait_for(old_browser.close(), timeout=self._close_timeout_seconds)
+            await asyncio.wait_for(
+                self._backend.close_browser(old_browser),
+                timeout=self._close_timeout_seconds,
+            )
         except Exception as exc:  # noqa: BLE001
             if self._observability is not None:
                 self._observability.record_browser_cleanup_failure()
@@ -570,7 +615,7 @@ class BrowserManager:
 
         if replacement is not None and not installed:
             try:
-                await replacement.close()
+                await self._backend.close_browser(replacement)
             except Exception as exc:  # noqa: BLE001
                 if self._observability is not None:
                     self._observability.record_browser_cleanup_failure()
@@ -600,7 +645,7 @@ class BrowserManager:
         return installed
 
     async def capacity(self, *, repair: bool = True) -> BrowserCapacity:
-        """Return resource accounting, optionally repairing dead Chrome processes.
+        """Return resource accounting, optionally repairing dead browser processes.
 
         Operator dashboard reads pass ``repair=False`` so viewing status cannot start
         browser recovery activity. Runtime and monitoring callers retain repair by
@@ -619,7 +664,7 @@ class BrowserManager:
             process_capacity = tuple(
                 BrowserProcessCapacity(
                     index=slot.index,
-                    connected=slot.browser.is_connected(),
+                    connected=self._backend.is_connected(slot.browser),
                     active_contexts=len(slot.contexts),
                     available_contexts=max(
                         0,
@@ -650,7 +695,7 @@ class BrowserManager:
             )
 
     async def shutdown(self) -> None:
-        """Close every context, Chrome process, and the Playwright controller."""
+        """Close every context, browser process, and the Playwright controller."""
 
         async with self._lock:
             self._running = False
@@ -671,10 +716,16 @@ class BrowserManager:
             slot.contexts.clear()
             for owned_context in contexts:
                 owned_context._mark_closed()
-                await self._bounded_close(owned_context.context.close(), slot.index)
+                await self._bounded_close(
+                    self._backend.close_context(owned_context.context),
+                    slot.index,
+                )
         for slot in self._slots:
             try:
-                await asyncio.wait_for(slot.browser.close(), timeout=self._close_timeout_seconds)
+                await asyncio.wait_for(
+                    self._backend.close_browser(slot.browser),
+                    timeout=self._close_timeout_seconds,
+                )
             except Exception as exc:  # noqa: BLE001
                 if self._observability is not None:
                     self._observability.record_browser_cleanup_failure()

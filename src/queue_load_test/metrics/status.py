@@ -77,7 +77,7 @@ class StatusSummary:
             ("Lost Queue IDs", self.lost_queue_ids),
             ("Persisted sessions", self.persisted_sessions),
             ("Active contexts", self.active_contexts),
-            ("Chrome processes", self.chrome_processes),
+            ("Browser processes", self.chrome_processes),
             ("Workers (monitor/create)", f"{self.monitoring_workers}/{self.creation_workers}"),
             ("Checks/sec", f"{self.checks_per_second:.2f}"),
             ("Creation rate", f"{self.creation_rate_per_second:.2f}/s"),
@@ -145,7 +145,7 @@ class StatusSummaryProvider:
         capacity = await self._browser_manager.capacity()
         self._metrics.set_browser_capacity(
             active_contexts=capacity.active_contexts,
-            processes=capacity.chrome_processes,
+            processes=capacity.browser_processes,
         )
         check_statistics = self._metrics.refresh_rate_gauges()
         metrics = self._metrics
@@ -165,7 +165,7 @@ class StatusSummaryProvider:
             expired=counts[QueueStatus.EXPIRED],
             failed=counts[QueueStatus.FAILED],
             active_contexts=capacity.active_contexts,
-            chrome_processes=capacity.chrome_processes,
+            chrome_processes=capacity.browser_processes,
             checks_per_second=check_statistics.checks_per_second,
             average_check_duration_seconds=(check_statistics.average_check_duration_seconds),
             lost_queue_ids=recovery.lost_queue_ids,

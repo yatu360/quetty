@@ -1,5 +1,6 @@
 """Domain models."""
 
+from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.lifecycle import (
     InvalidQueueTransition,
     QueuePageSignals,
@@ -19,6 +20,7 @@ from queue_load_test.models.session import QueueSession, QueueStatus, SessionMod
 from queue_load_test.models.work_item import WorkItem
 
 __all__ = [
+    "BrowserBackendName",
     "BrowserRuntimeState",
     "InvalidQueueTransition",
     "QueueExtractionDiagnostics",

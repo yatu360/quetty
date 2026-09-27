@@ -523,8 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox Dependency
-Resolution.
+**Next:** Phase 6 Prompt 3 — Stable Camoufox Session Identity and Park/Reopen.
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -532,7 +531,7 @@ Stop & Reset Run wipes the database and starts over.
 
 ## Phase 6 — Camoufox Browser Integration
 
-**Status: Prompt 1 readiness completed on 2026-09-27; implementation has not started.
+**Status: Prompt 2 dependency/backend implementation completed on 2026-09-27.
 Camoufox is NOT READY to become the default.** See
 `docs/phase6_camoufox_readiness.md`.
 
@@ -572,18 +571,36 @@ or one browser process/profile per persisted session.
    - Baseline: 463 tests passed, 4 staging tests deselected; Ruff and strict mypy
      passed.
 
-2. **Browser Backend Boundary and Camoufox Dependency Resolution** — **next.**
-   Introduce the smallest Chrome-preserving `BrowserBackend` seam, retain compatibility
-   names where needed, and resolve a single explicit Playwright/Camoufox package set
-   without ignoring metadata or silently downgrading. Add exact browser-fetch and
-   missing-browser preflight behavior, but do not enable Camoufox sessions until the
-   stable identity descriptor gate passes.
+2. **Browser Backend Boundary and Camoufox Dependency Resolution** — **completed on
+   2026-09-27.**
+   - Pinned Camoufox 0.5.6 and Playwright 1.62.0 after a compatible pip resolution and
+     full Chrome regression validation; the prior environment used Playwright 1.63.0.
+   - Pinned installed browser 152.0.4-beta.30. A current sync exposes beta.31, but
+     beta.30 has explicit upstream 1.61/1.62 compatibility evidence and passed the
+     local macOS arm64 preflight.
+   - Added minimal `BrowserBackend`, `ChromeBackend`, and `CamoufoxBackend` classes.
+     `BrowserManager` retains all fixed process slots, context/global/shared bounds,
+     restart tasks, metrics, timeouts, and cleanup.
+   - Added typed `BROWSER_BACKEND=chrome|camoufox`, with Chrome still default. Existing
+     Chrome launch behavior remains `channel="chrome"`; old Python capacity names stay
+     as compatibility aliases while operator/metric text is browser-neutral.
+   - Added explicit setup command
+     `camoufox fetch official/stable/152.0.4-beta.30` and a local-only human/JSON
+     preflight. Application launch selects the exact already-installed build and gives
+     an actionable error when absent; it never downloads a browser.
+   - Local preflight passed async launch, one context, `data:` navigation, context and
+     browser close, zero manager counts, and no orphan process. No Queue-it/staging
+     traffic was sent.
+   - Stable per-session identity and provenance were deliberately not implemented.
+     Do not use the Camoufox option for Queue-it runs before Prompt 3.
 
-3. **Browser Provenance and Identity Artifact Schema** — planned. Add immutable run
+3. **Stable Camoufox Session Identity and Park/Reopen** — **next.** Add immutable run
    backend selection and per-session backend/engine/package/browser/artifact
    provenance. Migrate every existing run/session to Chrome/Chromium without changing
    Queue IDs, transfer URLs, storage state, progress, schedules, leases, or ownership.
-   Define an identity payload only from a supported public Camoufox contract.
+   Define an identity payload only from a supported public Camoufox contract, then prove
+   same-identity context close/reopen and application restart before enabling Queue-it
+   use.
 
 4. **Camoufox Context Lifecycle and Restoration** — blocked pending the stable public
    identity descriptor gate. When unblocked, implement disposable context creation,

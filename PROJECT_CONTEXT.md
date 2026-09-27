@@ -9,13 +9,18 @@ live monitoring.
 
 ## Current Status
 
-- Phase 6 Prompt 1 Camoufox readiness is complete. The decision is **PARTIAL / NOT
-  READY to make Camoufox the default**; no runtime browser behavior changed. See
+- Phase 6 Prompt 2 browser-backend/dependency work is complete. The decision remains
+  **PARTIAL / NOT READY to make Camoufox the default**. See
   `docs/phase6_camoufox_readiness.md`.
   - The current released package is Camoufox 0.5.6 (`Python >=3.10,<4.0`) and it
-    requires `playwright<1.63`. This conflicts with the installed and previously
-    validated Playwright 1.63.0. A dry run selected Playwright 1.62.0; no downgrade or
-    Camoufox installation was performed.
+    requires `playwright<1.63`. The project deliberately changed its prior Playwright
+    1.63.0 environment/declaration to exact Playwright 1.62.0 and added exact Camoufox
+    0.5.6. `pip check` passes; no dependency constraints were bypassed.
+  - The exact locally validated browser is official stable 152.0.4-beta.30. Current
+    upstream also lists beta.31, but Quetty pins beta.30 because upstream explicitly
+    records Playwright 1.61/1.62 compatibility for it and the local preflight passes.
+    Setup is explicit with
+    `camoufox fetch official/stable/152.0.4-beta.30`; runtime never downloads it.
   - `AsyncNewBrowser` can use the existing async Playwright controller, and one
     Camoufox `Browser` can own multiple isolated disposable contexts. The bounded
     parked-session architecture is therefore viable without one process per session.
@@ -27,11 +32,18 @@ live monitoring.
   - Chrome-created state in Camoufox and Camoufox-created state in Chrome are both
     **UNKNOWN** for Queue-it continuity. Existing runs must remain Chrome/Chromium and
     must never be silently migrated.
-  - Proposed minimum seam: keep `BrowserManager` responsible for slots, capacity,
-    restart and cleanup; delegate launch, identity creation, and context creation to
-    `ChromeBackend` or `CamoufoxBackend`. Creation, restoration, monitoring,
-    scheduling, ownership, UI actions, and Queue ID verification stay browser-agnostic.
-  - Prompt 1 baseline: 463 passed, 4 staging deselected; Ruff and strict mypy passed.
+  - The minimum seam is implemented: `BrowserManager` keeps slots, capacity, shared
+    headed/automatic limits, bounded restart tasks, cleanup, and metrics;
+    `ChromeBackend`/`CamoufoxBackend` delegate launch, context, connectivity, close,
+    and diagnostics. Chrome is still the default via typed
+    `BROWSER_BACKEND=chrome|camoufox`.
+  - `queue-load-test-camoufox-preflight` sends no network traffic beyond a local
+    `data:` URL and passed with package 0.5.6, Playwright 1.62.0, browser beta.30, one
+    context, zero contexts after close, zero managed processes after shutdown, and no
+    residual Camoufox OS process.
+  - Stable per-session Camoufox identity, park/reopen, provenance persistence, and
+    cross-engine state migration remain Prompt 3 work. Do not use Camoufox for
+    Queue-it runs yet. Chrome remains the operational default.
 - Phase 5 remains complete. `docs/phase5_acceptance.md` records
   **PARTIAL: 108 PASS, 0 FAIL, 0 UNKNOWN** on local evidence. Eight separately listed
   Queue-it staging items (S1–S8) are **NOT RUN / UNKNOWN**; no Queue-it traffic was
@@ -92,8 +104,10 @@ live monitoring.
   (`docs/results/phase5_workflow_result.json`). The real CLI was checked for default
   localhost bind, a Playwright double-click, SIGKILL-with-headed-window recovery, a
   refused second instance, and clean SIGTERM.
-- **Current checks:** 463 passed (4 staging deselected) at the Phase 6 readiness
-  baseline. Ruff and mypy are clean on darwin. Earlier win32 mypy evidence reported 2
+- **Current checks:** 468 passed, 2 skipped, and 4 staging tests deselected with
+  Playwright 1.62.0; Ruff and strict mypy pass on darwin. The Camoufox local preflight
+  passes and `pip check` reports no broken requirements. Earlier win32 mypy evidence
+  reported 2
   pre-existing `signal.SIGKILL` errors in `harness/phase4_recovery.py`.
 - **Known limitations:**
   - no staging validation;
@@ -180,8 +194,8 @@ live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox
-  Dependency Resolution.**
+- Exact next task: **Phase 6 Prompt 3 — Stable Camoufox Session Identity and
+  Park/Reopen.**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -439,11 +453,13 @@ completed with exact per-process accounting, zero recorded failures, and full cl
 This is local installed-Chrome evidence, not a safe operating-point or Queue-it staging
 claim; the current configuration rejects ceilings above 100. `TARGET_QUEUE_IDS=10000`
 validates with the existing bounded process/context/worker/queue/claim/lease settings,
-while the checked-in default remains 1,000. `BrowserManager` launches Chromium with
-`channel="chrome"`, selects the least-loaded connected process, and rejects allocations
-above either capacity. Browser slot IDs remain stable when only a failed Chrome process
-is replaced. The manager reports per-slot and aggregate capacity, and a context exposes
-the ID of its owning browser slot for diagnostics.
+while the checked-in default remains 1,000. `BrowserManager` selects the least-loaded
+connected process and rejects allocations above either capacity. `ChromeBackend`
+preserves Chromium launch with `channel="chrome"`; `CamoufoxBackend` uses public async
+`AsyncNewBrowser` and `AsyncNewContext` with exact installed browser beta.30. Browser
+slot IDs remain stable when only a failed process is replaced. The manager reports
+per-slot and aggregate capacity, and a context exposes the ID of its owning slot for
+diagnostics.
 
 A fresh context is created without storage state; state is supplied only for explicit
 restoration. `OwnedBrowserContext`, the manager's async context manager, idempotent
@@ -1054,7 +1070,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox Dependency Resolution.
+Phase 6 Prompt 3 — Stable Camoufox Session Identity and Park/Reopen.
 
 ## Instructions for Future AI Sessions
 

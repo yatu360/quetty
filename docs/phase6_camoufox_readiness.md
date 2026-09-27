@@ -2,9 +2,57 @@
 
 **Date:** 2026-09-27
 
-**Scope:** readiness and compatibility only; no runtime browser behavior changed
+**Scope:** Prompt 1 readiness plus Prompt 2 dependency/backend implementation evidence
 
 **Decision:** **PARTIAL / NOT READY to make Camoufox the default**
+
+## Prompt 2 Implementation Update
+
+The dependency and basic runtime compatibility gates are now resolved. The project
+pins and has locally validated this supported combination:
+
+| Component | Previous | Prompt 2 pin / observation |
+|---|---:|---:|
+| Project Python | `>=3.12` | unchanged; validation host CPython 3.14.7 |
+| Playwright | declaration `>=1.46`, installed 1.63.0 | **1.62.0 exactly** |
+| Camoufox Python | absent | **0.5.6 exactly** |
+| Camoufox browser | absent | **152.0.4-beta.30 exactly** |
+
+`pip check` reports no dependency conflicts. Camoufox 0.5.6 declares Python
+`>=3.10,<4` and `playwright<1.63`. Its released source explicitly records that
+Playwright 1.61 and 1.62 fail on beta.29 and pass on beta.30. A current repository sync
+also exposes beta.31 as the newest official stable build. Quetty deliberately pins
+beta.30 because it has both that upstream compatibility evidence and a successful local
+launch test; it does not follow the moving stable channel.
+
+The minimal boundary is implemented as `BrowserBackend`, `ChromeBackend`, and
+`CamoufoxBackend`. `BrowserManager` still owns the one shared async Playwright
+controller, fixed process slots, least-loaded allocation, context and global limits,
+shared headed/automatic capacity, one restart task per failed slot, close timeouts,
+metrics, and shutdown. Backends own only launch, context creation, connectivity, close,
+and version diagnostics. Chrome's launch remains `chromium.launch(channel="chrome")`.
+Camoufox uses the public asynchronous `AsyncNewBrowser` and `AsyncNewContext` APIs.
+
+`BROWSER_BACKEND=chrome|camoufox` is typed; `chrome` remains the default. The Camoufox
+backend passes the exact installed `browser="152.0.4-beta.30"` selector. It never calls
+an implicit active-version launch path, so a missing build cannot cause an application
+download and instead reports:
+
+```text
+camoufox fetch official/stable/152.0.4-beta.30
+```
+
+The local-only `queue-load-test-camoufox-preflight` command reports human or JSON
+evidence. On macOS arm64 it imported Camoufox 0.5.6 and Playwright 1.62.0, launched
+browser 152.0.4-beta.30 asynchronously, opened one context, navigated to a `data:` URL,
+closed the context and browser, returned active managed contexts and processes to zero,
+and left no Camoufox OS process. No Queue-it or staging traffic was sent.
+
+This resolves the package, launch, bounded-context, and cleanup gates only. It does not
+resolve the stable per-session identity contract, browser provenance schema,
+park/reopen continuity, headed workflow, cross-engine storage compatibility, or
+authorised staging evidence. Camoufox therefore remains non-default and should not be
+used for Queue-it runs before Prompt 3.
 
 ## Executive Decision
 
@@ -16,13 +64,12 @@ Playwright controller, and a returned Playwright `Browser` can own multiple isol
 headed/headless budget, ownership leases, scheduler, and Queue ID verification can
 therefore remain.
 
-Two current blockers prevent accepting Camoufox as the default:
+Prompt 2 resolved the dependency blocker that existed at readiness review: Playwright
+was deliberately changed from 1.63.0 to the mutually supported 1.62.0, Camoufox 0.5.6
+was pinned, and the complete Chrome regression suite was rerun. One architectural
+blocker still prevents accepting Camoufox as the default:
 
-1. The project is installed and was last validated with Playwright 1.63.0. The current
-   Camoufox release, 0.5.6, declares `playwright<1.63`. Current upstream `main`
-   identifies itself as 0.5.7 but retains the same ceiling. A pip dry run in this
-   checkout selected Playwright 1.62.0. No downgrade was installed.
-2. The expected per-session stable identity contract is not currently demonstrated by
+1. The expected per-session stable identity contract is not currently demonstrated by
    a supported public Camoufox API. `AsyncNewContext(..., preset=...)` is public and
    creates per-context identities, but Camoufox 0.5.6 generates fresh audio, canvas,
    font-spacing, font-list, and voice values while converting a reused preset. A
@@ -30,9 +77,9 @@ Two current blockers prevent accepting Camoufox as the default:
    Persisting generated init scripts, internal config dictionaries, or private helper
    output would make Camoufox internals a project persistence contract and is rejected.
 
-The next implementation may introduce the small backend seam and resolve the package
-set deliberately, while keeping Chrome as the only active backend. Camoufox must not
-become selectable for real sessions until the identity gate in this report passes.
+The small backend seam and package set are now implemented, with Chrome still the
+default. Camoufox must not be used for real Queue-it sessions until the identity gate in
+this report passes.
 
 ## Sources and Snapshot
 
@@ -62,14 +109,14 @@ dependency authority for the resolution decision.
 |---|---|---|
 | Project Python contract | `requires-python = ">=3.12"`; Ruff and mypy target 3.12 | Compatible with Camoufox's Python range |
 | Baseline interpreter | CPython 3.14.7 in `.venv` | Camoufox 0.5.6 advertises/supports 3.10 through 3.14 |
-| Project Playwright declaration | `playwright>=1.46`, with no upper bound | Resolution is not reproducible and may select an unsupported Camoufox combination |
-| Installed/validated Playwright | 1.63.0 | Conflicts with Camoufox 0.5.6 |
-| Current released Camoufox | 0.5.6, published 2026-09-06 | Candidate package, not installed in this checkout |
+| Project Playwright declaration | `playwright==1.62.0` (previously `>=1.46`; installed baseline 1.63.0) | Exact mutually supported pin |
+| Installed/validated Playwright | 1.62.0 | Compatible with Camoufox 0.5.6 and beta.30 |
+| Current released Camoufox | 0.5.6, published 2026-09-06 | Installed and pinned exactly |
 | Current upstream package version | 0.5.7 on `main`, not published on PyPI at review time | Must not be pinned as if released |
 | Camoufox Python range | `>=3.10,<4.0` in 0.5.6 metadata | Includes project Python 3.12+ and the baseline 3.14.7 |
-| Camoufox Playwright constraint | `playwright<1.63` in 0.5.6; unchanged on reviewed `main` | **FAIL** with Playwright 1.63.0 |
-| Pip dry-run result | `camoufox==0.5.6` would select Playwright 1.62.0 | A deliberate revalidation decision is required; do not silently downgrade |
-| Current official stable browser release | `152.0.4-beta.30`, with Windows, macOS, and Linux assets | Pin this exact available build if 0.5.6 is evaluated |
+| Camoufox Playwright constraint | `playwright<1.63` in 0.5.6; unchanged on reviewed `main` | **PASS** with the explicit 1.62.0 pin |
+| Dependency resolution | `pip check` with Camoufox 0.5.6 and Playwright 1.62.0 | **PASS** without overrides or ignored dependencies |
+| Current official stable browser release | `152.0.4-beta.31`; beta.30 remains supported and installed | Quetty pins locally/upstream-validated beta.30 rather than following the moving channel |
 
 There is no lock file. `pyproject.toml` alone currently permits Playwright upgrades, so
 adding Camoufox without an explicit compatible Playwright range would make the resolver
@@ -607,11 +654,11 @@ installing Playwright 1.63 with `--no-deps` are prohibited.
 
 ## Migration Sequence
 
-1. Introduce `BrowserBackend`, `ChromeBackend`, browser-neutral capacity naming, and
-   compatibility aliases. Route all existing behavior through `ChromeBackend` and
-   prove no Phase 5 behavior changed.
-2. Resolve and pin the common Playwright/Camoufox dependency set. Add setup/CI browser
-   fetch and missing-browser preflight; do not enable Camoufox sessions.
+1. **Complete:** introduce `BrowserBackend`, `ChromeBackend`, browser-neutral capacity
+   naming, and compatibility aliases. Route existing behavior through `ChromeBackend`.
+2. **Complete locally:** pin Playwright 1.62.0/Camoufox 0.5.6/browser beta.30; add
+   explicit setup fetch, actionable missing-browser failure, and local preflight. The
+   cross-platform CI matrix remains future evidence.
 3. Add immutable run backend plus per-session provenance/artifact schema. Migrate all
    existing runs/sessions to Chrome/Chromium without touching Queue IDs, transfer URLs,
    storage state, schedules, or ownership.
@@ -632,10 +679,10 @@ installing Playwright 1.63 with `--no-deps` are prohibited.
 | Gate | Status | Evidence/reason |
 |---|---|---|
 | Project Python compatible with package | **PASS** | Project `>=3.12`; Camoufox 0.5.6 `>=3.10,<4.0` |
-| Current Playwright dependency compatible | **FAIL** | Installed 1.63.0 vs Camoufox `playwright<1.63` |
-| Explicit reproducible package/browser pin | **FAIL** | No lock/constraint and no Camoufox dependency/fetch in the project yet |
+| Current Playwright dependency compatible | **PASS** | Playwright 1.62.0 is pinned; Camoufox 0.5.6 requires `<1.63`; `pip check` passes |
+| Explicit reproducible package/browser pin | **PASS** | Camoufox 0.5.6, Playwright 1.62.0, and browser beta.30 are exact pins |
 | Existing async Playwright lifecycle reusable | **PASS** | Public `AsyncNewBrowser(playwright, ...)` accepts the existing controller |
-| Multiple isolated contexts in one process | **PASS** at API level | Playwright `Browser` plus repeated `AsyncNewContext`; runtime capacity evidence still required |
+| Multiple isolated contexts in one process | **PASS** for basic lifecycle | Public `AsyncNewContext` runs through existing bounded manager; larger-scale evidence remains future work |
 | Stable supported per-session identity descriptor | **FAIL** | Reused 0.5.6 preset still regenerates identity components; no versioned export/import contract |
 | Park/reopen with same Camoufox identity | **UNKNOWN** | Blocked by descriptor gate; not tested |
 | HYBRID transfer-first semantics retainable | **PASS** architecturally | Restorer is browser-agnostic and already identity-verifying |
@@ -643,7 +690,7 @@ installing Playwright 1.63 with `--no-deps` are prohibited.
 | Chrome state -> Camoufox state compatibility | **UNKNOWN** | No Queue-it/Camoufox cross-engine evidence |
 | Camoufox state -> Chrome state compatibility | **UNKNOWN** | No Queue-it/Camoufox cross-engine evidence |
 | Headed Open/Close/crash behavior | **UNKNOWN** | Public headed mode exists; project behavior not exercised |
-| Browser crash/restart and capacity cleanup | **UNKNOWN** for Camoufox | Generic design fits, but only Chrome is tested |
+| Browser crash/restart and capacity cleanup | **PASS** for manager mechanics; **UNKNOWN** for real crash | Backend-focused failure/slot/restart tests and real clean shutdown pass; OS-kill recovery remains untested |
 | Existing runs remain on original backend | **PASS as decision** | Required migration policy; implementation is future work |
 | Camoufox upstream production maturity | **UNKNOWN / operational risk** | Upstream explicitly says it is under development and may not suit stable production use |
 | Phase 5 regression baseline | **PASS** | 463 passed, 4 staging deselected; Ruff and mypy clean |
@@ -689,9 +736,9 @@ for **new** runs if cross-engine migration remains disabled and provenance enfor
 is proven. It remains required before any explicit Chrome-to-Camoufox or
 Camoufox-to-Chrome migration feature can be offered.
 
-## Baseline Validation
+## Baseline and Prompt 2 Validation
 
-No Camoufox package or browser was installed and no browser runtime code changed.
+The Prompt 1 pre-change baseline remains:
 
 - `.venv/bin/python -m pytest` — **463 passed, 4 staging deselected**, one existing
   Starlette/httpx deprecation warning, 78.36 seconds.
@@ -702,13 +749,22 @@ No Camoufox package or browser was installed and no browser runtime code changed
 
 No authorised staging run was performed and no Queue-it traffic was sent.
 
+Prompt 2 then resolved the environment without `--no-deps`, monkey-patching, or private
+Camoufox persistence APIs:
+
+- `python3 -m pytest` — **468 passed, 2 skipped, 4 staging tests deselected**;
+- focused backend/manager/config tests — **77 passed**;
+- `ruff check src tests` — **passed**;
+- `mypy src` — **passed**, 68 source files;
+- `python3 -m pip check` — **no broken requirements**;
+- Camoufox preflight — **PASS**, with zero active contexts and zero managed processes
+  after shutdown; a process-table check found no Camoufox process.
+
 ## Readiness Conclusion
 
-The minimal backend boundary and bounded multi-context process model are ready to
-implement without reopening Phase 5. Camoufox itself is not ready to become the runtime
-default because the dependency set conflicts and Strategy C lacks a proven public
-stable-descriptor contract. The safe next step is to add the Chrome-preserving backend
-boundary and resolve dependencies explicitly, while leaving runtime behavior on Chrome.
+The minimal backend boundary, supported dependency set, and bounded basic Camoufox
+lifecycle are implemented without reopening Phase 5. Camoufox is still not ready to
+become the runtime default because Strategy C lacks a proven public stable-descriptor
+contract and persisted provenance has not yet been added.
 
-**Exact next task: Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox Dependency
-Resolution.**
+**Exact next task: Phase 6 Prompt 3 — Stable Camoufox Session Identity and Park/Reopen.**

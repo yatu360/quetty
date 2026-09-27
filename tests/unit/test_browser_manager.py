@@ -56,11 +56,14 @@ class FakeChromium:
         self.launch_calls: list[dict[str, object]] = []
         self.browsers: list[FakeBrowser] = []
         self.block_launch_call: int | None = None
+        self.fail_launch_call: int | None = None
         self.launch_started = asyncio.Event()
         self.continue_launch = asyncio.Event()
 
     async def launch(self, **options: object) -> FakeBrowser:
         self.launch_calls.append(options)
+        if len(self.launch_calls) == self.fail_launch_call:
+            raise RuntimeError("browser launch failed")
         if len(self.launch_calls) == self.block_launch_call:
             self.launch_started.set()
             await self.continue_launch.wait()
@@ -115,6 +118,31 @@ async def test_manager_starts_configured_google_chrome_processes() -> None:
         {"channel": "chrome", "headless": True},
     ]
     await manager.shutdown()
+
+
+async def test_launch_failure_does_not_leak_process_slot() -> None:
+    manager, playwright = manager_and_playwright(processes=2, per_browser=2, global_limit=4)
+    playwright.chromium.fail_launch_call = 2
+
+    with pytest.raises(RuntimeError, match="browser launch failed"):
+        await manager.start()
+
+    assert not manager.started
+    assert manager.managed_process_count == 0
+    assert playwright.stopped
+    assert not playwright.chromium.browsers[0].connected
+
+
+async def test_shutdown_is_idempotent() -> None:
+    manager, playwright = manager_and_playwright()
+    await manager.start()
+
+    await manager.shutdown()
+    await manager.shutdown()
+
+    assert not manager.started
+    assert manager.managed_process_count == 0
+    assert playwright.stopped
 
 
 async def test_manager_starts_one_google_chrome_process() -> None:

@@ -11,7 +11,11 @@ from typing import Protocol
 
 from pydantic import HttpUrl, TypeAdapter
 
-from queue_load_test.browser import BrowserContextCapacity, BrowserManager
+from queue_load_test.browser import (
+    BrowserContextCapacity,
+    BrowserManager,
+    create_browser_backend,
+)
 from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
@@ -139,6 +143,7 @@ class ApplicationRunRuntime:
                     headless=settings.creation_headless,
                     observability=metrics,
                     shared_capacity=shared_capacity,
+                    backend=create_browser_backend(settings.browser_backend),
                 )
             creator = QueueSessionCreator(
                 browser_manager=creation_browser_manager,
@@ -184,6 +189,7 @@ class ApplicationRunRuntime:
                 headless=self._manual_headless,
                 observability=metrics,
                 shared_capacity=shared_capacity,
+                backend=create_browser_backend(settings.browser_backend),
             )
             headed_restorer = QueueSessionRestorer(
                 browser_manager=headed_manager,
@@ -276,7 +282,7 @@ class ApplicationRunRuntime:
         return RuntimeCapacity(
             active_contexts=shared.active if shared is not None else value.active_contexts,
             maximum_active_contexts=value.maximum_active_contexts,
-            chrome_processes=value.chrome_processes + int(headed is not None and headed.started),
+            chrome_processes=value.browser_processes + int(headed is not None and headed.started),
         )
 
     def error(self) -> str | None:

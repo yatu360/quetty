@@ -113,12 +113,12 @@ class PrometheusMetrics:
         )
         self.browser_processes = Gauge(
             "browser_processes",
-            "Managed Google Chrome processes.",
+            "Managed browser processes.",
             registry=self.registry,
         )
         self.browser_crashes_total = Counter(
             "browser_crashes_total",
-            "Detected Chrome process failures.",
+            "Detected browser process failures.",
             registry=self.registry,
         )
         self.browser_context_creation_failures_total = Counter(

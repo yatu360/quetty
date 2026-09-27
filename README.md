@@ -10,7 +10,7 @@ This phase intentionally implements only:
 - defensive, browser-independent Queue-it progress parsing
 - SQLite session persistence with lightweight work leases
 - atomic local JSON browser-state persistence
-- shared Google Chrome process and isolated BrowserContext resource management
+- shared managed-browser processes and isolated BrowserContext resource management
 - live, defensive Queue-it DOM state extraction after JavaScript execution
 - supported Queue-it transfer-link capture with explicit identity-mismatch handling
 - bounded session creation until the configured unique Queue ID target is reached
@@ -35,9 +35,32 @@ python -m pip install -e ".[test]"
 python -m playwright install chrome
 ```
 
-The browser manager uses Playwright's async API to launch the installed Google
-Chrome build with `channel="chrome"`. It shares each Chrome process across
-isolated browser contexts and does not implement stealth or automation hiding.
+The supported dependency set is Python 3.12+, Camoufox 0.5.6, and Playwright 1.62.0.
+Chrome remains the default backend. The browser manager uses Playwright's async API to
+launch installed Google Chrome with `channel="chrome"` and shares each process across
+isolated contexts.
+
+Camoufox's browser is a separate explicit installation. To install the exact locally
+validated build (never done automatically by application startup), run:
+
+```powershell
+camoufox fetch official/stable/152.0.4-beta.30
+queue-load-test-camoufox-preflight
+queue-load-test-camoufox-preflight --format json
+```
+
+The preflight launches one asynchronous Camoufox process, opens one context, navigates
+only to an in-memory `data:` page, and verifies complete cleanup. It sends no Queue-it
+or staging traffic. A missing build produces the exact `camoufox fetch` instruction.
+The newer beta.31 is visible in the current official stable channel, but beta.30 is
+intentionally pinned because upstream explicitly recorded Playwright 1.61/1.62
+compatibility for that build and this project locally validated it.
+
+`BROWSER_BACKEND=chrome|camoufox` is typed and defaults to `chrome`. The Camoufox path
+in this prompt proves bounded launch/context/close/recovery only. Stable per-session
+Camoufox identity and park/reopen are not implemented until Phase 6 Prompt 3, so do not
+use the Camoufox option for Queue-it runs yet. Neither backend adds proxy rotation,
+CAPTCHA solving, WAF-specific behavior, or traffic interception.
 
 The application is configured through environment variables. Start from:
 

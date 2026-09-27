@@ -1,5 +1,14 @@
-"""Google Chrome process and isolated-context resource management."""
+"""Managed browser process and isolated-context resource management."""
 
+from queue_load_test.browser.backend import (
+    CAMOUFOX_BROWSER_VERSION,
+    BrowserBackend,
+    BrowserBackendDiagnostics,
+    BrowserBackendSetupError,
+    CamoufoxBackend,
+    ChromeBackend,
+    create_browser_backend,
+)
 from queue_load_test.browser.manager import (
     BrowserCapacity,
     BrowserCapacityError,
@@ -12,6 +21,10 @@ from queue_load_test.browser.manager import (
 )
 
 __all__ = [
+    "CAMOUFOX_BROWSER_VERSION",
+    "BrowserBackend",
+    "BrowserBackendDiagnostics",
+    "BrowserBackendSetupError",
     "BrowserCapacity",
     "BrowserCapacityError",
     "BrowserContextCapacity",
@@ -19,5 +32,8 @@ __all__ = [
     "BrowserManagerError",
     "BrowserManagerNotStartedError",
     "BrowserProcessCapacity",
+    "CamoufoxBackend",
+    "ChromeBackend",
     "OwnedBrowserContext",
+    "create_browser_backend",
 ]

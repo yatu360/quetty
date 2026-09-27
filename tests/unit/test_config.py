@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from queue_load_test.config import Settings
-from queue_load_test.models import SessionMode
+from queue_load_test.models import BrowserBackendName, SessionMode
 
 
 def settings_kwargs(**overrides: object) -> dict[str, object]:
@@ -36,6 +36,7 @@ def test_phase_three_defaults_are_conservative_and_bounded() -> None:
 
     assert settings.target_queue_ids == 1000
     assert settings.session_mode is SessionMode.HYBRID
+    assert settings.browser_backend is BrowserBackendName.CHROME
     assert settings.chrome_process_count == 2
     assert settings.max_contexts_per_browser == 25
     assert settings.max_active_contexts == 50
@@ -222,6 +223,19 @@ def test_hybrid_and_transfer_only_mode_parsing() -> None:
         Settings(**settings_kwargs(SESSION_MODE="transfer-only")).session_mode
         is SessionMode.TRANSFER_ONLY
     )
+
+
+def test_browser_backend_parsing_and_validation() -> None:
+    assert (
+        Settings(**settings_kwargs(BROWSER_BACKEND="chrome")).browser_backend
+        is BrowserBackendName.CHROME
+    )
+    assert (
+        Settings(**settings_kwargs(BROWSER_BACKEND="CAMOUFOX")).browser_backend
+        is BrowserBackendName.CAMOUFOX
+    )
+    with pytest.raises(ValidationError, match="Unknown browser backend"):
+        Settings(**settings_kwargs(BROWSER_BACKEND="firefox"))
 
 
 @pytest.mark.parametrize(

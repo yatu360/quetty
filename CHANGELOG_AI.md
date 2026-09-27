@@ -3599,3 +3599,103 @@ behavior was not changed.
 - Readiness is **PARTIAL / NOT READY to make Camoufox the default**.
 - Exact next task: **Phase 6 Prompt 2 — Browser Backend Boundary and Camoufox
   Dependency Resolution.**
+
+## 2026-09-27 — Phase 6 Prompt 2 — Browser backend and dependency resolution
+
+### Agent / Model
+
+OpenAI Codex / GPT-5
+
+### Goal
+
+Resolve the Playwright/Camoufox compatibility gate, add the smallest browser-backend
+boundary, and prove a bounded local Camoufox lifecycle without changing persisted Queue
+session identity semantics or making Camoufox the default.
+
+### Upstream and Dependency Findings
+
+- Rechecked the current Camoufox 0.5.6 PyPI metadata, official Python installation and
+  usage documentation, released wheel source, current upstream `main` at
+  `0c6cc0a397da9ffcbca51df8efec6749c2a97f67`, and a live browser-repository sync.
+- Camoufox 0.5.6 supports Python `>=3.10,<4` and requires `playwright<1.63`.
+- Changed the project from `playwright>=1.46` / installed 1.63.0 to exact
+  `playwright==1.62.0`, and added exact `camoufox==0.5.6`. Pip resolved normally;
+  `pip check` reports no broken requirements. No `--no-deps`, forced constraint,
+  Playwright/Camoufox patch, or private persistence API was used.
+- A current sync reports official stable beta.31. The project deliberately pins browser
+  `152.0.4-beta.30`: Camoufox 0.5.6 explicitly records that Playwright 1.61/1.62 pass
+  with beta.30, and this exact combination passed locally. It does not follow the
+  moving stable channel.
+- Installed the browser explicitly with
+  `camoufox fetch official/stable/152.0.4-beta.30`. Application runtime never downloads
+  or updates Camoufox.
+
+### Changes Made
+
+- Added typed `BROWSER_BACKEND=chrome|camoufox`; default remains `chrome`.
+- Added a minimal `BrowserBackend` protocol plus `ChromeBackend` and
+  `CamoufoxBackend`. The boundary covers launch, context creation, connectivity, close,
+  and package/browser diagnostics only.
+- Preserved `BrowserManager` ownership of one async Playwright lifecycle, fixed process
+  slots, least-loaded selection, per-process/global/shared context bounds, one restart
+  task per failed slot, timeouts, metrics, and idempotent shutdown.
+- Preserved Chrome's `chromium.launch(channel="chrome")` behavior. Camoufox uses public
+  asynchronous `AsyncNewBrowser` and `AsyncNewContext`; it shares bounded processes
+  across contexts and does not create a process per session/context.
+- Passed the exact installed Camoufox browser selector to prevent the wrapper's implicit
+  missing-browser fetch. Missing beta.30 now raises an actionable command.
+- Added `queue-load-test-camoufox-preflight` with human and JSON output. It checks
+  package/browser versions, async launch, one context, local `data:` navigation,
+  context/browser close, and zero manager counts after shutdown.
+- Made active UI/Prometheus descriptions browser-neutral while retaining historical
+  Python compatibility names. Existing Prometheus metric names were not repurposed.
+- Propagated the selected backend to automatic, separate creation, and headed manager
+  pools so all still share the same global capacity coordinator.
+- Did not add identity persistence, provenance schema, proxy/GeoIP behavior, CAPTCHA
+  logic, humanized input, WAF-specific logic, traffic interception, or remote server
+  functionality.
+
+### Files Added
+
+- `src/queue_load_test/browser/backend.py`
+- `src/queue_load_test/models/browser.py`
+- `src/queue_load_test/harness/camoufox_preflight.py`
+- `tests/unit/test_browser_backend.py`
+
+### Files Modified
+
+- `pyproject.toml`, `.env.example`, `README.md`
+- `src/queue_load_test/browser/__init__.py`, `browser/manager.py`, `config.py`
+- `src/queue_load_test/models/__init__.py`
+- `src/queue_load_test/metrics/prometheus.py`, `metrics/status.py`
+- `src/queue_load_test/web/service.py`, `web/templates/_summary.html`
+- `tests/unit/test_browser_manager.py`, `tests/unit/test_config.py`
+- `docs/phase6_camoufox_readiness.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`
+
+### Validation
+
+- Focused browser/backend/config tests: **77 passed**.
+- `python3 -m pytest`: **468 passed, 2 skipped, 4 staging tests deselected**. An initial
+  full run had one known timing-sensitive manual-ownership failure; it passed in
+  isolation and the final full run was clean.
+- `ruff check src tests`: passed.
+- `mypy src`: passed, 68 source files.
+- `python3 -m pip check`: no broken requirements.
+- Camoufox local preflight: **PASS** with Camoufox 0.5.6, Playwright 1.62.0, browser
+  152.0.4-beta.30, successful in-memory navigation, zero active managed contexts,
+  zero managed processes after shutdown, and no residual Camoufox OS process.
+
+### Staging Tests
+
+- NOT RUN. The preflight used only a `data:` URL. No Queue-it or staging traffic was
+  sent.
+
+### Decision and Next Task
+
+- Dependency, backend-boundary, basic bounded lifecycle, and local cleanup gates are
+  **PASS**.
+- Stable supported per-session identity, park/reopen continuity, provenance, headed
+  Camoufox workflow, cross-engine storage compatibility, and staging evidence remain
+  unresolved. Camoufox remains non-default and should not be used for Queue-it runs.
+- Exact next task: **Phase 6 Prompt 3 — Stable Camoufox Session Identity and
+  Park/Reopen.**
