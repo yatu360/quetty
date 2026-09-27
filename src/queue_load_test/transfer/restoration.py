@@ -109,6 +109,9 @@ class OpenedSessionRestore:
     result: SessionRestoreResult
     owned_context: OwnedBrowserContext | None = None
     page: Page | None = None
+    # True when the session had no Queue ID: the window is open for the operator,
+    # and an identity observed in it can later be adopted with ``adopt_open``.
+    identity_pending: bool = False
 
 
 def _is_restore_failure(attempt: RestoreAttempt) -> bool:
@@ -238,17 +241,8 @@ class QueueSessionRestorer:
         started = time.perf_counter()
         expected_queue_id = session.queue_id
         if expected_queue_id is None:
-            opened = OpenedSessionRestore(
-                self._result(
-                    RestoreAttempt(
-                        method=RestoreMethod.TRANSFER,
-                        success=False,
-                        failure=RestoreFailure.EXPECTED_IDENTITY_MISSING,
-                    ),
-                    expected_queue_id,
-                )
-            )
-        elif not session.transfer_url.strip():
+            return await self._open_unidentified(session)
+        if not session.transfer_url.strip():
             opened = OpenedSessionRestore(
                 self._result(
                     RestoreAttempt(
@@ -311,6 +305,105 @@ class QueueSessionRestorer:
         await self._record(session, opened.result)
         self._observe_restore_result(session, opened.result, time.perf_counter() - started)
         return opened
+
+    async def _open_unidentified(self, session: QueueSession) -> OpenedSessionRestore:
+        """Open a window for a session that never acquired a Queue ID.
+
+        There is no identity to verify, so nothing is recorded: the persisted
+        status and error stay as they are until an identity is adopted.
+        """
+
+        navigation_url = self._storage_navigation_url
+        if navigation_url is None and self._valid_transfer_url(session.transfer_url):
+            navigation_url = session.transfer_url
+        if navigation_url is None:
+            return OpenedSessionRestore(
+                self._result(
+                    RestoreAttempt(
+                        method=RestoreMethod.TRANSFER,
+                        success=False,
+                        failure=RestoreFailure.TRANSFER_URL_MISSING,
+                    ),
+                    None,
+                )
+            )
+        storage_state: ContextStorageState | None = None
+        if session.mode is SessionMode.HYBRID:
+            storage_state, _ = await self._load_storage_state(session)
+        owned: OwnedBrowserContext | None = None
+        try:
+            async with asyncio.timeout(self._attempt_timeout_seconds):
+                owned = await self._browser_manager.create_context(storage_state=storage_state)
+                page = await owned.context.new_page()
+                await page.goto(
+                    navigation_url,
+                    wait_until="domcontentloaded",
+                    timeout=self._navigation_timeout_ms,
+                )
+        except (asyncio.CancelledError, BrowserCapacityError):
+            if owned is not None:
+                await owned.close()
+            raise
+        except Exception:  # noqa: BLE001 - browser adapter boundary, includes timeouts
+            if owned is not None:
+                await owned.close()
+            return OpenedSessionRestore(
+                self._result(
+                    RestoreAttempt(
+                        method=RestoreMethod.TRANSFER,
+                        success=False,
+                        failure=RestoreFailure.NAVIGATION_FAILED,
+                    ),
+                    None,
+                )
+            )
+        return OpenedSessionRestore(
+            self._result(RestoreAttempt(method=RestoreMethod.TRANSFER, success=True), None),
+            owned,
+            page,
+            identity_pending=True,
+        )
+
+    async def adopt_open(
+        self,
+        session: QueueSession,
+        *,
+        context: BrowserContext,
+        page: Page,
+    ) -> SessionRestoreResult | None:
+        """Adopt a live Queue-it identity observed in an unidentified open window.
+
+        Returns ``None`` while no live queue with a transfer identity is visible.
+        The session is updated in memory only; the caller persists the result.
+        """
+
+        progress = await self._live_extractor.extract(page, session_id=session.session_id)
+        if progress.pre_queue is not True and progress.active_queue is not True:
+            return None
+        transfer = await self._transfer_extractor_factory(
+            self._expected_journey_url or page.url
+        ).extract(page)
+        queue_id = transfer.queue_id
+        if not transfer.successful or queue_id is None or transfer.transfer_url is None:
+            return None
+        session.queue_id = queue_id
+        session.transfer_url = transfer.transfer_url
+        session.last_error = None
+        attempt = RestoreAttempt(
+            method=RestoreMethod.TRANSFER,
+            success=True,
+            observed_queue_id=queue_id,
+            identity_match=True,
+            progress=progress,
+        )
+        if session.mode is SessionMode.HYBRID:
+            attempt = await self._refresh_state(session, context, attempt)
+        return self._result(attempt, queue_id)
+
+    async def discard_state(self, session: QueueSession) -> None:
+        """Remove storage state saved for an identity that could not be adopted."""
+
+        await self._state_store.delete(session.session_id)
 
     async def inspect_open(
         self,

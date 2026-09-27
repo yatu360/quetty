@@ -581,3 +581,118 @@ async def test_hung_browser_call_is_bounded_and_context_released(tmp_path: Path)
     persisted = await repository.get(expected.session_id)
     assert persisted is not None and persisted.queue_id == "queue-expected"
     await repository.close()
+
+
+async def unidentified_session(
+    repository: SQLiteSessionRepository, mode: SessionMode
+) -> QueueSession:
+    unidentified = QueueSession(
+        session_id="session-no-id",
+        queue_id=None,
+        transfer_url="",
+        mode=mode,
+        status=QueueStatus.FAILED,
+        state_path=Path(".browser-state/session-no-id.json"),
+        last_error="queue_identity_missing",
+    )
+    await repository.create(unidentified)
+    return unidentified
+
+
+def adopted_result() -> TransferExtractionResult:
+    return TransferExtractionResult(
+        transfer_url="https://queue.staging.test/journey?q=queue-adopted",
+        observed_queue_id="queue-adopted",
+    )
+
+
+async def test_manual_open_without_queue_id_opens_staging_without_recording(
+    tmp_path: Path,
+) -> None:
+    restorer, _, repository, _, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [],
+        storage_navigation_url="https://staging.test/",
+    )
+    unidentified = await unidentified_session(repository, SessionMode.HYBRID)
+
+    opened = await restorer.restore_open(unidentified)
+
+    assert opened.result.success
+    assert opened.identity_pending
+    assert opened.owned_context is not None
+    # The HYBRID state file is missing, so a fresh context is used.
+    assert manager.storage_states == [None]
+    assert manager.contexts[0].page.visited_urls == ["https://staging.test/"]
+    persisted = await repository.get(unidentified.session_id)
+    assert persisted is not None
+    assert persisted.status is QueueStatus.FAILED
+    assert persisted.attempt_count == 0
+    assert persisted.last_error == "queue_identity_missing"
+    await opened.owned_context.close()
+    await repository.close()
+
+
+async def test_manual_open_without_queue_id_or_destination_is_rejected(tmp_path: Path) -> None:
+    restorer, _, repository, _, manager, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.TRANSFER_ONLY,
+        [],
+    )
+    unidentified = await unidentified_session(repository, SessionMode.TRANSFER_ONLY)
+
+    opened = await restorer.restore_open(unidentified)
+
+    assert not opened.result.success
+    assert opened.result.failure is RestoreFailure.TRANSFER_URL_MISSING
+    assert opened.owned_context is None
+    assert manager.contexts == []
+    await repository.close()
+
+
+class PreQueueExtractor:
+    def __init__(self) -> None:
+        self.live = False
+
+    async def extract(self, _: object, *, session_id: str) -> QueueProgress:
+        return QueueProgress(session_id=session_id, active_queue=self.live)
+
+
+async def test_adopt_open_captures_identity_only_once_queue_is_live(tmp_path: Path) -> None:
+    restorer, _, repository, state_store, manager, extractor = await setup_restorer(
+        tmp_path,
+        SessionMode.HYBRID,
+        [adopted_result()],
+        storage_navigation_url="https://staging.test/",
+    )
+    live = PreQueueExtractor()
+    restorer._live_extractor = cast(Any, live)
+    unidentified = await unidentified_session(repository, SessionMode.HYBRID)
+    opened = await restorer.restore_open(unidentified)
+    assert opened.owned_context is not None and opened.page is not None
+
+    assert (
+        await restorer.adopt_open(
+            unidentified, context=opened.owned_context.context, page=opened.page
+        )
+        is None
+    )
+    assert unidentified.queue_id is None
+    assert extractor.expected_ids == []
+
+    live.live = True
+    result = await restorer.adopt_open(
+        unidentified, context=opened.owned_context.context, page=opened.page
+    )
+
+    assert result is not None and result.success and result.state_refreshed
+    assert result.observed_queue_id == "queue-adopted"
+    assert unidentified.queue_id == "queue-adopted"
+    assert unidentified.transfer_url == "https://queue.staging.test/journey?q=queue-adopted"
+    assert unidentified.last_error is None
+    assert extractor.expected_ids == [None]
+    assert await state_store.load(unidentified.session_id) is not None
+    assert not manager.contexts[0].closed
+    await opened.owned_context.close()
+    await repository.close()

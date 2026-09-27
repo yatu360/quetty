@@ -14,9 +14,11 @@ from playwright.async_api import Page
 
 from queue_load_test.browser import BrowserCapacityError, BrowserManager, OwnedBrowserContext
 from queue_load_test.metrics.logging import log_event
+from queue_load_test.models import QueueProgress, QueueStatus
 from queue_load_test.repository import (
     ManualSessionBusyError,
     ManualSessionCapacityError,
+    QueueIdConflictError,
     SessionNotFoundError,
     SessionRepository,
 )
@@ -49,6 +51,8 @@ class _OpenSession:
     page: Page
     closed: asyncio.Event
     watcher: asyncio.Task[None] | None = None
+    identity_pending: bool = False
+    adoption_blocked: bool = False
 
 
 class ManualChromeSessionManager:
@@ -144,6 +148,7 @@ class ManualChromeSessionManager:
                 owned_context=opened.owned_context,
                 page=opened.page,
                 closed=asyncio.Event(),
+                identity_pending=opened.identity_pending,
             )
             opened.page.on("close", lambda _: record.closed.set())
             opened.owned_context.context.on("close", lambda _: record.closed.set())
@@ -154,6 +159,11 @@ class ManualChromeSessionManager:
                 record.watcher = asyncio.create_task(
                     self._watch(record),
                     name=f"manual-watch-{session_id}",
+                )
+            if record.identity_pending:
+                return ManualOpenResult(
+                    ManualOpenStatus.OPENED,
+                    "Opened in Chrome (no Queue ID yet; it will be captured if one appears)",
                 )
             return ManualOpenResult(ManualOpenStatus.OPENED, "Opened in Chrome")
         except BrowserCapacityError as exc:
@@ -235,6 +245,8 @@ class ManualChromeSessionManager:
                         record.closed.set()
                     else:
                         last_renewed = time.monotonic()
+                        if record.identity_pending and not record.adoption_blocked:
+                            await self._try_adopt(record)
         finally:
             await self._finalize(record, inspect=True)
 
@@ -255,7 +267,14 @@ class ManualChromeSessionManager:
                 return
             self._open.pop(record.session_id, None)
         try:
-            if inspect and not record.page.is_closed() and not record.owned_context.closed:
+            if not inspect or record.page.is_closed() or record.owned_context.closed:
+                pass
+            elif record.identity_pending:
+                # Without an identity there is nothing to verify; a failed inspection
+                # must not overwrite the row, so only a newly observed ID is saved.
+                if not record.adoption_blocked:
+                    await self._try_adopt(record)
+            else:
                 session = await self._repository.get(record.session_id)
                 if session is not None and session.manual_owner_id == record.owner_id:
                     result = await self._restorer.inspect_open(
@@ -275,6 +294,70 @@ class ManualChromeSessionManager:
                 await record.owned_context.close()
             finally:
                 await self._release(record.session_id, record.owner_id)
+
+    async def _try_adopt(self, record: _OpenSession) -> None:
+        """Persist a Queue-it identity that appeared in an unidentified window.
+
+        FAILED only re-enters the lifecycle through CREATING, so adoption follows
+        the creation path: CREATING (which rejects a duplicate Queue ID), then
+        PARKED and due, leaving the first verified inspection to set live status.
+        """
+
+        try:
+            session = await self._repository.get(record.session_id)
+            if session is None or session.manual_owner_id != record.owner_id:
+                return
+            progress: QueueProgress | None = None
+            if session.queue_id is None:
+                had_state = await asyncio.to_thread(session.state_path.exists)
+                result = await self._restorer.adopt_open(
+                    session,
+                    context=record.owned_context.context,
+                    page=record.page,
+                )
+                if result is None:
+                    return
+                progress = result.progress
+                session.status = QueueStatus.CREATING
+                try:
+                    await self._repository.update(session)
+                except QueueIdConflictError:
+                    record.adoption_blocked = True
+                    if result.state_refreshed and not had_state:
+                        await self._restorer.discard_state(session)
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "manual_identity_adoption_conflict",
+                        session_id=record.session_id,
+                    )
+                    return
+            if session.status is QueueStatus.CREATING:
+                # Also resumes an adoption whose PARKED write failed last heartbeat.
+                observed_at = datetime.now(UTC)
+                session.status = QueueStatus.PARKED
+                session.last_checked_at = observed_at
+                session.last_progress_change_at = observed_at
+                session.next_check_at = observed_at
+                if progress is not None:
+                    session.last_queue_update = progress.last_updated_at
+                await self._repository.update(session, progress)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "manual_identity_adopted",
+                    session_id=record.session_id,
+                    queue_id=session.queue_id,
+                )
+            record.identity_pending = False
+        except Exception as exc:  # noqa: BLE001 - retried on the next heartbeat
+            log_event(
+                logger,
+                logging.WARNING,
+                "manual_identity_adoption_failed",
+                session_id=record.session_id,
+                error_type=type(exc).__name__,
+            )
 
     async def _release(self, session_id: str, owner_id: str) -> None:
         try:

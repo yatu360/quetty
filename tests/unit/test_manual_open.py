@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -54,6 +55,7 @@ class FakeOwnedContext:
     def __init__(self) -> None:
         self.context = FakeContext()
         self.closed = False
+        self.browser_id = 0
 
     async def close(self) -> None:
         if self.closed:
@@ -71,8 +73,8 @@ class FakeHeadedManager:
     async def start(self) -> None:
         self.started = True
 
-    async def capacity(self) -> object:
-        return object()
+    async def capacity(self, *, repair: bool = True) -> object:
+        return SimpleNamespace(processes=[SimpleNamespace(index=0, connected=True)])
 
     async def shutdown(self) -> None:
         self.shutdown_calls += 1
@@ -85,6 +87,9 @@ class FakeOpenRestorer:
         self.opened: list[FakeOwnedContext] = []
         self.pages: list[FakePage] = []
         self.inspections = 0
+        self.adoptable_queue_id: str | None = None
+        self.adoptions = 0
+        self.discarded: list[str] = []
 
     async def restore_open(self, session: QueueSession) -> OpenedSessionRestore:
         if self.failure is not None:
@@ -121,7 +126,32 @@ class FakeOpenRestorer:
             result,
             cast(Any, owned),
             cast(Any, page),
+            identity_pending=session.queue_id is None,
         )
+
+    async def adopt_open(self, session: QueueSession, **_: object) -> SessionRestoreResult | None:
+        self.adoptions += 1
+        if self.adoptable_queue_id is None:
+            return None
+        session.queue_id = self.adoptable_queue_id
+        session.transfer_url = f"https://queue.test/journey?q={self.adoptable_queue_id}"
+        session.last_error = None
+        return SessionRestoreResult(
+            method=RestoreMethod.TRANSFER,
+            success=True,
+            expected_queue_id=session.queue_id,
+            observed_queue_id=session.queue_id,
+            identity_match=True,
+            state_refreshed=True,
+            progress=QueueProgress(
+                session_id=session.session_id,
+                queue_number="42",
+                active_queue=True,
+            ),
+        )
+
+    async def discard_state(self, session: QueueSession) -> None:
+        self.discarded.append(session.session_id)
 
     async def inspect_open(self, session: QueueSession, **_: object) -> SessionRestoreResult:
         self.inspections += 1
@@ -162,6 +192,7 @@ async def make_manager(
     session_count: int = 1,
     capacity: int = 2,
     failure: RestoreFailure | None = None,
+    lease_seconds: float = 30,
 ) -> tuple[
     ManualChromeSessionManager,
     SQLiteSessionRepository,
@@ -184,7 +215,7 @@ async def make_manager(
         restorer=cast(QueueSessionRestorer, restorer),
         monitor=monitor,
         capacity=capacity,
-        lease_seconds=30,
+        lease_seconds=lease_seconds,
     )
     return manager, repository, restorer, headed
 
@@ -279,3 +310,95 @@ async def test_page_close_and_application_shutdown_release_all_ownership(
     assert all(context.closed for context in restorer.opened)
     await repository.close()
 
+
+
+async def create_unidentified(repository: SQLiteSessionRepository, session_id: str) -> None:
+    await repository.create(
+        QueueSession(
+            session_id=session_id,
+            queue_id=None,
+            transfer_url="",
+            mode=SessionMode.HYBRID,
+            status=QueueStatus.FAILED,
+            state_path=Path(f"state/{session_id}.json"),
+            last_error="queue_identity_missing",
+        )
+    )
+
+
+async def test_session_without_queue_id_adopts_identity_on_heartbeat(tmp_path: Path) -> None:
+    manager, repository, restorer, _ = await make_manager(
+        tmp_path, session_count=0, lease_seconds=3
+    )
+    await create_unidentified(repository, "no-id")
+
+    opened = await manager.open("no-id")
+    assert opened.status.value == "OPENED"
+    assert "no Queue ID yet" in opened.message
+
+    restorer.adoptable_queue_id = "queue-adopted"
+    for _ in range(40):
+        persisted = await repository.get("no-id")
+        if persisted is not None and persisted.queue_id is not None:
+            break
+        await asyncio.sleep(0.1)
+    assert persisted is not None
+    assert persisted.queue_id == "queue-adopted"
+    assert persisted.transfer_url == "https://queue.test/journey?q=queue-adopted"
+    assert persisted.status is QueueStatus.PARKED
+    assert persisted.last_error is None
+    assert persisted.next_check_at is not None
+    assert persisted.manual_owner_id is not None
+    progress = await repository.get_progress("no-id")
+    assert progress is not None and progress.queue_number == "42"
+
+    # Once adopted, closing uses the normal verified inspection.
+    assert await manager.close_session("no-id")
+    assert restorer.inspections == 1
+    closed = await repository.get("no-id")
+    assert closed is not None and closed.manual_owner_id is None
+    assert closed.status is QueueStatus.SERVICED_SOON
+    await manager.close()
+    await repository.close()
+
+
+async def test_closing_before_queue_id_appears_leaves_row_unchanged(tmp_path: Path) -> None:
+    manager, repository, restorer, _ = await make_manager(tmp_path, session_count=0)
+    await create_unidentified(repository, "no-id")
+
+    await manager.open("no-id")
+    assert await manager.close_session("no-id")
+
+    persisted = await repository.get("no-id")
+    assert persisted is not None
+    assert persisted.queue_id is None
+    assert persisted.status is QueueStatus.FAILED
+    assert persisted.last_error == "queue_identity_missing"
+    assert persisted.manual_owner_id is None
+    assert restorer.adoptions == 1
+    assert restorer.inspections == 0
+    assert restorer.opened[0].closed
+    await manager.close()
+    await repository.close()
+
+
+async def test_adopting_duplicate_queue_id_is_rejected_and_state_discarded(
+    tmp_path: Path,
+) -> None:
+    manager, repository, restorer, _ = await make_manager(tmp_path, session_count=1)
+    await create_unidentified(repository, "no-id")
+
+    await manager.open("no-id")
+    restorer.adoptable_queue_id = "queue-session-0"
+    assert await manager.close_session("no-id")
+
+    persisted = await repository.get("no-id")
+    assert persisted is not None
+    assert persisted.queue_id is None
+    assert persisted.status is QueueStatus.FAILED
+    assert persisted.manual_owner_id is None
+    assert restorer.discarded == ["no-id"]
+    original = await repository.get("session-0")
+    assert original is not None and original.queue_id == "queue-session-0"
+    await manager.close()
+    await repository.close()
