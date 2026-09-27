@@ -2724,3 +2724,104 @@ measured need.
 - Commit: pending at the time this entry was written
 - Branch: `main`
 - Working tree: final Phase 4 acceptance report and handoff documentation
+
+## 2026-09-27 — Phase 5 Prompt 1 — Web Dashboard Foundation and Run Setup
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Add the smallest practical local non-terminal operator UI with first-run target setup,
+persisted restart behavior, bounded acquisition startup, and a scale-safe session
+dashboard without duplicating Queue-it lifecycle or browser orchestration.
+
+### Changes Made
+
+- Added a localhost FastAPI application with Jinja2 templates, HTMX two-second partial
+  polling, and minimal plain CSS. The default command is `queue-load-test-ui` at
+  `http://127.0.0.1:8000`.
+- Added a singleton immutable `run_config` SQLite table and `RunConfig` model. Setup
+  validates an absolute HTTP(S) URL and a positive requested count bounded by
+  `MAX_MANUAL_REQUESTED_SESSIONS` (default 10,000).
+- Setup refuses to associate pre-existing legacy sessions with a new target. There is
+  no retarget operation; **Start New Run** is disabled.
+- Added `ApplicationRunRuntime`, which assembles the existing `BrowserManager`,
+  `QueueSessionCreator`, bounded `SessionCreationController`, restorer, monitor, and
+  bounded monitoring scheduler from the persisted run. Restart passes the same target
+  to the existing deficit-aware controller.
+- Added safe `SessionSummary` pagination via one joined bounded query plus an aggregate
+  count. Search supports session/Queue ID and filters support lifecycle and separate
+  browser ownership state.
+- Added `BrowserRuntimeState` without changing `QueueStatus`. `OPEN_IN_CHROME` is
+  reserved for Prompt 3 and currently matches no rows.
+- Added a non-repairing `BrowserManager.capacity(repair=False)` view so dashboard reads
+  cannot start Chrome recovery activity.
+- Templates never receive transfer URLs or browser-state paths/content. Queue/session
+  IDs remain display-only and were not added to metric labels.
+
+### Files Added
+
+- `src/queue_load_test/models/run.py`
+- `src/queue_load_test/web/__init__.py`
+- `src/queue_load_test/web/app.py`
+- `src/queue_load_test/web/cli.py`
+- `src/queue_load_test/web/service.py`
+- `src/queue_load_test/web/templates/setup.html`
+- `src/queue_load_test/web/templates/dashboard.html`
+- `src/queue_load_test/web/templates/_summary.html`
+- `src/queue_load_test/web/templates/_sessions.html`
+- `src/queue_load_test/web/static/app.css`
+- `tests/unit/test_web_ui.py`
+
+### Files Modified
+
+- `.env.example`, `pyproject.toml`, `README.md`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/harness/staging.py`, `phase2_resources.py`,
+  `phase3_acquisition.py`, `phase4_acquisition.py`
+- `src/queue_load_test/models/__init__.py`
+- `src/queue_load_test/repository/base.py`, `sqlite.py`, `__init__.py`
+- `src/queue_load_test/browser/manager.py`
+- `src/queue_load_test/transfer/restoration.py`
+- `tests/unit/test_browser_manager.py`, `test_config.py`
+
+### Database / Configuration
+
+- New `run_config` table: `run_id`, `target_url`, `requested_sessions`, `created_at`,
+  `status`, and singleton `current_run` marker.
+- New `UI_HOST`, `UI_PORT`, and `MAX_MANUAL_REQUESTED_SESSIONS` settings.
+- `STAGING_URL` is optional for first UI boot; gated harnesses still require their
+  documented target and gates when run.
+
+### Tests Run
+
+- Targeted web/repository/config tests passed.
+- Full ordinary suite: 377 passed and 4 gated staging tests deselected.
+- `python3 -m ruff check src tests`: passed.
+- `python3 -m mypy src`: no issues in 60 source files.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it traffic was sent.
+
+### Known Limitations
+
+- Pause/resume is not implemented; the dashboard reports monitoring as RUNNING.
+- Headed Chrome ownership and `OPEN_IN_CHROME` persistence are Prompt 3 work.
+- Delete, replace, add, manual refresh, target replacement, and reliability/recovery
+  controls are not implemented.
+- HTMX is loaded from its public CDN; there is no Node build or vendored JS bundle.
+- Offset pagination is intentionally simple and bounded; very deep pages may later
+  benefit from keyset pagination if measurements justify it.
+
+### Follow-Up
+
+Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring
+
+### Git State
+
+- Commit: pending at the time this entry was written
+- Branch: `main`

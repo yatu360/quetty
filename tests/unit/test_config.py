@@ -44,6 +44,14 @@ def test_phase_three_defaults_are_conservative_and_bounded() -> None:
     assert settings.monitor_workers == 1
 
 
+def test_ui_first_boot_allows_no_environment_target_but_harnesses_require_one() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.staging_url is None
+    with pytest.raises(ValueError, match="STAGING_URL is required"):
+        settings.require_staging_url()
+
+
 def test_phase_four_target_uses_existing_bounded_benchmark_settings() -> None:
     settings = Settings(
         **settings_kwargs(

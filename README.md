@@ -1,7 +1,7 @@
 # Queue Load Test
 
-Phase 1 foundation and Phase 2 scaling-ready configuration for an authorised Queue-it
-staging test system.
+An authorised Queue-it staging test system with bounded browser orchestration and a
+local operator dashboard.
 
 This phase intentionally implements only:
 
@@ -20,9 +20,10 @@ This phase intentionally implements only:
 - signal-aware graceful shutdown that preserves persisted journeys
 - structured JSON logging with sensitive transfer URLs excluded
 - low-cardinality Prometheus metrics and a lightweight status endpoint
-- unit tests for configuration, domain behavior, parsing, and persistence
+- a lightweight FastAPI/Jinja2/HTMX local operator UI
+- unit tests for configuration, domain behavior, parsing, persistence, and the UI
 
-It does not implement PostgreSQL, a full frontend dashboard, or later
+It does not implement PostgreSQL, a client-side application framework, or later
 post-admission workflows.
 
 ## Install
@@ -43,6 +44,45 @@ The application is configured through environment variables. Start from:
 ```powershell
 Copy-Item .env.example .env
 ```
+
+`STAGING_URL` and `TARGET_QUEUE_IDS` remain available to the gated benchmark harnesses.
+The operator UI instead takes the actual target and requested count from its first-run
+setup and persists them as one immutable current run.
+
+## Local Operator UI
+
+Start the server after configuring bounded browser, database, and state settings:
+
+```powershell
+queue-load-test-ui
+```
+
+Open `http://127.0.0.1:8000`. `UI_HOST` defaults to `127.0.0.1`, `UI_PORT` defaults to
+`8000`, and `MAX_MANUAL_REQUESTED_SESSIONS` defaults to the currently supported 10,000
+session safety ceiling.
+
+On a new empty database, the UI shows setup before any dashboard. Enter an authorised
+absolute HTTP(S) staging URL and the requested session count. Start persists the run,
+then delegates acquisition to the existing fixed worker pool and bounded queue. It does
+not create population-sized tasks, Chrome processes, or contexts. A database containing
+sessions but no run configuration is rejected because those identities cannot safely
+be associated with a newly entered target.
+
+Restarting `queue-load-test-ui` loads the same persisted run, skips setup, counts valid
+persisted Queue IDs, and resumes only the remaining acquisition deficit. Target changes
+are intentionally unavailable in this prompt; the disabled **Start New Run** control is
+a placeholder and existing identities are never silently retargeted.
+
+The dashboard shows run/acquisition/monitoring aggregates and a database-paginated
+50-row session view. Search supports `session_id` and `queue_id`; filters cover Queue-it
+lifecycle and the separate browser ownership view. HTMX refreshes only the summary and
+visible page every two seconds. Dashboard requests never allocate a browser context.
+Queue-it lifecycle comes directly from persisted evaluator output and is not inferred
+from Queue ID or progress presence.
+
+The local UI may display session and Queue IDs. It never selects or renders transfer
+URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;
+do not expose the UI beyond a trusted local machine or share its SQLite/state files.
 
 The SQLite database, transfer URLs, and browser-state files contain sensitive
 session data. The default local files are git-ignored and should not be logged

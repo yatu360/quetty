@@ -13,7 +13,7 @@ from queue_load_test.models.session import SessionMode
 class Settings(BaseSettings):
     """Environment-backed application settings."""
 
-    staging_url: HttpUrl = Field(alias="STAGING_URL")
+    staging_url: HttpUrl | None = Field(default=None, alias="STAGING_URL")
     target_queue_ids: int = Field(default=1000, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///queue_load_test.sqlite3", alias="DATABASE_URL")
     state_directory: Path = Field(default=Path(".browser-state"), alias="STATE_DIRECTORY")
     prometheus_port: int = Field(default=9090, alias="PROMETHEUS_PORT", ge=1, le=65535)
+    ui_host: str = Field(default="127.0.0.1", alias="UI_HOST")
+    ui_port: int = Field(default=8000, alias="UI_PORT", ge=1, le=65535)
+    max_manual_requested_sessions: int = Field(
+        default=10_000,
+        alias="MAX_MANUAL_REQUESTED_SESSIONS",
+        ge=1,
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -92,6 +99,13 @@ class Settings(BaseSettings):
         if not value.startswith("sqlite:///"):
             raise ValueError("DATABASE_URL must use sqlite:///")
         return value
+
+    def require_staging_url(self) -> str:
+        """Return the environment target for explicitly gated legacy harnesses."""
+
+        if self.staging_url is None:
+            raise ValueError("STAGING_URL is required for this staging harness")
+        return str(self.staging_url)
 
     @field_validator("session_mode", mode="before")
     @classmethod

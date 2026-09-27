@@ -198,8 +198,8 @@ class QueueSessionRestorer:
             browser_manager=browser_manager,
             repository=repository,
             state_store=state_store,
-            admission_detector=AdmissionDetector.from_urls(str(settings.staging_url)),
-            storage_navigation_url=str(settings.staging_url),
+            admission_detector=AdmissionDetector.from_urls(settings.require_staging_url()),
+            storage_navigation_url=settings.require_staging_url(),
             admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
             observability=observability,
         )

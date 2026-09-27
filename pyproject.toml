@@ -9,10 +9,13 @@ description = "Authorised Queue-it staging test foundation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115,<1",
+    "jinja2>=3.1,<4",
     "playwright>=1.46",
     "prometheus-client>=0.26,<1",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "uvicorn>=0.30,<1",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +23,7 @@ benchmark = [
     "psutil>=6,<8",
 ]
 test = [
+    "httpx>=0.27,<1",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
 ]
@@ -40,6 +44,7 @@ queue-load-test-phase3-recovery = "queue_load_test.harness.phase3_recovery:main"
 queue-load-test-phase4-acquisition = "queue_load_test.harness.phase4_acquisition:main"
 queue-load-test-phase4-monitoring = "queue_load_test.harness.phase4_monitoring:main"
 queue-load-test-phase4-recovery = "queue_load_test.harness.phase4_recovery:main"
+queue-load-test-ui = "queue_load_test.web.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

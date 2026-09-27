@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus
+from queue_load_test.models import (
+    BrowserRuntimeState,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    RunConfig,
+    SessionSummaryPage,
+)
 
 
 class RepositoryError(RuntimeError):
@@ -23,6 +30,14 @@ class QueueIdConflictError(RepositoryError):
 
 class LeaseOwnershipError(RepositoryError):
     """Raised when stale leased work attempts to overwrite a newer owner."""
+
+
+class ActiveRunExistsError(RepositoryError):
+    """Raised when setup attempts to replace the immutable current run."""
+
+
+class UnownedSessionsError(RepositoryError):
+    """Raised when legacy sessions cannot safely be associated with a new target."""
 
 
 class ClaimedSessions(list[QueueSession]):
@@ -101,6 +116,10 @@ class SessionRepository(Protocol):
 
     async def initialize(self) -> None: ...
 
+    async def get_active_run(self) -> RunConfig | None: ...
+
+    async def create_run(self, run: RunConfig) -> RunConfig: ...
+
     async def create(
         self,
         session: QueueSession,
@@ -130,6 +149,16 @@ class SessionRepository(Protocol):
     async def save_progress(self, progress: QueueProgress) -> QueueProgress: ...
 
     async def get_progress(self, session_id: str) -> QueueProgress | None: ...
+
+    async def list_session_summaries(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        status: QueueStatus | None = None,
+        runtime_state: BrowserRuntimeState | None = None,
+    ) -> SessionSummaryPage: ...
 
     async def count_due_sessions(self, *, now: datetime) -> int: ...
 

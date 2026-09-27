@@ -9,20 +9,27 @@ from pathlib import Path
 from typing import TypeVar
 
 from queue_load_test.models import (
+    BrowserRuntimeState,
     QueueProgress,
     QueueSession,
     QueueStatus,
+    RunConfig,
+    RunStatus,
     SessionMode,
+    SessionSummary,
+    SessionSummaryPage,
     validate_transition,
 )
 from queue_load_test.repository.base import (
     PROGRESS_BUCKETS,
+    ActiveRunExistsError,
     ClaimedSessions,
     DueSessionSummary,
     LeaseOwnershipError,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
+    UnownedSessionsError,
 )
 from queue_load_test.utils.asyncio_tools import run_to_completion
 
@@ -50,6 +57,14 @@ CREATE INDEX IF NOT EXISTS {_DUE_INDEX_NAME}
 """
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS run_config (
+    run_id TEXT PRIMARY KEY,
+    target_url TEXT NOT NULL,
+    requested_sessions INTEGER NOT NULL CHECK (requested_sessions > 0),
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
+);
 CREATE TABLE IF NOT EXISTS queue_sessions (
     session_id TEXT PRIMARY KEY,
     queue_id TEXT UNIQUE,
@@ -269,6 +284,69 @@ class SQLiteSessionRepository:
         """Create the database schema if needed."""
 
         await self._run(self._initialize)
+
+    async def get_active_run(self) -> RunConfig | None:
+        """Return the immutable current run configuration, if setup has completed."""
+
+        def operation() -> RunConfig | None:
+            row = self._connect().execute(
+                """
+                SELECT run_id, target_url, requested_sessions, created_at, status
+                FROM run_config WHERE current_run = 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            created_at = _from_storage(row["created_at"])
+            if created_at is None:
+                raise ValueError("Persisted run has no created_at timestamp")
+            return RunConfig(
+                run_id=str(row["run_id"]),
+                target_url=str(row["target_url"]),
+                requested_sessions=int(row["requested_sessions"]),
+                created_at=created_at,
+                status=RunStatus(str(row["status"])),
+            )
+
+        return await self._run(operation)
+
+    async def create_run(self, run: RunConfig) -> RunConfig:
+        """Persist setup once, refusing unsafe association with legacy sessions."""
+
+        def operation() -> RunConfig:
+            connection = self._connect()
+            try:
+                session_count = int(
+                    connection.execute("SELECT COUNT(*) FROM queue_sessions").fetchone()[0]
+                )
+                if session_count:
+                    raise UnownedSessionsError(
+                        "Existing sessions have no persisted target; use a dedicated empty database"
+                    )
+                connection.execute(
+                    """
+                    INSERT INTO run_config (
+                        run_id, target_url, requested_sessions, created_at, status, current_run
+                    ) VALUES (?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        run.run_id,
+                        run.target_url,
+                        run.requested_sessions,
+                        _to_storage(run.created_at),
+                        run.status.value,
+                    ),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ActiveRunExistsError("An active run already exists") from exc
+            except Exception:
+                connection.rollback()
+                raise
+            return run
+
+        return await self._run(operation)
 
     def _connect(self) -> sqlite3.Connection:
         if self._connection is None:
@@ -658,6 +736,89 @@ class SQLiteSessionRepository:
                 .fetchone()
             )
             return _row_to_progress(row) if row is not None else None
+
+        return await self._run(operation)
+
+    async def list_session_summaries(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        status: QueueStatus | None = None,
+        runtime_state: BrowserRuntimeState | None = None,
+    ) -> SessionSummaryPage:
+        """Return a safe dashboard page using one bounded SQL query plus COUNT."""
+
+        if page < 1:
+            raise ValueError("page must be at least 1")
+        if page_size < 1 or page_size > 100:
+            raise ValueError("page_size must be between 1 and 100")
+        parsed_status = QueueStatus.parse(status) if status is not None else None
+        parsed_runtime = (
+            BrowserRuntimeState(runtime_state) if runtime_state is not None else None
+        )
+        clauses: list[str] = []
+        parameters: list[object] = []
+        normalized_search = search.strip() if search is not None else ""
+        if normalized_search:
+            clauses.append("(s.session_id LIKE ? OR s.queue_id LIKE ?)")
+            pattern = f"%{normalized_search}%"
+            parameters.extend((pattern, pattern))
+        if parsed_status is not None:
+            clauses.append("s.status = ?")
+            parameters.append(parsed_status.value)
+        if parsed_runtime is BrowserRuntimeState.CHECKING:
+            clauses.append("(s.worker_id IS NOT NULL OR s.status = 'CHECKING')")
+        elif parsed_runtime is BrowserRuntimeState.PARKED:
+            clauses.append("(s.worker_id IS NULL AND s.status != 'CHECKING')")
+        elif parsed_runtime is BrowserRuntimeState.OPEN_IN_CHROME:
+            # Prompt 3 will add explicit headed-Chrome ownership persistence.
+            clauses.append("0 = 1")
+        where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
+        offset = (page - 1) * page_size
+
+        def operation() -> SessionSummaryPage:
+            connection = self._connect()
+            total_row = connection.execute(
+                "SELECT COUNT(*) AS total FROM queue_sessions AS s" + where_sql,
+                tuple(parameters),
+            ).fetchone()
+            rows = connection.execute(
+                """
+                SELECT s.session_id, s.queue_id, s.status, p.progress_percentage,
+                       s.last_queue_update, s.last_checked_at, s.next_check_at,
+                       s.worker_id
+                FROM queue_sessions AS s
+                LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
+                """
+                + where_sql
+                + " ORDER BY s.created_at, s.session_id LIMIT ? OFFSET ?",
+                (*parameters, page_size, offset),
+            ).fetchall()
+            items = tuple(
+                SessionSummary(
+                    session_id=str(row["session_id"]),
+                    queue_id=row["queue_id"],
+                    status=QueueStatus.parse(row["status"]),
+                    progress_percentage=row["progress_percentage"],
+                    last_queue_update=_from_storage(row["last_queue_update"]),
+                    last_checked_at=_from_storage(row["last_checked_at"]),
+                    next_check_at=_from_storage(row["next_check_at"]),
+                    runtime_state=(
+                        BrowserRuntimeState.CHECKING
+                        if row["worker_id"] is not None or row["status"] == "CHECKING"
+                        else BrowserRuntimeState.PARKED
+                    ),
+                )
+                for row in rows
+            )
+            return SessionSummaryPage(
+                items=items,
+                total=int(total_row["total"]),
+                page=page,
+                page_size=page_size,
+            )
 
         return await self._run(operation)
 

@@ -333,6 +333,19 @@ async def test_dead_browser_is_detected_and_restarted() -> None:
     await manager.shutdown()
 
 
+async def test_read_only_capacity_snapshot_does_not_restart_dead_browser() -> None:
+    manager, playwright = manager_and_playwright()
+    await manager.start()
+    playwright.chromium.browsers[0].connected = False
+
+    capacity = await manager.capacity(repair=False)
+
+    assert capacity.connected_processes == 0
+    assert len(playwright.chromium.browsers) == 1
+    assert manager.restart_count == 0
+    await manager.shutdown()
+
+
 async def test_healthy_browser_remains_usable_while_failed_browser_restarts() -> None:
     manager, playwright = manager_and_playwright(processes=2, per_browser=2, global_limit=4)
     await manager.start()

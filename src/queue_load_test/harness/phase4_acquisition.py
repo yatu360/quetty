@@ -260,7 +260,7 @@ async def run_phase4_preflight(
             )
         )
 
-    hostname = urlsplit(str(settings.staging_url)).hostname
+    hostname = urlsplit(settings.require_staging_url()).hostname
     if not hostname or hostname in {"example.test", "staging.example.test"}:
         checks.append(
             PreflightCheck(
@@ -437,7 +437,7 @@ async def run_phase4_acquisition_benchmark(
             browser_manager=browser_manager,
             repository=repository,
             state_store=state_store,
-            staging_url=str(settings.staging_url),
+            staging_url=settings.require_staging_url(),
             state_directory=settings.state_directory,
             mode=settings.session_mode,
             observability=metrics,

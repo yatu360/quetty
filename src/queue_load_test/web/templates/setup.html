@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Queue Session Setup</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="setup-shell">
+    <section class="panel setup-panel">
+      <p class="eyebrow">Authorised staging only</p>
+      <h1>Queue Session Setup</h1>
+      <p>Configure the immutable target for this persisted run.</p>
+      {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+      <form method="post" action="/setup">
+        <label for="target_url">Target URL</label>
+        <input id="target_url" name="target_url" type="url" required
+               placeholder="https://authorised-staging.example/path"
+               value="{{ target_url }}">
+        <label for="requested_sessions">Number of sessions</label>
+        <input id="requested_sessions" name="requested_sessions" type="number"
+               min="1" required value="{{ requested_sessions }}">
+        <button type="submit">Start</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

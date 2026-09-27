@@ -219,7 +219,7 @@ async def run_phase3_acquisition_benchmark(
             browser_manager=browser_manager,
             repository=repository,
             state_store=state_store,
-            staging_url=str(settings.staging_url),
+            staging_url=settings.require_staging_url(),
             state_directory=settings.state_directory,
             mode=settings.session_mode,
             observability=metrics,

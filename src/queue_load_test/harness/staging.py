@@ -85,7 +85,7 @@ async def run_staging_acceptance(
         browser_manager=browser_manager,
         repository=repository,
         state_store=state_store,
-        staging_url=str(settings.staging_url),
+        staging_url=settings.require_staging_url(),
         state_directory=settings.state_directory,
         mode=settings.session_mode,
         live_extractor=extractor,
@@ -228,7 +228,7 @@ async def _probe_storage_restores(
     sessions: list[QueueSession],
     recorder: Phase1AcceptanceRecorder,
 ) -> None:
-    admission_detector = AdmissionDetector.from_urls(str(settings.staging_url))
+    admission_detector = AdmissionDetector.from_urls(settings.require_staging_url())
     extractor = QueueItLiveStateExtractor()
     for session in sessions:
         state = await state_store.load(session.session_id)
@@ -244,7 +244,7 @@ async def _probe_storage_restores(
                 page = await context.new_page()
                 navigation_started = time.perf_counter()
                 await page.goto(
-                    str(settings.staging_url),
+                    settings.require_staging_url(),
                     wait_until="domcontentloaded",
                     timeout=30_000,
                 )

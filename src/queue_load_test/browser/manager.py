@@ -543,12 +543,17 @@ class BrowserManager:
         )
         return installed
 
-    async def capacity(self) -> BrowserCapacity:
-        """Return current active and available capacity, repairing dead processes first."""
+    async def capacity(self, *, repair: bool = True) -> BrowserCapacity:
+        """Return resource accounting, optionally repairing dead Chrome processes.
+
+        Operator dashboard reads pass ``repair=False`` so viewing status cannot start
+        browser recovery activity. Runtime and monitoring callers retain repair by
+        default.
+        """
 
         async with self._lock:
             self._require_started()
-            restart_tasks = self._schedule_failed_restarts_locked()
+            restart_tasks = self._schedule_failed_restarts_locked() if repair else ()
         if restart_tasks:
             await asyncio.gather(*restart_tasks)
 

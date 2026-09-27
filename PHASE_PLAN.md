@@ -463,6 +463,26 @@ Planned prompt breakdown:
    or sustainable live cadence. The single-machine SQLite/local-state architecture is
    retained; PostgreSQL and distribution remain deferred pending measured need.
 
+## Phase 5 — Operator UI
+
+**Status: Prompt 1 complete.**
+
+1. **Lightweight Web Dashboard Foundation + Startup Run Setup** — **completed on
+   2026-09-27.** Added a localhost FastAPI/Jinja2/HTMX UI, immutable persisted run
+   setup, restart-safe bounded acquisition startup, aggregate status, and a safe
+   database-paginated dashboard. The UI keeps browser ownership separate from Queue-it
+   lifecycle and never renders transfer or browser-state data.
+2. **Persistent Pause / Resume Monitoring** — next.
+3. **Open Existing Session in Headed Chrome** — planned.
+4. **Delete, Replace, Add, and Manual Refresh Actions** — planned.
+5. **UI Reliability and Recovery** — planned.
+6. **Phase 5 Acceptance** — planned.
+
+Later Phase 5 actions must continue to use bounded workers, repository ownership, and
+existing lifecycle/restoration logic. Prompt 1 intentionally includes only a disabled
+new-run placeholder; it does not implement retargeting, pause/resume, headed ownership,
+session mutation, or manual refresh.
+
 ## Scaling Gates
 
 ### Phase 1 → Phase 2

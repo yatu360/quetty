@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Queue Sessions</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+</head>
+<body>
+  <main class="dashboard-shell">
+    <header>
+      <p class="eyebrow">Local operator dashboard</p>
+      <h1>Queue Sessions</h1>
+    </header>
+    {% include "_summary.html" %}
+    <section class="panel">
+      <form class="filters" method="get" action="/dashboard"
+            hx-get="/partials/sessions" hx-target="#session-results" hx-swap="outerHTML">
+        <label>Search
+          <input name="search" value="{{ search }}" placeholder="session_id or queue_id">
+        </label>
+        <label>Lifecycle
+          <select name="status">
+            <option value="">All statuses</option>
+            {% for item in statuses %}
+            <option value="{{ item.value }}" {% if selected_status == item.value %}selected{% endif %}>
+              {{ item.value }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Browser state
+          <select name="runtime_state">
+            <option value="">All runtime states</option>
+            {% for item in runtime_states %}
+            <option value="{{ item.value }}" {% if selected_runtime == item.value %}selected{% endif %}>
+              {{ item.value }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Apply</button>
+        <button type="button" disabled title="Available in a later Phase 5 prompt">
+          Start New Run
+        </button>
+      </form>
+      {% include "_sessions.html" %}
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<section id="summary" class="panel" hx-get="/partials/summary" hx-trigger="every 2s"
+         hx-swap="outerHTML">
+  <div class="run-heading">
+    <div><span>Target URL</span><strong class="target">{{ summary.target_url }}</strong></div>
+    <div><span>Creation</span><strong class="state">{{ summary.creation }}</strong></div>
+    <div><span>Monitoring</span><strong class="state">{{ summary.monitoring }}</strong></div>
+  </div>
+  <dl class="metrics-grid">
+    <div><dt>Requested Sessions</dt><dd>{{ summary.requested_sessions }}</dd></div>
+    <div><dt>Loaded Sessions</dt><dd>{{ summary.loaded_sessions }}</dd></div>
+    <div><dt>Remaining</dt><dd>{{ summary.remaining }}</dd></div>
+    <div><dt>Total persisted sessions</dt><dd>{{ summary.total_persisted_sessions }}</dd></div>
+    <div><dt>Valid Queue IDs</dt><dd>{{ summary.valid_queue_ids }}</dd></div>
+    <div><dt>Due backlog</dt><dd>{{ summary.due_backlog }}</dd></div>
+    <div><dt>Active BrowserContexts</dt><dd>{{ summary.active_contexts }}</dd></div>
+    <div><dt>BrowserContext limit</dt><dd>{{ summary.maximum_active_contexts }}</dd></div>
+    <div><dt>Managed Chrome processes</dt><dd>{{ summary.chrome_processes }}</dd></div>
+  </dl>
+</section>

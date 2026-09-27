@@ -9,6 +9,21 @@ live monitoring.
 
 ## Current Status
 
+- Current phase: Phase 5 Prompt 1 is complete. A localhost FastAPI/Jinja2/HTMX operator
+  UI now provides persisted first-run setup, bounded acquisition/runtime startup, run
+  recovery, aggregate status, and a safe paginated session dashboard.
+- The SQLite schema now includes one immutable current `run_config` row. The run target
+  and requested session count survive restart; the existing creation controller counts
+  valid Queue IDs and resumes only the deficit. Setup refuses a database with legacy
+  sessions but no run target, preventing unsafe identity retargeting.
+- Dashboard rows use a joined `LIMIT`/`OFFSET` projection of non-sensitive fields and a
+  separate count query. The 50-row page works with 10,000 persisted sessions without
+  calling `list()` or materializing the population. Search, lifecycle filtering,
+  browser-ownership filtering, and two-second HTMX partial refresh are implemented.
+- Browser ownership is represented by `BrowserRuntimeState` (`PARKED`, `CHECKING`, and
+  reserved `OPEN_IN_CHROME`) and remains separate from `QueueStatus`. Pause/resume,
+  headed Chrome, mutations, manual refresh, and recovery controls remain later prompts.
+- Exact next task: **Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring**.
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -155,6 +170,8 @@ close the context, release the lease, and park them again.
   `src/queue_load_test/queue_monitor/admission.py`.
 - Repository boundary and SQLite implementation:
   `src/queue_load_test/repository/base.py` and `sqlite.py`.
+- Local operator UI and runtime assembly:
+  `src/queue_load_test/web/`.
 - State-store protocol and atomic filesystem implementation:
   `src/queue_load_test/state/base.py` and `filesystem.py`.
 - Shared-Chrome resource manager with stable process-slot identifiers, least-loaded
@@ -195,6 +212,10 @@ and `lease_until`.
 `connection_lost`, `pre_queue`, `active_queue`, `manual_update_warning`, and compact
 extraction diagnostics. All Queue-it layout fields can be `None`.
 
+`RunConfig` holds the immutable current `run_id`, sensitive-in-logs `target_url`,
+`requested_sessions`, `created_at`, and `ACTIVE` run status. `SessionSummary` is a safe
+dashboard projection and never contains transfer URLs or browser-state paths.
+
 Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUEUE`,
 `ACTIVE_QUEUE`, `PARKED`, `CHECKING`, `PAUSED`, `SERVICED_SOON`, `TURN_STARTED`,
 `READY`, `ADMITTED`, `CONNECTION_LOST`, `EXPIRED`, and `FAILED`.
@@ -212,6 +233,8 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   uses a partial ordered expression index on
   `COALESCE(next_check_at, created_at), created_at, session_id` for monitorable states.
   Existing Phase 2 indexes are migrated in place during initialization.
+- SQLite also has a singleton `run_config` table. Setup is insert-only in Prompt 1;
+  there is no target-changing operation.
 - Successful-ID counting excludes `FAILED` rows. Duplicate non-null Queue IDs raise
   `QueueIdConflictError`.
 - Updates from leased snapshots are conditional on the persisted `worker_id`. A stale
@@ -839,9 +862,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 4 reporting is complete. The next justified work is an authorised controlled
-staging acquisition and monitoring run to close the 16 UNKNOWN acceptance items; do
-not add PostgreSQL, shared storage, or distributed workers without measured need.
+Phase 5 Prompt 2 — Persistent Pause / Resume Monitoring.
 
 ## Instructions for Future AI Sessions
 
