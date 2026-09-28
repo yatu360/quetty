@@ -4363,3 +4363,92 @@ Phase 7 Prompt 4 — Full Runtime and Dashboard Integration.
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
 - Working tree: Phase 7 Prompt 3 changes only before commit.
+
+## 2026-09-28 — Phase 7 Prompt 4 — Patchright Full Runtime and Dashboard Integration
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Exercise and harden Patchright through the complete Quetty application/dashboard
+workflow while preserving bounded resources, persisted backend provenance, manual
+ownership, parked sessions, and immutable expected Queue IDs.
+
+### Changes Made
+
+- Extended the existing real FastAPI/HTMX/SQLite/browser workflow with generic Phase 7
+  checks for in-flight pause drain, Add while paused, manual-window process crash and
+  lazy reopen, automatic-monitoring crash/replacement, stale manual and interrupted
+  monitor leases, inverse environment-backend restart, post-reset backend change,
+  operator-worker drain, and bounded shutdown.
+- Made workflow process accounting backend-generic via the shared browser main-process
+  classifier. The old helper incorrectly reported Patchright process inspection as
+  unavailable.
+- Corrected the historical workflow CLI default from Camoufox to the current Chrome
+  new-run default.
+- Added `queue-load-test-phase7-patchright-runtime`, a formal headed Patchright plus
+  Chrome-control runner, automated Patchright integration coverage, a sanitized
+  aggregate report, and `docs/phase7_patchright_runtime_integration.md`.
+- Updated README browser/reliability/workflow guidance, project context, and phase plan.
+
+### Controlled Evidence
+
+- Patchright visible-headed workflow: **74/74 checks passed**.
+- Chrome controlled workflow: **74/74 checks passed**.
+- Combined formal report: **148/148**, zero failures.
+- Manual crash killed three Patchright-controlled Chrome main processes; ownership
+  released in 0.2 seconds, identities stayed unchanged, and the bounded headed slot
+  reopened and returned to monitoring.
+- Automatic crash killed two Patchright processes; monitoring resumed, the automatic
+  pool returned to one process, and no identity was replaced.
+- Paused restart retained the full population, target adjustment, pause state, and
+  backend. Injected future-dated manual and monitor leases were cleared by exclusive
+  startup recovery without changing identity.
+- Patchright survived restart under a Chrome-configured environment without migration;
+  Chrome passed the inverse Patchright-configured test. Backend change occurred only
+  after Stop & Reset and new-run creation.
+- Patchright shutdown completed in 0.216 seconds; Chrome in 0.091 seconds. Both ended
+  with zero contexts, browser processes, owners, queued/running operator work, or hung
+  shutdown tasks.
+- No expected Queue ID changed in place. The only replacement was the explicit
+  create-first operator Replace; Add and no-ID adoption followed their documented
+  semantics and unrelated rows remained unchanged.
+- Aggregate result: `docs/results/phase7_patchright_runtime_result.json`; it contains no
+  Queue IDs, session IDs, transfer URLs, or browser-state contents.
+
+### Patchright-Specific Findings
+
+No production Patchright runtime defect was found. The process-accounting omission was
+in the historical evidence harness and was fixed generically. Patchright continued to
+use the existing bounded operation, close, controller-stop, and repeated-cancellation
+paths; no unbounded or backend-specific shutdown workaround was added.
+
+### Tests Run
+
+- Formal Patchright headed plus Chrome controlled workflow — **148/148 checks passed**.
+- Focused application/UI/restart/recovery tests — **99 passed**.
+- Full non-staging suite — **531 passed, 4 staging tests deselected**.
+- `python3 -m ruff check src tests` — PASS.
+- `python3 -m mypy src` — PASS, 75 source files.
+- `python3 -m pip check` — PASS; no broken requirements.
+- Editable install with test/benchmark extras and the new CLI `--help` — PASS.
+
+### Scope and Staging
+
+- Camoufox remains implemented/configurable and provenance-compatible but was excluded
+  from the Phase 7 Prompt 4 workflow acceptance result.
+- All new browser traffic targeted the local simulator on `127.0.0.1`.
+- Queue-it staging was **NOT RUN / UNKNOWN**.
+- Chrome remains the default for new runs.
+
+### Follow-Up
+
+Phase 7 Prompt 5.
+
+### Git State
+
+- Commit: pending at the time this entry was written.
+- Branch: `main`.
+- Working tree: Phase 7 Prompt 4 changes only before commit.

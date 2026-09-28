@@ -9,6 +9,22 @@ Camoufox, or Patchright backend for live monitoring.
 
 ## Current Status
 
+- **Phase 7 Prompt 4 is complete:** Patchright passes the complete controlled local
+  runtime/dashboard workflow (`docs/phase7_patchright_runtime_integration.md`).
+  - Patchright passed 74/74 checks with a visible headed manual window; Chrome passed
+    the same 74/74 extended checks as control. Camoufox was excluded from the Phase 7
+    workflow result but remains implemented and provenance-compatible.
+  - Setup/acquisition, dashboard fields, automatic monitoring, pause/in-flight drain,
+    resume, Refresh, Add while paused, create-first Replace, Delete, manual ownership,
+    direct window close, manual/automatic browser kills, bounded replacement, paused
+    restart, stale/interrupted lease recovery, and interrupted acquisition all passed.
+  - Changing the environment backend did not migrate either persisted run. Backend
+    change succeeded only after Stop & Reset and new-run creation. New Patchright run
+    and session provenance remained explicit; no unexpected Queue ID changed.
+  - Patchright shutdown took 0.216 seconds and left zero contexts, browser processes,
+    leases, or operator work. Chrome remains the default pending final Phase 7
+    acceptance. Staging is **NOT RUN / UNKNOWN**. Next is Phase 7 Prompt 5.
+
 - **Phase 7 Prompt 3 is complete:** Patchright passes the controlled local
   park/destroy/reopen Queue-identity gate with the existing temporary-context
   architecture (`docs/phase7_patchright_identity_strategy.md`).
@@ -23,8 +39,8 @@ Camoufox, or Patchright backend for live monitoring.
   - All 33 Patchright cleanup checks passed; final active contexts, managed processes,
     and new child Chrome processes were zero. Persistent user-data profiles are not
     needed and were not adopted.
-  - Evidence is local simulator only. Staging is **NOT RUN / UNKNOWN**. Next is Phase 7
-    Prompt 4, full runtime and dashboard integration.
+  - Evidence is local simulator only. Staging is **NOT RUN / UNKNOWN**. Prompt 4
+    subsequently completed the full runtime/dashboard workflow.
 
 - **Phase 7 Prompt 2 is complete:** Patchright 1.63.0 is integrated behind the existing
   `BrowserBackend` / `BrowserManager` seam (`docs/phase7_patchright_backend_integration.md`).
@@ -361,7 +377,7 @@ Camoufox, or Patchright backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 7 Prompt 4 — Full Runtime and Dashboard Integration**
+- Exact next task: **Phase 7 Prompt 5**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1236,7 +1252,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 Prompt 4 — Full Runtime and Dashboard Integration
+Phase 7 Prompt 5
 
 ## Instructions for Future AI Sessions
 

@@ -22,3 +22,17 @@ async def test_phase5_operator_workflow_passes_every_check(
     failed = [check["name"] for check in result["checks"] if not check["passed"]]
     assert failed == []
     assert result["passed"] >= 55
+
+
+async def test_phase7_patchright_extended_runtime_workflow(tmp_path: Path) -> None:
+    result = await run_workflow(
+        tmp_path,
+        headed=False,
+        backend=BrowserBackendName.PATCHRIGHT,
+        phase7_recovery=True,
+    )
+
+    failed = [check["name"] for check in result["checks"] if not check["passed"]]
+    assert failed == []
+    assert result["passed"] >= 70
+    assert result["evidence"]["browser_backend"] == BrowserBackendName.PATCHRIGHT.value

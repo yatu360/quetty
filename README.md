@@ -48,7 +48,10 @@ Patchright uses its own `patchright.*` namespace and driver, so it coexists with
 retained Playwright/Camoufox pins. Its probe launches already-installed Google Chrome
 with `channel="chrome"`; no Patchright Chromium download is required and runtime code
 does not install a browser. See `docs/phase7_patchright_readiness.md` and
-`docs/phase7_patchright_backend_integration.md`.
+`docs/phase7_patchright_backend_integration.md`. Disposable-context Queue identity and
+the complete controlled runtime/dashboard result are in
+`docs/phase7_patchright_identity_strategy.md` and
+`docs/phase7_patchright_runtime_integration.md`.
 
 The preflight launches one Camoufox process, opens one context, loads only an in-memory
 `data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
@@ -115,9 +118,9 @@ queue-load-test-phase6-camoufox-benchmark --headed --output docs/results/phase6_
 
 Results and limits are in `docs/phase6_camoufox_benchmark.md`.
 
-Phase 7 dependency/readiness findings and runtime integration are recorded in
-`docs/phase7_patchright_readiness.md` and
-`docs/phase7_patchright_backend_integration.md`.
+Phase 7 dependency/readiness, identity, and full runtime/dashboard findings are recorded
+in the four `docs/phase7_patchright_*.md` reports. Chrome remains the default until
+final Phase 7 acceptance.
 
 The application is configured through environment variables. Start from:
 
@@ -265,9 +268,10 @@ See `docs/phase5_ui_reliability.md` for the full audit, fencing matrix, fault te
 - **Auto-refresh.** Polls are read-only GETs. A click aborts an in-flight poll, and a
   poll waits behind a mutation. Action feedback lives outside the polled region, so a
   refresh never erases it.
-- **Chrome crash.** A crash during Open or while open releases ownership, returns the
-  context budget, and keeps the last persisted observation and Queue ID. A crashed
-  headed Chrome is not relaunched until the next Open.
+- **Browser crash.** A Chrome or Patchright-controlled Chrome crash during Open or
+  while open releases ownership, returns the context budget, and keeps the last
+  persisted observation and Queue ID. A crashed headed pool is repaired lazily on the
+  next Open.
 - **Failures.** A database, route, or template failure returns a sanitized message
   (HTTP 503) into the feedback line and never reaches the scheduler, creation, or
   browser workers.
@@ -304,6 +308,17 @@ operator workflow on the real application, with installed Chrome, against
 
 It needs the `benchmark` extra (`psutil`) and never contacts Queue-it. Results are local
 mechanism evidence only; see `docs/phase5_acceptance.md`.
+
+The Phase 7 extension runs the same application workflow with manual/automatic process
+kills, restart ownership recovery, backend-provenance fencing, and post-reset backend
+change. Patchright uses a real headed manual window by default; Chrome is the control:
+
+```powershell
+queue-load-test-phase7-patchright-runtime --output docs/results/phase7_patchright_runtime_result.json
+```
+
+It sends traffic only to the local simulator. Camoufox is excluded from this Phase 7
+workflow matrix.
 
 The local UI may display session and Queue IDs. It never selects or renders transfer
 URLs, storage-state paths/content, cookies, or secrets. Those values remain sensitive;
@@ -357,7 +372,7 @@ python -m pytest
 ```
 
 The ordinary suite runs against a local Queue-it-shaped simulator. It includes:
-- controlled Chrome and Camoufox application workflows;
+- the extended Patchright runtime workflow and Chrome/Camoufox historical regressions;
 - a 20-cycle Camoufox park/reopen and process/repository restart run;
 - Camoufox recovery scenarios: browser kills, multi-slot failure, and restoration
   faults. It does not contact staging. Tests

@@ -25,7 +25,7 @@ import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -79,12 +79,7 @@ def _browser_processes(backend: BrowserBackendName) -> int:
             arguments = process.cmdline()
         except psutil.Error:
             continue
-        if backend is BrowserBackendName.CHROME:
-            if "--remote-debugging-pipe" in arguments and not any(
-                argument.startswith("--type=") for argument in arguments
-            ):
-                count += 1
-        elif arguments and Path(arguments[0]).name.casefold() == "camoufox":
+        if is_browser_main_process(backend, arguments):
             count += 1
     return count
 
@@ -217,6 +212,7 @@ async def run_workflow(
     *,
     headed: bool,
     backend: BrowserBackendName = BrowserBackendName.CHROME,
+    phase7_recovery: bool = False,
 ) -> dict[str, Any]:
     record = Recorder()
     simulator = LocalQueueSimulator(new_identity_prefix="sim-accept")
@@ -236,13 +232,15 @@ async def run_workflow(
         "requested": REQUESTED,
     }
 
-    def build() -> tuple[Any, ApplicationRunRuntime]:
+    def build(configured_settings: Settings = settings) -> tuple[Any, ApplicationRunRuntime]:
         repository = SQLiteSessionRepository(database_path)
         runtime = ApplicationRunRuntime(
-            settings=settings, repository=repository, manual_headless=not headed
+            settings=configured_settings,
+            repository=repository,
+            manual_headless=not headed,
         )
         app = create_app(
-            settings=settings,
+            settings=configured_settings,
             repository=repository,
             runtime=runtime,
             instance_lock=InstanceLock.for_database(database_path),
@@ -267,9 +265,26 @@ async def run_workflow(
                     evidence,
                     backend=backend,
                 )
+                if phase7_recovery:
+                    await _manual_browser_crash(
+                        ui,
+                        record,
+                        db,
+                        simulator,
+                        runtime,
+                        evidence,
+                        backend,
+                    )
                 await _refresh(ui, record, db, simulator, evidence)
                 await _browser_crash(record, db, simulator, backend)
-                await _add_replace_delete(ui, record, db, directory, evidence)
+                await _add_replace_delete(
+                    ui,
+                    record,
+                    db,
+                    directory,
+                    evidence,
+                    verify_paused_acquisition=phase7_recovery,
+                )
                 await _no_id_open_and_window_loss(
                     ui,
                     record,
@@ -286,6 +301,20 @@ async def run_workflow(
                 adjustment = db.value(
                     "SELECT operator_population_adjustment FROM runtime_control"
                 )
+                shutdown_started = time.perf_counter()
+        shutdown_seconds = time.perf_counter() - shutdown_started
+        operator = runtime._operator_actions
+        evidence["first_shutdown_seconds"] = round(shutdown_seconds, 3)
+        record.check(
+            "shutdown_is_bounded_and_operator_work_stops",
+            shutdown_seconds < settings.shutdown_timeout_seconds * 2.5
+            and operator is not None
+            and operator.running == 0
+            and operator._queue.empty()
+            and operator._workers == [],
+            seconds=round(shutdown_seconds, 3),
+            operator_running=operator.running if operator is not None else None,
+        )
         record.check(
             "shutdown_zero_contexts_owners_and_browser_processes",
             db.owners() == 0 and _browser_processes(backend) == 0,
@@ -297,9 +326,26 @@ async def run_workflow(
             db.identities() == before_shutdown,
             sessions=len(before_shutdown),
         )
+        if phase7_recovery:
+            _inject_orphaned_ownership(db, tuple(before_shutdown)[:2])
 
         # --------------------------------------------------------------- restart
-        app, runtime = build()
+        restart_backend = (
+            BrowserBackendName.CHROME
+            if backend is BrowserBackendName.PATCHRIGHT
+            else BrowserBackendName.PATCHRIGHT
+        )
+        restart_settings = (
+            workflow_settings(
+                directory,
+                database=database_path,
+                headed=headed,
+                backend=restart_backend,
+            )
+            if phase7_recovery
+            else settings
+        )
+        app, runtime = build(restart_settings)
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ui:
@@ -314,8 +360,25 @@ async def run_workflow(
                 record.check(
                     "restart_preserves_run_config",
                     _dd(summary, "Requested Sessions") == str(REQUESTED)
-                    and target in summary,
+                    and target in summary
+                    and _dd(summary, "Browser backend") == backend.value,
                 )
+                if phase7_recovery:
+                    record.check(
+                        "environment_backend_change_does_not_migrate_existing_run",
+                        restart_settings.browser_backend is restart_backend
+                        and db.value("SELECT browser_backend FROM run_config")
+                        == backend.value
+                        and {
+                            row[0]
+                            for row in db.rows(
+                                "SELECT DISTINCT browser_backend FROM queue_sessions"
+                            )
+                        }
+                        == {backend.value},
+                        configured_backend=restart_backend.value,
+                        persisted_backend=backend.value,
+                    )
                 retarget = await ui.post(
                     "/setup",
                     data={"target_url": "https://other.example.test/", "requested_sessions": "9"},
@@ -330,6 +393,12 @@ async def run_workflow(
                     "restart_preserves_paused_state",
                     "PAUSED" in summary and "Resume Monitoring" in summary,
                 )
+                if phase7_recovery:
+                    record.check(
+                        "restart_recovers_stale_manual_and_interrupted_monitoring_leases",
+                        db.owners() == 0 and db.identities() == before_shutdown,
+                        owners=db.owners(),
+                    )
                 await asyncio.sleep(1.5)
                 record.check(
                     "restart_preserves_sessions_and_queue_ids",
@@ -380,6 +449,14 @@ async def run_workflow(
                     "stop_and_reset_returns_to_setup",
                     setup_after_reset.headers.get("location") == "/setup",
                 )
+                if phase7_recovery:
+                    await _new_backend_after_reset(
+                        ui,
+                        record,
+                        db,
+                        simulator,
+                        restart_backend,
+                    )
         record.check(
             "final_shutdown_clean",
             db.owners() == 0 and _browser_processes(backend) == 0,
@@ -406,6 +483,61 @@ async def run_workflow(
         "evidence": evidence,
         "checks": [asdict(check) for check in record.checks],
     }
+
+
+def _inject_orphaned_ownership(db: Database, session_ids: tuple[str, ...]) -> None:
+    """Model a killed monitor and headed owner immediately before process restart."""
+
+    if len(session_ids) < 2:
+        raise AssertionError("Phase 7 restart evidence needs two persisted sessions")
+    future = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    with sqlite3.connect(db.path) as connection:
+        connection.execute(
+            "UPDATE queue_sessions SET worker_id = ?, lease_until = ? WHERE session_id = ?",
+            ("controlled-interrupted-monitor", future, session_ids[0]),
+        )
+        connection.execute(
+            "UPDATE queue_sessions SET manual_owner_id = ?, manual_lease_until = ? "
+            "WHERE session_id = ?",
+            ("controlled-stale-manual", future, session_ids[1]),
+        )
+        connection.commit()
+
+
+async def _new_backend_after_reset(
+    ui: httpx.AsyncClient,
+    record: Recorder,
+    db: Database,
+    simulator: LocalQueueSimulator,
+    backend: BrowserBackendName,
+) -> None:
+    """Prove a backend change happens only after reset creates a new run."""
+
+    response = await ui.post(
+        "/setup",
+        data={"target_url": simulator.entry_url, "requested_sessions": "1"},
+    )
+    elapsed = await until(lambda: db.valid() == 1, timeout=30)
+    run_backend = db.value("SELECT browser_backend FROM run_config")
+    session_backends = {
+        row[0] for row in db.rows("SELECT DISTINCT browser_backend FROM queue_sessions")
+    }
+    record.check(
+        "backend_change_allowed_only_after_reset_new_run",
+        response.status_code == 303
+        and elapsed is not None
+        and run_backend == backend.value
+        and session_backends == {backend.value},
+        backend=run_backend,
+        seconds=elapsed,
+    )
+    reset = await ui.post("/run/reset", headers={"HX-Request": "true"})
+    record.check(
+        "second_reset_cleans_backend_change_run",
+        reset.status_code == 204
+        and db.value("SELECT COUNT(*) FROM run_config") == 0
+        and db.value("SELECT COUNT(*) FROM queue_sessions") == 0,
+    )
 
 
 async def _partial_resume(
@@ -531,7 +663,8 @@ async def _first_boot(
         "valid_setup_persists_and_redirects",
         response.status_code == 303
         and response.headers.get("location") == "/dashboard"
-        and db.value("SELECT requested_sessions FROM run_config") == REQUESTED,
+        and db.value("SELECT requested_sessions FROM run_config") == REQUESTED
+        and db.value("SELECT browser_backend FROM run_config") == backend.value,
     )
     record.check(
         "setup_tasks_bounded",
@@ -556,6 +689,19 @@ async def _first_boot(
         elapsed is not None and db.valid() == REQUESTED,
         seconds=evidence["acquisition_seconds"],
         browser_processes=_browser_processes(backend),
+    )
+    builds = db.rows("SELECT browser_backend, browser_build FROM run_config")
+    session_backends = {
+        row[0] for row in db.rows("SELECT DISTINCT browser_backend FROM queue_sessions")
+    }
+    record.check(
+        "new_run_and_sessions_record_backend_provenance",
+        len(builds) == 1
+        and builds[0][0] == backend.value
+        and session_backends == {backend.value}
+        and (backend is not BrowserBackendName.PATCHRIGHT or builds[0][1] is not None),
+        backend=builds[0][0] if builds else None,
+        browser_build_recorded=bool(builds and builds[0][1]),
     )
     record.check(
         "dashboard_shows_sessions_as_they_appear",
@@ -631,6 +777,15 @@ async def _dashboard(
         and _dd(summary, "Remaining To Initial Target") == "0"
         and "COMPLETE" in summary,
     )
+    record.check(
+        "dashboard_shows_backend_monitoring_and_acquisition_fields",
+        _dd(summary, "Browser backend")
+        == db.value("SELECT browser_backend FROM run_config")
+        and "Monitoring" in summary
+        and "Creation" in summary
+        and "Valid Queue IDs" in summary
+        and "Due backlog" in summary,
+    )
     changes_before = db.value("SELECT COUNT(*) FROM queue_sessions")
     contexts_before = _dd(summary, "Active BrowserContexts")
     for _ in range(10):
@@ -659,6 +814,7 @@ async def _pause_resume(
     await asyncio.sleep(1.0)  # let any check already in flight finish
     statuses = dict(db.rows("SELECT session_id, status FROM queue_sessions"))
     snapshot = dict(db.rows("SELECT session_id, last_checked_at FROM queue_sessions"))
+    record.check("pause_drains_already_inflight_work_safely", db.owners() == 0)
     await asyncio.sleep(4.5)  # more than two polling intervals
     later = dict(db.rows("SELECT session_id, last_checked_at FROM queue_sessions"))
     summary = (await ui.get("/partials/summary")).text
@@ -774,6 +930,79 @@ async def _open_close(
     await ui.post("/monitoring/resume", headers={"HX-Request": "true"})
 
 
+async def _manual_browser_crash(
+    ui: httpx.AsyncClient,
+    record: Recorder,
+    db: Database,
+    simulator: LocalQueueSimulator,
+    runtime: ApplicationRunRuntime,
+    evidence: dict[str, Any],
+    backend: BrowserBackendName,
+) -> None:
+    """Kill live browser processes while a verified manual session owns its row."""
+
+    session_id = evidence["session_ids"][0]
+    expected_queue_id = db.identities()[session_id]
+    assert expected_queue_id is not None
+    await ui.post("/monitoring/pause", headers={"HX-Request": "true"})
+    await until(
+        lambda: (db.session(session_id) or {}).get("worker_id") is None,
+        timeout=10,
+    )
+    identities = db.identities()
+    created_before = simulator.new_identities
+    opened = await ui.post(
+        f"/sessions/{session_id}/open", headers={"HX-Request": "true"}
+    )
+    owned = (db.session(session_id) or {}).get("manual_owner_id") is not None
+    victims = _browser_main_pids(backend)
+    for pid in victims:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+    manual = runtime._manual_sessions
+    released = await until(
+        lambda: (db.session(session_id) or {}).get("manual_owner_id") is None
+        and bool(manual is not None and session_id not in manual._open),
+        timeout=15,
+        interval=0.2,
+    )
+    record.check(
+        "manual_browser_crash_releases_ownership_without_identity_change",
+        "Opened in browser" in opened.text
+        and owned
+        and bool(victims)
+        and released is not None
+        and db.identities() == identities
+        and simulator.new_identities == created_before,
+        killed_processes=len(victims),
+        seconds=released,
+    )
+
+    # A later Open repairs the bounded headed slot lazily. Closing returns the same
+    # persisted row to the automatic scheduler; no replacement identity is acquired.
+    reopened = await ui.post(
+        f"/sessions/{session_id}/open", headers={"HX-Request": "true"}
+    )
+    closed = await ui.post(
+        f"/sessions/{session_id}/close", headers={"HX-Request": "true"}
+    )
+    await ui.post("/monitoring/resume", headers={"HX-Request": "true"})
+    checked = db.checked_at(session_id)
+    resumed = await until(lambda: db.checked_at(session_id) != checked, timeout=20)
+    row = db.session(session_id) or {}
+    record.check(
+        "manual_crash_replacement_reopens_closes_and_returns_to_monitoring",
+        "Opened in browser" in reopened.text
+        and "Browser session closed" in closed.text
+        and resumed is not None
+        and row.get("manual_owner_id") is None
+        and row.get("queue_id") == expected_queue_id
+        and db.identities() == identities,
+        seconds=resumed,
+        browser_processes=_browser_processes(backend),
+    )
+
+
 async def _refresh(
     ui: httpx.AsyncClient,
     record: Recorder,
@@ -863,8 +1092,12 @@ async def _add_replace_delete(
     db: Database,
     directory: Path,
     evidence: dict[str, Any],
+    *,
+    verify_paused_acquisition: bool = False,
 ) -> None:
     before = db.identities()
+    if verify_paused_acquisition:
+        await ui.post("/monitoring/pause", headers={"HX-Request": "true"})
     duplicate = await asyncio.gather(
         ui.post("/sessions/new?token=accept-add", headers={"HX-Request": "true"}),
         ui.post("/sessions/new?token=accept-add", headers={"HX-Request": "true"}),
@@ -882,6 +1115,13 @@ async def _add_replace_delete(
         db.value("SELECT requested_sessions FROM run_config") == REQUESTED
         and db.value("SELECT operator_population_adjustment FROM runtime_control") == 1,
     )
+    if verify_paused_acquisition:
+        summary = (await ui.get("/partials/summary")).text
+        record.check(
+            "acquisition_add_remains_available_while_monitoring_paused",
+            "PAUSED" in summary and len(added) == 1,
+        )
+        await ui.post("/monitoring/resume", headers={"HX-Request": "true"})
     summary = (await ui.get("/partials/summary")).text
     record.check(
         "managed_count_may_exceed_requested",
@@ -1043,8 +1283,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--backend",
         choices=tuple(backend.value for backend in BrowserBackendName),
-        # Matches the application default for new runs (Phase 6 Prompt 6).
-        default=BrowserBackendName.CAMOUFOX.value,
+        # Matches the application default for new runs during Phase 7.
+        default=BrowserBackendName.CHROME.value,
+    )
+    parser.add_argument(
+        "--phase7-recovery",
+        action="store_true",
+        help="include backend migration fencing and extended restart/crash evidence",
     )
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -1054,6 +1299,7 @@ def main(argv: list[str] | None = None) -> None:
                 Path(directory),
                 headed=args.headed,
                 backend=BrowserBackendName.parse(args.backend),
+                phase7_recovery=args.phase7_recovery,
             )
         )
     text = json.dumps(result, indent=2, default=str)

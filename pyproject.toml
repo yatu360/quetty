@@ -53,6 +53,7 @@ queue-load-test-camoufox-preflight = "queue_load_test.harness.camoufox_preflight
 queue-load-test-patchright-preflight = "queue_load_test.harness.patchright_preflight:main"
 queue-load-test-phase6-camoufox-benchmark = "queue_load_test.harness.phase6_camoufox_benchmark:main"
 queue-load-test-phase7-patchright-identity = "queue_load_test.harness.phase7_patchright_identity:main"
+queue-load-test-phase7-patchright-runtime = "queue_load_test.harness.phase7_patchright_runtime:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

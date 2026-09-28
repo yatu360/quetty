@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 7 Prompt 4 — Full Runtime and Dashboard Integration
+**Next:** Phase 7 Prompt 5
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -740,9 +740,21 @@ switching continues to require Stop & Reset Run.
    - All contexts and managed/child browser processes returned to zero. Temporary
      isolated contexts pass; persistent per-session profiles are not required or
      adopted. Staging remains NOT RUN / UNKNOWN.
-4. **Full Runtime and Dashboard Integration** — next. Extend the Phase 7 candidate
-   through the complete runtime and operator-visible workflow without changing backend
-   provenance or identity rules.
+4. **Full Runtime and Dashboard Integration** — **completed on 2026-09-28**
+   (`docs/phase7_patchright_runtime_integration.md`).
+   - Patchright passed 74/74 checks with a visible headed manual window; Chrome passed
+     the same 74/74 extended control. Camoufox remained implemented but was excluded
+     from the Phase 7 workflow matrix.
+   - Full setup/acquisition/dashboard, monitoring pause/resume, Refresh, Add while
+     paused, create-first Replace, Delete, manual Open/Close/window loss, manual and
+     automatic process kills/replacement, application restart, paused restart,
+     stale/interrupted ownership recovery, and interrupted acquisition passed.
+   - Existing runs retained persisted backend provenance despite the inverse configured
+     environment. Switching succeeded only through Stop & Reset plus new-run creation.
+     There were zero unexpected Queue ID changes or replacement identities.
+   - Final contexts, browser processes, leases, and operator work were zero. Chrome
+     remains the default; staging remains NOT RUN / UNKNOWN.
+5. **Phase 7 Prompt 5** — next.
 
 ## Scaling Gates
 
