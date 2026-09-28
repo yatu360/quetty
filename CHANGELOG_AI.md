@@ -4288,3 +4288,78 @@ Phase 7 Prompt 3 — Patchright Queue identity restoration.
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
 - Working tree: Phase 7 Prompt 2 changes only before commit.
+
+## 2026-09-28 — Phase 7 Prompt 3 — Patchright Queue Identity Restoration
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Prove whether Patchright supports Quetty's park/destroy/reopen architecture while the
+persisted Queue ID remains authoritative, using only the controlled local simulator.
+
+### Changes Made
+
+- Added `queue-load-test-phase7-patchright-identity`, an aggregate evidence workflow
+  using the production creator, restorer, BrowserManager, SQLite repository, and
+  filesystem state store.
+- Exercised fresh acquisition, explicit transfer restoration, explicit storage-state
+  restoration, production HYBRID transfer-first fallback, repeated state refresh and
+  park/reopen, managed browser restart, repository/state-store restart, injected
+  restoration failures, recovery of the same persisted row, and final resource checks.
+- Added focused unit coverage for sanitized aggregation and a real installed-browser
+  Patchright integration test covering the lifecycle and failure matrix.
+- Added the aggregate result JSON and
+  `docs/phase7_patchright_identity_strategy.md`; updated project context and phase plan.
+
+### Controlled Evidence
+
+- Patchright: 20/20 repeated park/reopen cycles; 32 restore operations; 31 transfer and
+  five storage attempts; mean 0.1452 s, p95 0.2251 s, maximum 0.2506 s.
+- Chrome control: 5/5 cycles; mean 0.1619 s, p95 0.2368 s.
+- Browser-process restart: PASS for both backends.
+- Repository/state-store object restart: PASS for both backends.
+- Failure matrix: missing/corrupt/unavailable state, transfer HTTP failure, identity
+  mismatch, backend mismatch, context creation failure, and navigation timeout all
+  returned explicit failures and preserved the existing persisted identity.
+- Identity: zero persisted Queue ID changes and zero replacement identities. The one
+  intentionally observed mismatch was rejected.
+- Cleanup: 33/33 Patchright cleanup checks; zero final contexts, BrowserManager
+  processes, or new descendant Chrome main processes.
+- Aggregate result: `docs/results/phase7_patchright_identity_result.json`; it contains
+  no Queue IDs, session IDs, transfer URLs, or browser-state contents.
+
+### Decision
+
+**TEMPORARY_CONTEXTS_PASS.** Patchright satisfies the controlled Prompt 3 gate without
+persistent user-data directories. Upstream's persistent-context recommendation does
+not outweigh direct evidence that Quetty's disposable contexts preserve its
+authoritative Queue identity. No profile-based redesign was made.
+
+### Tests Run
+
+- Focused identity aggregation and real Patchright workflow — **2 passed**.
+- Focused restoration/Patchright regression suite — **28 passed**.
+- Dedicated Patchright 20-cycle plus Chrome 5-cycle evidence command — PASS.
+- Full non-staging suite — **524 passed, 3 skipped, 4 staging tests deselected**.
+- `python3 -m ruff check src tests` — PASS.
+- `python3 -m mypy src` — PASS, 74 source files.
+- `python3 -m pip check` — PASS; no broken requirements.
+- Editable test install and the new CLI `--help` entry point — PASS.
+
+### Staging Tests
+
+- Authorised Queue-it staging tests — **NOT RUN / UNKNOWN**.
+- All new browser traffic was limited to the local Queue simulator on `127.0.0.1`.
+
+### Follow-Up
+
+Phase 7 Prompt 4 — Full Runtime and Dashboard Integration.
+
+### Git State
+
+- Commit: pending at the time this entry was written.
+- Branch: `main`.
+- Working tree: Phase 7 Prompt 3 changes only before commit.

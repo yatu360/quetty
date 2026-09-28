@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 7 Prompt 3 — Patchright Queue identity restoration
+**Next:** Phase 7 Prompt 4 — Full Runtime and Dashboard Integration
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -728,9 +728,21 @@ switching continues to require Stop & Reset Run.
      library error families are normalized below application services.
    - Chrome remains the default and regression control. Camoufox source/support remains
      intact but is excluded from Phase 7 validation. Staging is NOT RUN / UNKNOWN.
-3. **Patchright Queue Identity Restoration** — next. Validate park/reopen identity
-   restoration in fresh temporary contexts; do not infer it from Prompt 1 lifecycle
-   evidence.
+3. **Patchright Queue Identity Restoration** — **completed on 2026-09-28**
+   (`docs/phase7_patchright_identity_strategy.md`).
+   - The real creator/restorer path passed 20/20 Patchright park/reopen cycles with
+     explicit transfer/state restoration, HYBRID transfer-first fallback, refreshed
+     state, full browser-process restart, and repository/state-store restart. Chrome
+     passed a 5/5 control.
+   - Controlled missing/corrupt/unavailable state, transfer failure, identity mismatch,
+     provenance mismatch, context creation failure, and navigation timeout preserved the
+     authoritative persisted Queue ID and created no replacement identity.
+   - All contexts and managed/child browser processes returned to zero. Temporary
+     isolated contexts pass; persistent per-session profiles are not required or
+     adopted. Staging remains NOT RUN / UNKNOWN.
+4. **Full Runtime and Dashboard Integration** — next. Extend the Phase 7 candidate
+   through the complete runtime and operator-visible workflow without changing backend
+   provenance or identity rules.
 
 ## Scaling Gates
 

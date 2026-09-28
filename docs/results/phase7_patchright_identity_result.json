@@ -1,0 +1,129 @@
+{
+  "chrome_control": {
+    "application_repository_restart": "PASS",
+    "backend": "chrome",
+    "browser_build": "153.0.8010.54",
+    "browser_package_version": "1.62.0",
+    "context_cleanup": {
+      "active_contexts_before_shutdown": 0,
+      "checks": 9,
+      "failures": 0
+    },
+    "creation_duration_seconds": 0.2068,
+    "explicit_storage_state_restore": "PASS",
+    "explicit_transfer_restore": "PASS",
+    "failure_scenarios": {},
+    "fresh_context_creation": "PASS",
+    "hybrid_transfer_first_fallback": "PASS",
+    "identity_acquisition": "PASS",
+    "park_reopen": {
+      "attempted_cycles": 5,
+      "successful_cycles": 5
+    },
+    "persisted_identity_changes": 0,
+    "process_restart": "PASS",
+    "replacement_identities_created": 0,
+    "resource_cleanup": {
+      "active_contexts_after_shutdown": 0,
+      "managed_processes_after_shutdown": 0,
+      "new_browser_processes_after_shutdown": 0
+    },
+    "restoration": {
+      "attempts_by_mechanism": {
+        "STORAGE_STATE": 2,
+        "TRANSFER": 7
+      },
+      "failures_by_mechanism_and_reason": {
+        "TRANSFER:HTTP_FAILURE": 1
+      },
+      "identity_mismatches": 0,
+      "operations": 8,
+      "restore_duration_seconds": {
+        "count": 8,
+        "max": 0.2532,
+        "mean": 0.1619,
+        "p50": 0.1401,
+        "p95": 0.2368
+      },
+      "state_refresh_successes": 6,
+      "successes_by_mechanism": {
+        "STORAGE_STATE": 2,
+        "TRANSFER": 6
+      }
+    }
+  },
+  "decision": "TEMPORARY_CONTEXTS_PASS",
+  "elapsed_seconds": 9.053,
+  "generated_at": "2026-09-28T09:52:36.052049+00:00",
+  "patchright": {
+    "application_repository_restart": "PASS",
+    "backend": "patchright",
+    "browser_build": "153.0.8010.54",
+    "browser_package_version": "1.63.0",
+    "context_cleanup": {
+      "active_contexts_before_shutdown": 0,
+      "checks": 33,
+      "failures": 0
+    },
+    "creation_duration_seconds": 0.2298,
+    "explicit_storage_state_restore": "PASS",
+    "explicit_transfer_restore": "PASS",
+    "failure_scenarios": {
+      "backend_provenance_mismatch": "BACKEND_MISMATCH",
+      "context_creation_failure": "NAVIGATION_FAILED",
+      "corrupt_state": "STATE_CORRUPT",
+      "identity_mismatch": "IDENTITY_MISMATCH",
+      "missing_state": "STATE_MISSING",
+      "navigation_timeout": "NAVIGATION_FAILED",
+      "transfer_failure": "HTTP_FAILURE",
+      "unavailable_state": "STATE_UNAVAILABLE"
+    },
+    "fresh_context_creation": "PASS",
+    "hybrid_transfer_first_fallback": "PASS",
+    "identity_acquisition": "PASS",
+    "park_reopen": {
+      "attempted_cycles": 20,
+      "successful_cycles": 20
+    },
+    "persisted_identity_changes": 0,
+    "process_restart": "PASS",
+    "replacement_identities_created": 0,
+    "resource_cleanup": {
+      "active_contexts_after_shutdown": 0,
+      "managed_processes_after_shutdown": 0,
+      "new_browser_processes_after_shutdown": 0
+    },
+    "restoration": {
+      "attempts_by_mechanism": {
+        "STORAGE_STATE": 5,
+        "TRANSFER": 31
+      },
+      "failures_by_mechanism_and_reason": {
+        "STORAGE_STATE:STATE_CORRUPT": 1,
+        "STORAGE_STATE:STATE_MISSING": 1,
+        "STORAGE_STATE:STATE_UNAVAILABLE": 1,
+        "TRANSFER:BACKEND_MISMATCH": 1,
+        "TRANSFER:HTTP_FAILURE": 5,
+        "TRANSFER:IDENTITY_MISMATCH": 1,
+        "TRANSFER:NAVIGATION_FAILED": 2
+      },
+      "identity_mismatches": 1,
+      "operations": 32,
+      "restore_duration_seconds": {
+        "count": 32,
+        "max": 0.2506,
+        "mean": 0.1452,
+        "p50": 0.1536,
+        "p95": 0.2251
+      },
+      "state_refresh_successes": 22,
+      "successes_by_mechanism": {
+        "STORAGE_STATE": 2,
+        "TRANSFER": 22
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": "local_queue_simulator_only",
+  "staging": "NOT_RUN_UNKNOWN"
+}

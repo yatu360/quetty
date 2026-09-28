@@ -4,10 +4,27 @@
 
 This repository is an authorised Queue-it staging test system. It creates independent
 browser visitors, persists their Queue-it identities and progress, parks them without
-keeping browsers open, and restores a bounded subset through the configured Chrome or
-Camoufox backend for live monitoring.
+keeping browsers open, and restores a bounded subset through the configured Chrome,
+Camoufox, or Patchright backend for live monitoring.
 
 ## Current Status
+
+- **Phase 7 Prompt 3 is complete:** Patchright passes the controlled local
+  park/destroy/reopen Queue-identity gate with the existing temporary-context
+  architecture (`docs/phase7_patchright_identity_strategy.md`).
+  - The production creator/restorer path completed 20/20 Patchright park/reopen cycles,
+    explicit transfer and storage restoration, HYBRID transfer-first fallback, state
+    refresh, a full managed browser-process restart, and a repository/state-store object
+    restart. A 5/5 Chrome control passed the same core lifecycle.
+  - Missing, corrupt, and unavailable state; transfer failure; identity mismatch;
+    backend mismatch; context creation failure; and navigation timeout all retained the
+    persisted expected Queue ID and created no replacement identity. A final restore of
+    the same row succeeded.
+  - All 33 Patchright cleanup checks passed; final active contexts, managed processes,
+    and new child Chrome processes were zero. Persistent user-data profiles are not
+    needed and were not adopted.
+  - Evidence is local simulator only. Staging is **NOT RUN / UNKNOWN**. Next is Phase 7
+    Prompt 4, full runtime and dashboard integration.
 
 - **Phase 7 Prompt 2 is complete:** Patchright 1.63.0 is integrated behind the existing
   `BrowserBackend` / `BrowserManager` seam (`docs/phase7_patchright_backend_integration.md`).
@@ -26,9 +43,9 @@ Camoufox backend for live monitoring.
   - Existing Chrome, Camoufox, and Patchright runs restart with persisted provenance.
     Legacy rows remain Chrome, mismatch fails before context creation, and switching
     still requires Stop & Reset.
-  - Patchright-specific Queue identity restoration remains deliberately unproven and is
-    Phase 7 Prompt 3. Camoufox is retained but excluded from Phase 7 validation. No
-    Queue-it traffic was sent; staging is **NOT RUN / UNKNOWN**.
+  - Patchright-specific Queue identity restoration was subsequently proven locally in
+    Prompt 3. Camoufox is retained but excluded from Phase 7 validation. No Queue-it
+    traffic was sent; staging is **NOT RUN / UNKNOWN**.
 - **Phase 7 Prompt 1 is complete:** `PATCHRIGHT_READY_FOR_INTEGRATION` on local-only
   evidence (`docs/phase7_patchright_readiness.md`). Patchright 1.63.0 is pinned beside
   Playwright 1.62.0 and Camoufox 0.5.6 without resolver conflicts. Its async API launched
@@ -344,7 +361,7 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 7 Prompt 3 — Patchright Queue identity restoration**
+- Exact next task: **Phase 7 Prompt 4 — Full Runtime and Dashboard Integration**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1219,7 +1236,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 Prompt 3 — Patchright Queue identity restoration
+Phase 7 Prompt 4 — Full Runtime and Dashboard Integration
 
 ## Instructions for Future AI Sessions
 
