@@ -149,6 +149,8 @@ def test_first_boot_shows_setup_and_valid_submission_starts_one_bounded_runtime(
         assert response.status_code == 200
         assert "Queue Session Setup" in response.text
         assert "recorded as ADMITTED" in response.text
+        assert "Browser backend: patchright" in response.text
+        assert "standard Chrome is the fallback" in response.text
 
         response = client.post(
             "/setup",
@@ -162,7 +164,8 @@ def test_first_boot_shows_setup_and_valid_submission_starts_one_bounded_runtime(
         assert response.headers["location"] == "/dashboard"
         assert len(runtime.started) == 1
         assert runtime.started[0].requested_sessions == 100
-        assert runtime.started[0].browser_backend is BrowserBackendName.CHROME
+        # Phase 7 acceptance: a new run with default settings uses Patchright.
+        assert runtime.started[0].browser_backend is BrowserBackendName.PATCHRIGHT
         # Setup delegates once; it does not allocate one task or row per requested visitor.
         assert asyncio.run(repository.recovery_summary(now=datetime.now(UTC))).total_persisted_sessions == 0
 
@@ -630,6 +633,22 @@ def passing_camoufox_preflight(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return calls
 
 
+@pytest.fixture(autouse=True)
+def passing_patchright_preflight(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Patchright is the default backend; setup sees a passing preflight, never a browser."""
+
+    calls: list[int] = []
+
+    async def ready() -> Any:
+        calls.append(1)
+        return SimpleNamespace(
+            passed=True, error=None, remedy="", observed_browser_version="153.0.8010.54"
+        )
+
+    monkeypatch.setattr("queue_load_test.web.app.run_patchright_preflight", ready)
+    return calls
+
+
 def _run_rows(database: Path) -> list[tuple[object, ...]]:
     with sqlite3.connect(database) as connection:
         return list(connection.execute("SELECT browser_backend, browser_build FROM run_config"))
@@ -763,15 +782,16 @@ def test_failed_patchright_preflight_persists_nothing_and_is_actionable(tmp_path
     assert runtime.started == []
 
 
-def test_new_run_defaults_to_chrome_skips_camoufox_preflight_and_records_no_build(
-    tmp_path: Path,
+def test_new_run_defaults_to_patchright_and_records_observed_build(
+    tmp_path: Path, passing_patchright_preflight: list[int]
 ) -> None:
-    database = tmp_path / "chrome.sqlite3"
+    database = tmp_path / "default.sqlite3"
     runtime = FakeRuntime()
 
     async def must_not_run() -> Any:
-        raise AssertionError("Chrome runs never run the Camoufox preflight")
+        raise AssertionError("Patchright runs never run the Camoufox preflight")
 
+    assert settings(database).browser_backend is BrowserBackendName.PATCHRIGHT
     app = create_app(
         settings=settings(database),
         repository=SQLiteSessionRepository(database),
@@ -786,6 +806,67 @@ def test_new_run_defaults_to_chrome_skips_camoufox_preflight_and_records_no_buil
         )
 
     assert response.status_code == 303
+    assert passing_patchright_preflight == [1]
+    assert _run_rows(database) == [("patchright", "153.0.8010.54")]
+
+
+def test_explicit_chrome_fallback_skips_backend_preflights_and_records_no_build(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "chrome.sqlite3"
+    runtime = FakeRuntime()
+
+    async def must_not_run() -> Any:
+        raise AssertionError("Chrome runs never run a Camoufox or Patchright preflight")
+
+    app = create_app(
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.CHROME}
+        ),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        camoufox_preflight=must_not_run,
+        patchright_preflight=must_not_run,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert _run_rows(database) == [("chrome", None)]
+    assert runtime.started[0].browser_backend is BrowserBackendName.CHROME
+
+
+async def test_existing_chrome_run_restarts_as_chrome_after_patchright_default(
+    tmp_path: Path, passing_patchright_preflight: list[int]
+) -> None:
+    database = tmp_path / "existing-chrome.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await repository.create_run(
+        RunConfig(
+            run_id="chrome-run",
+            target_url="https://staging.example.test/",
+            requested_sessions=1,
+            created_at=datetime.now(UTC),
+            browser_backend=BrowserBackendName.CHROME,
+        )
+    )
+    await repository.close()
+    runtime = FakeRuntime()
+    app = create_app(
+        settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
+    )
+    assert settings(database).browser_backend is BrowserBackendName.PATCHRIGHT
+
+    with TestClient(app) as client:
+        summary = client.get("/partials/summary").text
+
+    assert [run.browser_backend for run in runtime.started] == [BrowserBackendName.CHROME]
+    assert passing_patchright_preflight == []
+    assert "installed Google Chrome" in summary
     assert _run_rows(database) == [("chrome", None)]
 
 
@@ -809,7 +890,7 @@ async def test_existing_camoufox_run_restarts_as_camoufox_after_default_change(
     app = create_app(
         settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
     )
-    assert settings(database).browser_backend is BrowserBackendName.CHROME
+    assert settings(database).browser_backend is BrowserBackendName.PATCHRIGHT
 
     with TestClient(app) as client:
         summary = client.get("/partials/summary").text

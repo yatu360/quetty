@@ -4,10 +4,43 @@
 
 This repository is an authorised Queue-it staging test system. It creates independent
 browser visitors, persists their Queue-it identities and progress, parks them without
-keeping browsers open, and restores a bounded subset through the configured Chrome,
-Camoufox, or Patchright backend for live monitoring.
+keeping browsers open, and restores a bounded subset through the configured browser
+backend (Patchright by default; Chrome fallback; Camoufox retained, uncertified) for
+live monitoring.
 
 ## Current Status
+
+### Browser backend policy (authoritative, Phase 7 accepted 2026-09-28)
+
+- **Patchright is the default for NEW runs** (`BROWSER_BACKEND=patchright`, also the
+  default when unset). It uses Patchright 1.63.0 driving installed Google Chrome via
+  `channel="chrome"`. New-run setup runs the Patchright preflight and records the
+  observed Chrome build.
+- **Chrome** (`BROWSER_BACKEND=chrome`) is the supported fallback/control. It passed the
+  Phase 7 fallback regression.
+- **Camoufox** (`BROWSER_BACKEND=camoufox`) is retained as dormant/experimental. It is
+  **not certified** by Phase 7 and not recommended. Its implementation, config value,
+  provenance, schema, and restart path are kept, but routine Phase 7 tests and
+  benchmarks exclude it.
+- **Existing runs are never migrated.** A run restarts with its persisted
+  `run_config.browser_backend`; legacy rows are Chrome. Switching backends requires
+  Stop & Reset Run and a new run.
+- Queue ID is the authoritative identity. Staging is **NOT RUN / UNKNOWN** for every
+  backend in Phase 7.
+
+- **Phase 7 Prompt 6 is complete: Phase 7 ACCEPTED** (`docs/phase7_acceptance.md`,
+  `docs/results/phase7_acceptance_result.json`).
+  - All 18 decision gates passed, and the new-run default changed Chrome → Patchright.
+  - Final `queue-load-test-phase7-acceptance`:
+    - Patchright: preflight PASS, headed application workflow 74/74,
+      restoration/recovery scenarios 102/102, and the 50-context ceiling healthy.
+    - Chrome fallback: preflight PASS, workflow 74/74, scenarios 102/102.
+    - 352/352 checks, 0 leftover processes, zero Queue ID changes.
+  - Known issues: a restore attempt in flight on a killed browser waits out its
+    deadline (both backends); shutdown is bounded per stage; Patchright costs a little
+    more than Chrome locally; the Chrome build is not pinned; an intermittent
+    fake-based operator-fencing unit test.
+  - Next: an authorised Queue-it staging validation of the Patchright default.
 
 - **Phase 7 Prompt 5 is complete: `READY_FOR_DEFAULT_DECISION`**
   (`docs/phase7_patchright_benchmark.md`,
@@ -397,7 +430,7 @@ Camoufox, or Patchright backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance**
+- Exact next task: **authorised Queue-it staging validation of the Patchright default** (Phase 7 complete)
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1272,7 +1305,9 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance
+Phase 7 is complete. Next: authorised Queue-it staging validation of the Patchright
+default (requires an authorised staging configuration; never claim staging PASS
+without it).
 
 ## Instructions for Future AI Sessions
 

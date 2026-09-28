@@ -12,7 +12,11 @@
       <p class="eyebrow">Authorised staging only</p>
       <h1>Queue Session Setup</h1>
       <p>Configure the immutable target for this persisted run.</p>
-      <p class="muted">Browser backend: {{ browser_backend }}</p>
+      <p class="muted">Browser backend: {{ browser_backend }}
+        {% if browser_backend == "patchright" %}(default; standard Chrome is the fallback via BROWSER_BACKEND=chrome)
+        {% elif browser_backend == "chrome" %}(supported fallback)
+        {% elif browser_backend == "camoufox" %}(retained experimental backend; not certified by Phase 7)
+        {% endif %}</p>
       {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
       <form method="post" action="/setup">
         <label for="target_url">Target URL</label>

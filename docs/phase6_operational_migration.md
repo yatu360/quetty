@@ -1,5 +1,10 @@
 # Phase 6 Operational Migration: Camoufox Default Decision
 
+> **Superseded (2026-09-28).** This is a historical Phase 6 record. Phase 7 moved the
+> new-run default back to Chrome (Prompt 1) and then to **Patchright** (Prompt 6,
+> `docs/phase7_acceptance.md`). Camoufox is now retained as a dormant/experimental,
+> uncertified backend. Existing runs keep their persisted backend.
+
 **Date:** 2026-09-27
 **Scope:** Phase 6 Prompt 6. Local simulator evidence only. **No Queue-it or staging
 traffic was sent.**

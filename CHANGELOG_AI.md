@@ -4564,6 +4564,126 @@ Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance.
 
 ### Git State
 
+- Commit: `b8bfb26`.
+- Branch: `main`.
+- Working tree: clean after commit.
+
+## 2026-09-28 — Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Decide from the Prompt 1–5 evidence whether Patchright becomes the default for new runs.
+Run the final Patchright acceptance and a Chrome fallback regression, and close Phase 7
+honestly.
+
+### Changes Made
+
+- All 18 decision gates passed, so the **new-run default changed Chrome → Patchright**:
+  - `Settings.browser_backend` defaults to `patchright`;
+  - `.env.example` sets `BROWSER_BACKEND=patchright` and documents Chrome as the
+    fallback and Camoufox as uncertified;
+  - the workflow CLI default follows the application default.
+- Existing runs are not migrated. They restart with their persisted backend, legacy
+  rows remain Chrome, and Stop & Reset is still required to switch.
+- The setup page states the backend role: default/fallback/"retained experimental;
+  not certified by Phase 7".
+- Tests:
+  - default Settings → Patchright;
+  - a default new run runs the Patchright preflight and records the observed build;
+  - an explicit Chrome fallback skips backend preflights;
+  - existing Chrome, Camoufox, and Patchright runs restart unchanged under the new
+    default;
+  - an autouse fake Patchright preflight keeps web unit tests browser-free.
+- Added `queue-load-test-phase7-acceptance` (`harness/phase7_acceptance.py`). It runs
+  the Patchright preflight and a Chrome fallback launch check, the Phase 7 extended
+  application workflow (Patchright headed, Chrome control), the Prompt 5
+  restoration/recovery scenarios, and the default-ceiling concurrency case.
+- Documentation:
+  - added `docs/phase7_acceptance.md`;
+  - updated README, PROJECT_CONTEXT (authoritative backend policy), and PHASE_PLAN
+    (Phase 7 COMPLETE);
+  - marked the Phase 6 default-decision documents as superseded.
+- Camoufox implementation, config value, provenance, schema, preflight, and restart
+  path are unchanged. No Camoufox acceptance was run.
+
+### Files Added
+
+- `src/queue_load_test/harness/phase7_acceptance.py`
+- `docs/phase7_acceptance.md`
+- `docs/results/phase7_acceptance_result.json`
+
+### Files Modified
+
+- `src/queue_load_test/config.py`, `.env.example`
+- `src/queue_load_test/web/templates/setup.html`
+- `src/queue_load_test/harness/phase5_workflow.py`
+- `tests/unit/test_config.py`, `tests/unit/test_web_ui.py`
+- `pyproject.toml` (console script)
+- `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+- `docs/phase6_operational_migration.md`, `docs/phase6_acceptance.md` (superseded
+  banners)
+
+### Controlled Evidence
+
+`queue-load-test-phase7-acceptance` took 456 s, with a visible headed Patchright manual
+window.
+
+- **Patchright:** preflight PASS (1.63.0, Chrome 153.0.8010.54, 5/5, 0 contexts and 0
+  processes after). Application workflow **74/74**. Scenarios **6/6, 102/102**: park
+  and reopen of 90 restores, application restart, crash during monitoring, state,
+  navigation and identity faults, stuck navigation, and the shutdown matrix. The
+  50-context default ceiling was healthy (150/150 churn restores).
+- **Chrome fallback:** preflight PASS, workflow **74/74**, scenarios **102/102**, and
+  50 contexts healthy.
+- **Total:** 352/352 checks, 0 leftover browser processes, zero Queue ID changes, and
+  zero silent replacements.
+
+### Tests Run
+
+- `python -m pytest -q`: **542 passed, 4 staging deselected** (final run). One earlier full run on the same code had 541 passed and 1 failed: the intermittent operator-fencing timing test.
+- `python -m ruff check src tests`: PASS.
+- `python -m mypy src`: PASS (strict, 77 source files).
+- `python -m pip check`: PASS.
+- `queue-load-test-patchright-preflight --context-cycles 5`: PASS.
+- Chrome fallback preflight (acceptance run): PASS.
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it staging configuration was supplied. All Queue-it
+  vendor-specific questions are NOT RUN / UNKNOWN.
+
+### Important Decisions
+
+- **Phase 7 ACCEPTED on local evidence**, and Patchright is the new-run default.
+- Chrome is the supported fallback. Camoufox is retained, dormant/experimental, and
+  uncertified.
+- No Patchright-specific limit, serialization, or health heuristic; the existing
+  ceilings apply.
+
+### Known Issues
+
+- On both backends, a restore attempt in flight on a killed browser waits out its
+  attempt deadline (about 24 s total locally). This is bounded.
+- Total shutdown is bounded per stage, not by one timeout.
+- Patchright costs about 10–30% more restore latency and has about 8% lower throughput
+  than Chrome locally.
+- The installed Chrome build is recorded per run, not pinned.
+- `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`
+  fails intermittently under the full suite (a fake-based timing test, unrelated to the
+  default). It did not reproduce in isolation, under CPU stress, or in
+  integration-first ordering.
+
+### Follow-Up
+
+Authorised Queue-it staging validation of the Patchright default. There are no further
+Phase 7 prompts.
+
+### Git State
+
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
-- Working tree: Phase 7 Prompt 5 changes only before commit.
+- Working tree: Phase 7 Prompt 6 changes only before commit.

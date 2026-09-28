@@ -28,18 +28,19 @@ post-admission workflows.
 
 ## Install
 
-During Phase 7 development, standard Chrome is the safe default for new runs.
-Patchright is the integrated candidate backend. Camoufox remains installed and
-selectable as a dormant/experimental backend.
+**Backend policy (Phase 7 accepted, 2026-09-28):** Patchright is the default backend for
+new runs. Standard Chrome is the supported fallback. Camoufox is retained as a
+dormant/experimental backend: it is still installed and selectable, but it is not
+recommended and Phase 7 did not certify it. See `docs/phase7_acceptance.md`.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[test]"           # also pins patchright==1.63.0
-queue-load-test-patchright-preflight --context-cycles 5
-camoufox fetch official/stable/152.0.4-beta.30 # exact pinned Camoufox browser build
-queue-load-test-camoufox-preflight            # local-only readiness check
-python -m playwright install chrome           # installed Chrome used by both APIs
+python -m playwright install chrome           # installed Chrome used by Patchright and Chrome
+queue-load-test-patchright-preflight --context-cycles 5   # default backend readiness
+# Optional, only for the retained experimental Camoufox backend:
+# camoufox fetch official/stable/152.0.4-beta.30 && queue-load-test-camoufox-preflight
 ```
 
 The Phase 7 dependency set is Python 3.12+, Patchright 1.63.0, Camoufox 0.5.6,
@@ -53,8 +54,12 @@ the complete controlled runtime/dashboard result are in
 `docs/phase7_patchright_identity_strategy.md` and
 `docs/phase7_patchright_runtime_integration.md`.
 
-The preflight launches one Camoufox process, opens one context, loads only an in-memory
-`data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
+The Patchright preflight also runs automatically before a **new** Patchright run is
+created. If Chrome or the exact Patchright package is missing, no run is persisted and
+the setup page names the remedy and the `BROWSER_BACKEND=chrome` fallback.
+
+The Camoufox preflight launches one Camoufox process, opens one context, loads only an
+in-memory `data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
 It also runs automatically before a **new** Camoufox run is created. If it fails, no run
 is persisted and the setup page shows the exact next step, such as the
 `camoufox fetch` command. The newer beta.31 build is visible upstream, but beta.30 is
@@ -64,8 +69,8 @@ and rollback procedure.
 
 ### Browser backend
 
-`BROWSER_BACKEND=chrome|camoufox|patchright` selects the backend for **new** runs.
-Chrome is the temporary Phase 7 default:
+`BROWSER_BACKEND=patchright|chrome|camoufox` selects the backend for **new** runs.
+Patchright is the default:
 - **Recorded per run and session.** The backend is persisted on the immutable run and
   on every session. An existing run always restarts with the backend it was created
   with; changing `BROWSER_BACKEND` never migrates it. To switch backends, use **Stop &
@@ -78,17 +83,22 @@ Chrome is the temporary Phase 7 default:
   is shown and logged (`run_browser_build_changed`). Patchright runs record and display
   the installed Chrome version observed by their successful new-run preflight.
 
-**Chrome fallback:** set `BROWSER_BACKEND=chrome` before creating a run. Chrome uses
-installed Google Chrome (`channel="chrome"`) and remains covered by the regression
-workflow.
-
-**Patchright candidate:** set `BROWSER_BACKEND=patchright` before creating a run. Setup
+**Patchright (default):** used when `BROWSER_BACKEND` is unset or `patchright`. Setup
 runs the exact-package local preflight before persisting anything. Patchright uses its
 own async controller beneath the existing `BrowserManager`; the same bounded slots,
 context capacity, shared headed/headless budget, deadlines, replacement, and cleanup
 rules apply. Patchright uses ordinary shared-process contexts with no Camoufox-style
 serialization. Existing runs never rerun new-run preflight and always retain their
 persisted backend.
+
+**Chrome fallback:** set `BROWSER_BACKEND=chrome` before creating a run. Chrome uses
+installed Google Chrome (`channel="chrome"`) through standard Playwright and passed the
+Phase 7 fallback regression.
+
+**Camoufox (retained, not certified):** `BROWSER_BACKEND=camoufox` still creates and
+reopens Camoufox runs, and existing Camoufox runs restart as Camoufox. Phase 7 tests
+and benchmarks exclude it, and it is kept only for possible future investigation. Its
+Phase 6 evidence and limits below are historical.
 
 Queue ID is the authoritative persisted identity. Transfer URL and same-backend HYBRID
 storage state restore it in a fresh, disposable context. Fresh Camoufox contexts may
@@ -126,8 +136,15 @@ concurrency, capacity, and resource benchmark (Chrome control, simulator only) i
 queue-load-test-phase7-patchright-benchmark --headed --output docs/results/phase7_patchright_benchmark_result.json
 ```
 
-Results are in `docs/phase7_patchright_benchmark.md`. Chrome remains the default until
-final Phase 7 acceptance.
+Results are in `docs/phase7_patchright_benchmark.md`. The final acceptance run
+(Patchright preflight and headed application workflow, the Prompt 5
+restoration/recovery scenarios, and the Chrome fallback regression) is:
+
+```powershell
+queue-load-test-phase7-acceptance --output docs/results/phase7_acceptance_result.json
+```
+
+The decision and matrix are in `docs/phase7_acceptance.md`.
 
 The application is configured through environment variables. Start from:
 

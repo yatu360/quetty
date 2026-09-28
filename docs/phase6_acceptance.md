@@ -1,5 +1,10 @@
 # Phase 6 Acceptance: Camoufox Browser Backend
 
+> **Superseded (2026-09-28).** This is a historical Phase 6 record. Phase 7 moved the
+> new-run default back to Chrome (Prompt 1) and then to **Patchright** (Prompt 6,
+> `docs/phase7_acceptance.md`). Camoufox is now retained as a dormant/experimental,
+> uncertified backend. Existing runs keep their persisted backend.
+
 **Date:** 2026-09-27
 **Status:** **Phase 6 ACCEPTED on local evidence.** The Queue-it staging boundary
 remains **UNKNOWN / NOT RUN**.

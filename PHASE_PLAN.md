@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance
+**Next:** authorised Queue-it staging validation of the Patchright default (no further Phase 7 prompts)
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -691,11 +691,11 @@ or one browser process/profile per persisted session.
    - Staging continuity was deliberately not run: no authorised traffic was sent. It
      stays UNKNOWN.
 
-## Phase 7 — Patchright Browser Evaluation
+## Phase 7 — Patchright Browser Evaluation — **COMPLETE (accepted 2026-09-28, local evidence)**
 
-Camoufox remains implemented but is dormant/experimental and excluded from Phase 7
-benchmark and acceptance effort. Chrome is the control/fallback and the temporary
-default for new runs. Persisted runs always retain their recorded backend; backend
+Final policy (`docs/phase7_acceptance.md`): **Patchright is the default for new runs**,
+Chrome is the supported fallback, and Camoufox is retained as dormant/experimental and
+uncertified. Camoufox was excluded from Phase 7 benchmark and acceptance effort. Persisted runs always retain their recorded backend; backend
 switching continues to require Stop & Reset Run.
 
 1. **Patchright Readiness, Dependency Compatibility, and Safe Default** — **completed
@@ -773,7 +773,20 @@ switching continues to require Stop & Reset Run.
      13 for Chrome, with backlog bounded.
    - No Patchright-specific limit is required. A harness restore-deadline check was
      corrected. Chrome remains the default; staging is NOT RUN / UNKNOWN.
-6. **Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance** — next.
+6. **Patchright Default Migration and Final Acceptance** — **completed on 2026-09-28:
+   Phase 7 ACCEPTED** (`docs/phase7_acceptance.md`).
+   - All 18 decision gates passed on Prompt 1–6 evidence. The new-run default changed
+     from Chrome to Patchright (`Settings`, `.env.example`, setup page, workflow CLI).
+     No existing run is migrated, and switching still requires Stop & Reset.
+   - Final run (`queue-load-test-phase7-acceptance`):
+     - Patchright: preflight PASS, headed workflow 74/74, restoration/recovery
+       scenarios 102/102, and the 50-context default ceiling healthy.
+     - Chrome fallback: preflight PASS, workflow 74/74, scenarios 102/102.
+     - 352/352 checks in total, 0 leftover processes.
+   - Camoufox is retained (implementation, config, provenance, schema, restart path),
+     uncertified, and not run.
+   - Queue-it staging is **NOT RUN / UNKNOWN**. An authorised staging validation of the
+     Patchright default is the open follow-up.
 
 ## Scaling Gates
 

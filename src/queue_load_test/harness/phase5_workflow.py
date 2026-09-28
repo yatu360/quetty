@@ -1283,8 +1283,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--backend",
         choices=tuple(backend.value for backend in BrowserBackendName),
-        # Matches the application default for new runs during Phase 7.
-        default=BrowserBackendName.CHROME.value,
+        # Matches the application default for new runs (Patchright since Phase 7).
+        default=BrowserBackendName.PATCHRIGHT.value,
     )
     parser.add_argument(
         "--phase7-recovery",

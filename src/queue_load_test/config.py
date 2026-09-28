@@ -17,10 +17,11 @@ class Settings(BaseSettings):
     staging_url: HttpUrl | None = Field(default=None, alias="STAGING_URL")
     target_queue_ids: int = Field(default=1000, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
-    # Default for NEW runs only (Phase 7 development policy). An existing run always restarts
-    # with the backend persisted in its run configuration.
+    # Default for NEW runs only (Phase 7 acceptance: Patchright; Chrome is the supported
+    # fallback). An existing run always restarts with the backend persisted in its run
+    # configuration; changing this never migrates it.
     browser_backend: BrowserBackendName = Field(
-        default=BrowserBackendName.CHROME,
+        default=BrowserBackendName.PATCHRIGHT,
         alias="BROWSER_BACKEND",
     )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
