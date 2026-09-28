@@ -4452,3 +4452,118 @@ Phase 7 Prompt 5.
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
 - Working tree: Phase 7 Prompt 4 changes only before commit.
+
+## 2026-09-28 — Phase 7 Prompt 5 — Patchright Recovery, Concurrency, Capacity, and Resource Benchmark
+
+### Agent / Model
+
+Claude Code / Claude Opus 5.5
+
+### Goal
+
+Determine whether Patchright is reliable enough under Quetty's bounded browser workload
+to become the default backend, with standard Chrome as the control and Camoufox
+excluded.
+
+### Changes Made
+
+- Added `queue-load-test-phase7-patchright-benchmark`
+  (`harness/phase7_patchright_benchmark.py`). It reuses the Phase 6 park/reopen,
+  restart, kill, restoration-fault, and operator-runtime scenarios and adds:
+  - context concurrency with close, reacquisition, churn sweep, health probe, and
+    browser-reported context counts;
+  - create/page/navigate/inspect/close churn with stuck-call detection;
+  - a monitoring-shaped production scheduler/restorer workload with check, restore,
+    acquisition, backlog, and resource timelines;
+  - stuck/slow navigation deadlines, worker isolation, and health;
+  - a five-case application shutdown matrix.
+- Phase 6 harness: `make_backend` supports Patchright, and the provenance scenarios
+  accept an explicit foreign backend so Phase 7 pairs Patchright ↔ Chrome.
+- Fixed a harness defect. The failure-during-monitoring check bounded a whole HYBRID
+  restore by one attempt deadline, although TRANSFER and STORAGE_STATE are each bounded
+  separately. It now bounds each restore by `attempts × deadline + 1 s`, and
+  `RecordingRestorer` records the attempt count.
+- No production code changed. The default backend is unchanged (Chrome).
+
+### Files Added
+
+- `src/queue_load_test/harness/phase7_patchright_benchmark.py`
+- `tests/unit/test_phase7_patchright_benchmark.py`
+- `docs/phase7_patchright_benchmark.md`
+- `docs/results/phase7_patchright_benchmark_result.json`
+
+### Files Modified
+
+- `src/queue_load_test/harness/phase6_camoufox_benchmark.py`
+- `pyproject.toml` (console script)
+- `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Controlled Evidence
+
+- **Host:** macOS 26.5.1 arm64 (M5 Pro, 15 CPUs, 24 GiB).
+- **Versions:** Python 3.14.7, Patchright 1.63.0, Playwright 1.62.0, installed Chrome
+  153.0.8010.54.
+- **Run:** full headed run in 1,189 s. Patchright 15/15 scenarios and 247/247 checks;
+  Chrome 15/15 and 247/247, after the corrected re-run. 0 leftover processes.
+- **Concurrency:** 1/5/10/20/25 contexts on one process and 50 on two processes were
+  all healthy on both backends. There were 0 reacquisition failures, 0 churn-restore
+  failures, and 0 leaks, and the health probe took ≤ 0.17 s.
+- **Churn:** 1,200 cycles on one process (1–20 workers) with 0 failures, 0 stuck calls,
+  no wedge, contexts back to 0 each time, and 0 restarts.
+- **Park/reopen:** 300/300 same-process restores (p95 ≤ 0.35 s), 3 full-restart cycles
+  at 50/50 each, and application restart with 5 stranded leases recovered and
+  foreign-provenance rows rejected both ways.
+- **Monitoring:** 100 sessions at 20 checks/s offered. Patchright ran 12.1–12.3
+  checks/s vs Chrome 13.1–13.3, with bounded backlog and queue, 0 failures, and 0
+  mismatches.
+- **Kills:** detection 0.05 s and replacement about 0.2 s. 20 repeated kills with
+  Patchright restart p50/p95/max 0.154/0.185/0.186 s and exactly 1 process per cycle.
+- **Stuck navigation:** deadlines fired and healthy sessions verified alongside stuck
+  ones. Stuck rows were left `CONNECTION_LOST` and retryable, and 15 repeated timeouts
+  left the process healthy with 0 restarts.
+- **Operator runtime:** headed manual 14/14, pause-under-failure 7/7, and shutdown
+  under load plus a five-case matrix all bounded. The 90 s stuck-page shutdown took
+  30.1 s, stage-composed by `SHUTDOWN_TIMEOUT_SECONDS`.
+- **Identity:** zero Queue ID changes or replacement identities anywhere.
+
+### Tests Run
+
+- Full Patchright + Chrome benchmark: first run 492/494, both failures being the harness
+  check above. Corrected re-run of the affected scenario for both backends: PASS. Final
+  aggregate: 494/494.
+- Focused recovery/backend/Patchright/Chrome-recovery tests: **122 passed**.
+- Full non-staging suite: **540 passed, 4 staging deselected**. An earlier pass hit a
+  timing flake in `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`;
+  it passed 3/3 in isolation, on the unmodified tree, and in the clean re-run.
+- `ruff check src tests`: PASS. `mypy src` (strict, 76 files): PASS. `pip check`: PASS.
+
+### Staging Tests
+
+- NOT RUN. No authorised staging configuration was supplied; all traffic was local.
+
+### Important Decisions
+
+- **READY_FOR_DEFAULT_DECISION.**
+- No Patchright-specific concurrency bound, serialization, or consecutive-timeout
+  restart heuristic. The evidence did not justify one, so Patchright keeps the Chrome
+  model.
+- Per-process page throughput, not context count, limits local capacity for both
+  backends. That is a worker-sizing input, not a Patchright limit.
+
+### Known Issues
+
+- On both backends, a restore attempt in flight on a killed browser waits out its
+  attempt deadline (23 s locally) before the HYBRID fallback runs. This is bounded.
+  Cancelling on detected disconnect is a possible backend-independent follow-up.
+- Total shutdown is bounded per stage, not by one timeout (about 3 ×
+  `SHUTDOWN_TIMEOUT_SECONDS` observed).
+
+### Follow-Up
+
+Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance.
+
+### Git State
+
+- Commit: pending at the time this entry was written.
+- Branch: `main`.
+- Working tree: Phase 7 Prompt 5 changes only before commit.

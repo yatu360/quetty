@@ -9,6 +9,26 @@ Camoufox, or Patchright backend for live monitoring.
 
 ## Current Status
 
+- **Phase 7 Prompt 5 is complete: `READY_FOR_DEFAULT_DECISION`**
+  (`docs/phase7_patchright_benchmark.md`,
+  `docs/results/phase7_patchright_benchmark_result.json`).
+  - Patchright (candidate) and Chrome (control) each passed 15/15 scenarios and
+    247/247 checks on the same host (`queue-load-test-phase7-patchright-benchmark`).
+    Camoufox was excluded.
+  - Multiple live Patchright contexts per process are healthy: 1–25 on one process and
+    50 on two, with zero reacquisition, churn, wedge, or leak failures. Patchright keeps
+    the ordinary Chrome concurrency model and ceilings; no Patchright-specific limit or
+    timeout-restart heuristic is needed.
+  - Park/reopen (300), browser restart (150), application restart, 29 kills including
+    20 repeated (restart p95 0.185 s), stuck navigation, manual headed ownership,
+    pause/resume under failure, and the shutdown matrix all passed with zero Queue ID
+    changes. Shutdown is bounded by per-stage `SHUTDOWN_TIMEOUT_SECONDS`.
+  - Costs vs Chrome locally: about 10–30% higher restore latency and about 8% lower
+    monitoring throughput (12 vs 13 checks/s at 100 sessions). Per-process page
+    throughput, not context count, is the shared ceiling.
+  - Chrome remains the default. Staging is **NOT RUN / UNKNOWN**. Next is Phase 7
+    Prompt 6.
+
 - **Phase 7 Prompt 4 is complete:** Patchright passes the complete controlled local
   runtime/dashboard workflow (`docs/phase7_patchright_runtime_integration.md`).
   - Patchright passed 74/74 checks with a visible headed manual window; Chrome passed
@@ -377,7 +397,7 @@ Camoufox, or Patchright backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 7 Prompt 5**
+- Exact next task: **Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1252,7 +1272,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 Prompt 5
+Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance
 
 ## Instructions for Future AI Sessions
 

@@ -118,8 +118,15 @@ queue-load-test-phase6-camoufox-benchmark --headed --output docs/results/phase6_
 
 Results and limits are in `docs/phase6_camoufox_benchmark.md`.
 
-Phase 7 dependency/readiness, identity, and full runtime/dashboard findings are recorded
-in the four `docs/phase7_patchright_*.md` reports. Chrome remains the default until
+Phase 7 dependency/readiness, identity, full runtime/dashboard, and benchmark findings
+are recorded in the `docs/phase7_patchright_*.md` reports. The Patchright recovery,
+concurrency, capacity, and resource benchmark (Chrome control, simulator only) is:
+
+```powershell
+queue-load-test-phase7-patchright-benchmark --headed --output docs/results/phase7_patchright_benchmark_result.json
+```
+
+Results are in `docs/phase7_patchright_benchmark.md`. Chrome remains the default until
 final Phase 7 acceptance.
 
 The application is configured through environment variables. Start from:

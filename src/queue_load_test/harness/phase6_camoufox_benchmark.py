@@ -48,6 +48,7 @@ from queue_load_test.browser import (
     BrowserManager,
     CamoufoxBackend,
     ChromeBackend,
+    PatchrightBackend,
 )
 from queue_load_test.browser.backend import BrowserBackend
 from queue_load_test.config import Settings
@@ -198,9 +199,23 @@ async def until(
 
 
 def make_backend(backend: BrowserBackendName, *, serialize: bool = True) -> BrowserBackend:
+    """Construct a backend; ``serialize`` applies only to Camoufox."""
+
     if backend is BrowserBackendName.CHROME:
         return ChromeBackend()
+    if backend is BrowserBackendName.PATCHRIGHT:
+        return PatchrightBackend()
     return CamoufoxBackend(serialize_contexts=serialize)
+
+
+def foreign_backend(backend: BrowserBackendName) -> BrowserBackendName:
+    """The provenance used for cross-backend rejection checks (Phase 6 pairing kept)."""
+
+    if backend is BrowserBackendName.CAMOUFOX:
+        return BrowserBackendName.CHROME
+    if backend is BrowserBackendName.PATCHRIGHT:
+        return BrowserBackendName.CHROME
+    return BrowserBackendName.CAMOUFOX
 
 
 def make_manager(
@@ -236,6 +251,7 @@ class RestoreObservation:
     state_refreshed: bool
     mode: str
     attempt_failures: tuple[str, ...] = ()
+    attempts: int = 1
 
 
 class RecordingRestorer:
@@ -262,6 +278,7 @@ class RecordingRestorer:
                     for attempt in result.attempts
                     if attempt.failure is not None
                 ),
+                attempts=max(1, len(result.attempts)),
             )
         )
         return result
@@ -1093,6 +1110,7 @@ async def scenario_application_restart(
     backend: BrowserBackendName,
     processes: int,
     workers: int,
+    foreign_provenance: BrowserBackendName | None = None,
 ) -> ScenarioResult:
     """Stop runtime, repository, and browser with stranded leases; restart and recover."""
 
@@ -1101,11 +1119,7 @@ async def scenario_application_restart(
         title="Application restart with stranded leases and foreign-backend rows",
         evidence="repository/state/browser fully stopped; new objects on the same files",
     )
-    other = (
-        BrowserBackendName.CHROME
-        if backend is BrowserBackendName.CAMOUFOX
-        else BrowserBackendName.CAMOUFOX
-    )
+    other = foreign_provenance or foreign_backend(backend)
     repository = SQLiteSessionRepository(population.database)
     await repository.initialize()
     state_store = FileSystemStateStore(population.state_directory)
@@ -1612,9 +1626,14 @@ async def scenario_failure_during_monitoring(
         deadline = recorder.restorer._attempt_timeout_seconds
         result.check("browser_killed_during_checks", len(kills) >= 1)
         result.check("sweep_completed", bool(sweep["completed"]))
+        # Each mechanism attempt (TRANSFER, then HYBRID STORAGE_STATE) has its own
+        # deadline, so a restore is bounded by attempts x deadline, not one deadline.
         result.check(
             "every_restore_attempt_ended_within_deadline",
-            (latency["max"] or 0) <= deadline + 1.0,
+            all(
+                item.duration_seconds <= item.attempts * deadline + 1.0
+                for item in recorder.observations
+            ),
         )
         result.check("killed_slot_replaced", manager.restart_count >= len(kills))
         result.check(
@@ -1639,6 +1658,9 @@ async def scenario_failure_during_monitoring(
             {
                 "kills_at_seconds": kills,
                 "restore_attempt_deadline_seconds": round(deadline, 3),
+                "restores_with_two_attempts": sum(
+                    item.attempts > 1 for item in recorder.observations
+                ),
                 "sweep": sweep,
                 "restoration": restored,
                 "sessions_retried_after_kill": len(retry_ids),
@@ -1662,6 +1684,7 @@ async def scenario_restoration_failures(
     directory: Path,
     *,
     backend: BrowserBackendName,
+    foreign_provenance: BrowserBackendName | None = None,
 ) -> ScenarioResult:
     result = ScenarioResult(
         key=f"restoration_failures_{backend.value}",
@@ -1741,11 +1764,7 @@ async def scenario_restoration_failures(
             not outcome.success and outcome.failure is RestoreFailure.STATE_CORRUPT,
         )
 
-        other = (
-            BrowserBackendName.CHROME
-            if backend is BrowserBackendName.CAMOUFOX
-            else BrowserBackendName.CAMOUFOX
-        )
+        other = foreign_provenance or foreign_backend(backend)
         with sqlite3.connect(database) as connection:
             connection.execute(
                 "UPDATE queue_sessions SET browser_backend = ? WHERE session_id = ?",

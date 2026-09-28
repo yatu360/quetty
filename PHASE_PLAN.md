@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 7 Prompt 5
+**Next:** Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -754,7 +754,26 @@ switching continues to require Stop & Reset Run.
      There were zero unexpected Queue ID changes or replacement identities.
    - Final contexts, browser processes, leases, and operator work were zero. Chrome
      remains the default; staging remains NOT RUN / UNKNOWN.
-5. **Phase 7 Prompt 5** — next.
+5. **Patchright Recovery, Concurrency, Capacity, and Resource Benchmark** — **completed
+   on 2026-09-28: `READY_FOR_DEFAULT_DECISION`** (`docs/phase7_patchright_benchmark.md`).
+   - Patchright candidate and Chrome control each passed 15/15 scenarios and 247/247
+     checks on the same host. Camoufox was excluded.
+   - Measured concurrency: 1, 5, 10, 20, 25 contexts on one process and 50 on two
+     processes were healthy through hold, reacquisition, churn, and shutdown. No
+     one-context-per-process model is needed.
+   - 1,200 create/navigate/close churn cycles on one process produced no wedge, stuck
+     call, context growth, or leak.
+   - 300 park/reopen, 150 restart, and application-restart restores verified with zero
+     Queue ID changes. 20 repeated kills recovered (restart p95 0.185 s) with exactly
+     one process per cycle.
+   - Stuck navigation hit its deadlines and left the process healthy, so no
+     consecutive-timeout heuristic was copied. Manual headed ownership, pause/resume
+     under failure, and a five-case shutdown matrix passed.
+   - The monitoring workload (100 sessions) ran at about 12 checks/s for Patchright vs
+     13 for Chrome, with backlog bounded.
+   - No Patchright-specific limit is required. A harness restore-deadline check was
+     corrected. Chrome remains the default; staging is NOT RUN / UNKNOWN.
+6. **Phase 7 Prompt 6 — Patchright Default Migration and Final Acceptance** — next.
 
 ## Scaling Gates
 
