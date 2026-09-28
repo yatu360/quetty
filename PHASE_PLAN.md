@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 6 complete
+**Next:** Phase 7 Prompt 2 — Patchright runtime integration
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -690,6 +690,36 @@ or one browser process/profile per persisted session.
      A clean 10-run loop confirmed the fix.
    - Staging continuity was deliberately not run: no authorised traffic was sent. It
      stays UNKNOWN.
+
+## Phase 7 — Patchright Browser Evaluation
+
+Camoufox remains implemented but is dormant/experimental and excluded from Phase 7
+benchmark and acceptance effort. Chrome is the control/fallback and the temporary
+default for new runs. Persisted runs always retain their recorded backend; backend
+switching continues to require Stop & Reset Run.
+
+1. **Patchright Readiness, Dependency Compatibility, and Safe Default** — **completed
+   on 2026-09-28: `PATCHRIGHT_READY_FOR_INTEGRATION`**
+   (`docs/phase7_patchright_readiness.md`).
+   - Pin `patchright==1.63.0` beside retained `playwright==1.62.0` and
+     `camoufox==0.5.6`; resolver validation and `pip check` pass without changing the
+     Phase 6 pins.
+   - The project remains Python >=3.12; Patchright supports Python >=3.10 and publishes
+     wheels/classifiers through Python 3.14.
+   - Patchright's Playwright-derived 1.63 API is imported from its independent
+     `patchright.*` namespace. The async probe uses installed Google Chrome via
+     `channel="chrome"`; no managed Chromium download is required for this path.
+   - Installed Chrome 153.0.8010.54 passed 20 temporary BrowserContext create,
+     `data:` navigate, close cycles with no context or process leak. Persistent profiles
+     are an upstream best-practice recommendation, not a technical API requirement.
+   - Chrome is again the default for new runs. Provenance schema, legacy migration,
+     Camoufox implementation, and existing-run restart behavior are unchanged.
+   - No Queue-it/staging traffic was sent; staging remains NOT RUN / UNKNOWN.
+2. **Patchright Runtime Integration** — next. Add the candidate behind the existing
+   backend boundary without changing identity safety or persisted-run semantics.
+3. **Patchright Queue Identity Restoration** — planned. Validate park/reopen identity
+   restoration in fresh temporary contexts; do not infer it from Prompt 1 lifecycle
+   evidence.
 
 ## Scaling Gates
 

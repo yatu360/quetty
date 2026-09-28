@@ -28,22 +28,26 @@ post-admission workflows.
 
 ## Install
 
-Camoufox is the default browser backend for new runs. Chrome remains a supported
-fallback.
+During Phase 7 development, standard Chrome is the safe default for new runs.
+Camoufox remains installed and selectable as a dormant/experimental backend. Patchright
+is pinned and locally probed, but is not yet a runtime-selectable backend.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[test]"           # pins camoufox==0.5.6, playwright==1.62.0
+python -m pip install -e ".[test]"           # also pins patchright==1.63.0
+queue-load-test-patchright-preflight --context-cycles 5
 camoufox fetch official/stable/152.0.4-beta.30 # exact pinned Camoufox browser build
 queue-load-test-camoufox-preflight            # local-only readiness check
-python -m playwright install chrome           # Chrome fallback and Chrome regression tests
+python -m playwright install chrome           # installed Chrome used by both APIs
 ```
 
-The supported dependency set is Python 3.12+, Camoufox 0.5.6 (Python package),
-Playwright 1.62.0, and the Camoufox browser build `official/stable/152.0.4-beta.30`.
-The application launches that exact installed build and never downloads or updates a
-browser, at startup or at any other time.
+The Phase 7 dependency set is Python 3.12+, Patchright 1.63.0, Camoufox 0.5.6,
+Playwright 1.62.0, and Camoufox browser build `official/stable/152.0.4-beta.30`.
+Patchright uses its own `patchright.*` namespace and driver, so it coexists with the
+retained Playwright/Camoufox pins. Its probe launches already-installed Google Chrome
+with `channel="chrome"`; no Patchright Chromium download is required and runtime code
+does not install a browser. See `docs/phase7_patchright_readiness.md`.
 
 The preflight launches one Camoufox process, opens one context, loads only an in-memory
 `data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
@@ -56,7 +60,8 @@ and rollback procedure.
 
 ### Browser backend
 
-`BROWSER_BACKEND=camoufox|chrome` selects the backend for **new** runs:
+`BROWSER_BACKEND=chrome|camoufox` selects the backend for **new** runs. Chrome is the
+temporary Phase 7 default:
 - **Recorded per run and session.** The backend is persisted on the immutable run and
   on every session. An existing run always restarts with the backend it was created
   with; changing `BROWSER_BACKEND` never migrates it. To switch backends, use **Stop &
@@ -100,6 +105,9 @@ queue-load-test-phase6-camoufox-benchmark --headed --output docs/results/phase6_
 ```
 
 Results and limits are in `docs/phase6_camoufox_benchmark.md`.
+
+Phase 7 dependency, browser-install, temporary-context, and safe-default findings are
+recorded in `docs/phase7_patchright_readiness.md`.
 
 The application is configured through environment variables. Start from:
 

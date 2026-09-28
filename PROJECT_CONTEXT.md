@@ -9,6 +9,21 @@ Camoufox backend for live monitoring.
 
 ## Current Status
 
+- **Phase 7 Prompt 1 is complete:** `PATCHRIGHT_READY_FOR_INTEGRATION` on local-only
+  evidence (`docs/phase7_patchright_readiness.md`). Patchright 1.63.0 is pinned beside
+  Playwright 1.62.0 and Camoufox 0.5.6 without resolver conflicts. Its async API launched
+  installed Google Chrome 153.0.8010.54 through `channel="chrome"`, completed 20
+  disposable-context/`data:` navigation cycles, and left zero contexts or new managed
+  Chrome processes. No Patchright browser download is needed for this path.
+  - Patchright is not runtime-integrated or a `BROWSER_BACKEND` value yet; that is
+    Phase 7 Prompt 2.
+  - Chrome is again the default for **new** runs. Existing persisted Chrome or Camoufox
+    runs continue with their recorded backend; switching still requires Stop & Reset.
+  - Camoufox is retained intact as dormant/experimental and is excluded from Phase 7
+    benchmark/acceptance work.
+  - Upstream recommends a persistent Chrome context as its best-practice configuration,
+    but normal temporary contexts are supported by the API and passed locally. Queue
+    identity restoration is deferred to Prompt 3. Staging is **NOT RUN / UNKNOWN**.
 - **Phase 6 is complete** (Prompt 7 acceptance, `docs/phase6_acceptance.md`).
   Camoufox is accepted as a supported backend and as the default for new runs, on
   local simulator evidence. Chrome is retained as a tested fallback. The Queue-it
@@ -309,7 +324,7 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 6 complete**
+- Exact next task: **Phase 7 Prompt 2 — Patchright runtime integration**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1184,7 +1199,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 6 complete
+Phase 7 Prompt 2 — Patchright runtime integration
 
 ## Instructions for Future AI Sessions
 

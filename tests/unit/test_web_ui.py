@@ -162,6 +162,7 @@ def test_first_boot_shows_setup_and_valid_submission_starts_one_bounded_runtime(
         assert response.headers["location"] == "/dashboard"
         assert len(runtime.started) == 1
         assert runtime.started[0].requested_sessions == 100
+        assert runtime.started[0].browser_backend is BrowserBackendName.CHROME
         # Setup delegates once; it does not allocate one task or row per requested visitor.
         assert asyncio.run(repository.recovery_summary(now=datetime.now(UTC))).total_persisted_sessions == 0
 
@@ -634,13 +635,18 @@ def _run_rows(database: Path) -> list[tuple[object, ...]]:
         return list(connection.execute("SELECT browser_backend, browser_build FROM run_config"))
 
 
-def test_new_run_defaults_to_camoufox_with_pinned_build_after_preflight(
+def test_explicit_camoufox_run_records_pinned_build_after_preflight(
     tmp_path: Path, passing_camoufox_preflight: list[int]
 ) -> None:
     database = tmp_path / "default.sqlite3"
     runtime = FakeRuntime()
+    camoufox_settings = settings(database).model_copy(
+        update={"browser_backend": BrowserBackendName.CAMOUFOX}
+    )
     app = create_app(
-        settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
+        settings=camoufox_settings,
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
     )
     with TestClient(app) as client:
         response = client.post(
@@ -667,7 +673,9 @@ def test_failed_camoufox_preflight_creates_no_run_and_explains_the_fix(tmp_path:
         )
 
     app = create_app(
-        settings=settings(database),
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.CAMOUFOX}
+        ),
         repository=SQLiteSessionRepository(database),
         runtime=runtime,
         camoufox_preflight=missing_build,
@@ -686,18 +694,17 @@ def test_failed_camoufox_preflight_creates_no_run_and_explains_the_fix(tmp_path:
     assert runtime.started == []
 
 
-def test_chrome_fallback_skips_camoufox_preflight_and_records_no_build(tmp_path: Path) -> None:
+def test_new_run_defaults_to_chrome_skips_camoufox_preflight_and_records_no_build(
+    tmp_path: Path,
+) -> None:
     database = tmp_path / "chrome.sqlite3"
     runtime = FakeRuntime()
 
     async def must_not_run() -> Any:
         raise AssertionError("Chrome runs never run the Camoufox preflight")
 
-    chrome_settings = settings(database).model_copy(
-        update={"browser_backend": BrowserBackendName.CHROME}
-    )
     app = create_app(
-        settings=chrome_settings,
+        settings=settings(database),
         repository=SQLiteSessionRepository(database),
         runtime=runtime,
         camoufox_preflight=must_not_run,
@@ -713,18 +720,19 @@ def test_chrome_fallback_skips_camoufox_preflight_and_records_no_build(tmp_path:
     assert _run_rows(database) == [("chrome", None)]
 
 
-async def test_existing_chrome_run_restarts_as_chrome_after_default_change(
+async def test_existing_camoufox_run_restarts_as_camoufox_after_default_change(
     tmp_path: Path, passing_camoufox_preflight: list[int]
 ) -> None:
     database = tmp_path / "existing.sqlite3"
     repository = SQLiteSessionRepository(database)
     await repository.create_run(
         RunConfig(
-            run_id="chrome-run",
+            run_id="camoufox-run",
             target_url="https://staging.example.test/",
             requested_sessions=1,
             created_at=datetime.now(UTC),
-            browser_backend=BrowserBackendName.CHROME,
+            browser_backend=BrowserBackendName.CAMOUFOX,
+            browser_build=CAMOUFOX_BROWSER_VERSION,
         )
     )
     await repository.close()
@@ -732,15 +740,15 @@ async def test_existing_chrome_run_restarts_as_chrome_after_default_change(
     app = create_app(
         settings=settings(database), repository=SQLiteSessionRepository(database), runtime=runtime
     )
-    assert settings(database).browser_backend is BrowserBackendName.CAMOUFOX
+    assert settings(database).browser_backend is BrowserBackendName.CHROME
 
     with TestClient(app) as client:
         summary = client.get("/partials/summary").text
 
-    assert [run.browser_backend for run in runtime.started] == [BrowserBackendName.CHROME]
+    assert [run.browser_backend for run in runtime.started] == [BrowserBackendName.CAMOUFOX]
     assert passing_camoufox_preflight == []
-    assert "installed Google Chrome" in summary
-    assert _run_rows(database) == [("chrome", None)]
+    assert CAMOUFOX_BROWSER_VERSION in summary
+    assert _run_rows(database) == [("camoufox", CAMOUFOX_BROWSER_VERSION)]
 
 
 def test_browser_build_label_never_hides_a_changed_pinned_build() -> None:

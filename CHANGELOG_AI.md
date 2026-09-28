@@ -4062,3 +4062,113 @@ PHASE_PLAN, README, and the migration doc.
 ### Next task
 
 Phase 6 complete
+
+## 2026-09-28 — Phase 7 Prompt 1 — Patchright Readiness and Safe Default
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Determine whether Patchright can coexist with the retained Chrome/Camoufox environment,
+establish exact dependency and browser requirements, prove a local disposable-context
+lifecycle, and restore Chrome as the temporary default for new Phase 7 runs without
+migrating existing runs.
+
+### Changes Made
+
+- Pinned `patchright==1.63.0` without changing retained `camoufox==0.5.6` or
+  `playwright==1.62.0`. Resolver validation and `pip check` found no conflict.
+- Added `queue-load-test-patchright-preflight`, using only `patchright.async_api`,
+  installed Google Chrome via `channel="chrome"`, and an in-memory `data:` page. It
+  repeats fresh temporary context creation/destruction and verifies context, browser,
+  and driver cleanup. It never installs or downloads a browser.
+- Proved 20/20 temporary-context cycles locally with Chrome 153.0.8010.54, zero active
+  contexts, disconnected browser, stopped driver, and no new Chrome
+  `--remote-debugging-pipe` process after shutdown.
+- Changed the configuration and `.env.example` default for new runs from Camoufox to
+  Chrome. Persisted run/session provenance, legacy migrations, Camoufox parsing,
+  implementation, preflight, and runtime paths are unchanged.
+- Updated provenance coverage so a persisted Camoufox run restarts as Camoufox while
+  the environment default is Chrome. Switching remains a Stop & Reset operation.
+- Documented upstream metadata, Python/API/browser requirements, dependency
+  coexistence, browser install/download behavior, persistent-context guidance, evidence
+  limits, and `PATCHRIGHT_READY_FOR_INTEGRATION` in
+  `docs/phase7_patchright_readiness.md`.
+- Patchright was deliberately not added to the runtime backend enum or manager factory;
+  that work belongs to Prompt 2.
+
+### Files Added
+
+- `docs/phase7_patchright_readiness.md`
+- `src/queue_load_test/browser/patchright_preflight.py`
+- `src/queue_load_test/harness/patchright_preflight.py`
+- `tests/integration/test_installed_patchright.py`
+- `tests/unit/test_patchright_preflight.py`
+
+### Files Modified
+
+- `.env.example`
+- `pyproject.toml`
+- `src/queue_load_test/config.py`
+- `tests/unit/test_config.py`
+- `tests/unit/test_web_ui.py`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pip install -e ".[test]"` — PASS; exact dependencies resolved normally.
+- `python -m pip install --dry-run patchright==1.63.0 camoufox==0.5.6 playwright==1.62.0`
+  — PASS; no pin change or resolver bypass required.
+- `python -m patchright install --dry-run chromium` — inspected only; reported Chrome
+  for Testing 153.0.8010.12 / revision 1243 and separate downloads. Nothing downloaded.
+- `python -m patchright install --dry-run chrome` — inspected only; system Chrome path.
+- `queue-load-test-patchright-preflight --context-cycles 20` — PASS, 20/20, Chrome
+  153.0.8010.54, 0 contexts and 0 managed processes after shutdown.
+- Focused Patchright/configuration/provenance/backend suite — 107 passed.
+- `python -m pytest -q` — 516 passed, 4 staging tests deselected.
+- `python -m ruff check src tests` — PASS.
+- `python -m mypy src` — PASS, 72 source files.
+- `python -m pip check` — PASS; no broken requirements.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN / UNKNOWN**.
+- No Queue-it traffic was authorised or sent. All Patchright navigation used a local
+  `data:` URL.
+
+### Important Decisions
+
+- Readiness: **PATCHRIGHT_READY_FOR_INTEGRATION**, not runtime or final acceptance.
+- Use exact Patchright 1.63.0 with its separate `patchright.*` API/driver; retain
+  Playwright 1.62.0 for Chrome/Camoufox runtime compatibility.
+- Target installed Google Chrome with `channel="chrome"`; no Patchright-managed browser
+  download is required for this path and runtime must not invoke install commands.
+- Upstream persistent context/user-data-directory guidance is a best-practice
+  recommendation. The existing shared browser plus disposable-context lifecycle is
+  technically viable locally and remains the Quetty design. Queue identity restoration
+  is explicitly deferred to Prompt 3.
+- Camoufox remains dormant/experimental and excluded from Phase 7 benchmark/acceptance
+  work, but all existing support is preserved.
+
+### Known Issues
+
+- Patchright is not runtime-selectable yet.
+- Temporary-context lifecycle success does not establish Queue ID continuity,
+  storage-state restoration, fingerprint behavior, or Queue-it staging behavior.
+- Installed Google Chrome is externally updated rather than package-pinned; the exact
+  locally tested build is recorded above.
+
+### Follow-Up
+
+Phase 7 Prompt 2 — Patchright runtime integration.
+
+### Git State
+
+- Commit: pending at the time this entry was written.
+- Branch: `main`.
+- Working tree: Phase 7 Prompt 1 changes only before commit.

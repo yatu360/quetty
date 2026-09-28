@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     staging_url: HttpUrl | None = Field(default=None, alias="STAGING_URL")
     target_queue_ids: int = Field(default=1000, alias="TARGET_QUEUE_IDS", ge=1)
     session_mode: SessionMode = Field(default=SessionMode.HYBRID, alias="SESSION_MODE")
-    # Default for NEW runs only (Phase 6 Prompt 6). An existing run always restarts
+    # Default for NEW runs only (Phase 7 development policy). An existing run always restarts
     # with the backend persisted in its run configuration.
     browser_backend: BrowserBackendName = Field(
-        default=BrowserBackendName.CAMOUFOX,
+        default=BrowserBackendName.CHROME,
         alias="BROWSER_BACKEND",
     )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)

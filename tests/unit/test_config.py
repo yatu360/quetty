@@ -36,8 +36,8 @@ def test_phase_three_defaults_are_conservative_and_bounded() -> None:
 
     assert settings.target_queue_ids == 1000
     assert settings.session_mode is SessionMode.HYBRID
-    # Phase 6 Prompt 6: Camoufox is the default for new runs; Chrome stays supported.
-    assert settings.browser_backend is BrowserBackendName.CAMOUFOX
+    # Phase 7 development policy: Chrome is the safe default for new runs.
+    assert settings.browser_backend is BrowserBackendName.CHROME
     assert settings.chrome_process_count == 2
     assert settings.max_contexts_per_browser == 25
     assert settings.max_active_contexts == 50

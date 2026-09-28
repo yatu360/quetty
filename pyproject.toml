@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.115,<1",
     "jinja2>=3.1,<4",
     "playwright==1.62.0",
+    "patchright==1.63.0",
     "prometheus-client>=0.26,<1",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
@@ -49,6 +50,7 @@ queue-load-test-ui = "queue_load_test.web.cli:main"
 queue-load-test-phase5-ui-benchmark = "queue_load_test.harness.phase5_ui_benchmark:main"
 queue-load-test-phase5-workflow = "queue_load_test.harness.phase5_workflow:main"
 queue-load-test-camoufox-preflight = "queue_load_test.harness.camoufox_preflight:main"
+queue-load-test-patchright-preflight = "queue_load_test.harness.patchright_preflight:main"
 queue-load-test-phase6-camoufox-benchmark = "queue_load_test.harness.phase6_camoufox_benchmark:main"
 
 [tool.hatch.build.targets.wheel]
