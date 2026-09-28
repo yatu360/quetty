@@ -829,10 +829,24 @@ browser-observed behavior; undocumented URL construction is out of scope.
    - No status URL/path/method/body was assumed, constructed, or replayed. Historical
      2025 Glastonbury JavaScript remains a clue only.
 
-3. **Direct Request Replay and State Sufficiency Experiment** — next task.
-   - Requires genuine browser-observed authorised evidence from Prompt 2 capture.
-   - Keep replay experimental and separate from production monitoring until browser
-     state, cookies, rotating values, admission behavior, and fallback safety are proven.
+3. **Direct Request Replay and State Sufficiency Experiment** — **implementation
+   completed on 2026-09-29; evidence UNKNOWN**
+   (`docs/phase8_direct_replay.md`).
+   - Added a gated, bounded client/harness that accepts only an exact status candidate
+     from a matching protected Prompt 2 artifact and the same persisted session state.
+     It never constructs a route or identity and never enters production monitoring.
+   - Separates network, timeout, HTTP, redirect, schema, rejected-state, and identity
+     failures; retains response cookies in protected experiment state; compares
+     repeated full-derived/minimal headers and bounded per-cookie omissions.
+   - Produces protected, sanitized question/state-classification evidence. Normal logs,
+     metrics, UI, SQLite, and aggregate reports receive no visitor credentials.
+   - Queue-it staging was **NOT RUN** because no authorised target or genuine capture
+     was supplied. Storage outcomes A/B/C/D and all Queue-it replay questions remain
+     **UNKNOWN**.
+
+4. **Direct-vs-Browser Observation Equivalence** — **BLOCKED / NOT STARTED**.
+   - First resolve Prompt 3's evidence blocker with authorised multi-session replay,
+     repeated polls, open/closed browser cases, and an application restart.
 
 ## Scaling Gates
 

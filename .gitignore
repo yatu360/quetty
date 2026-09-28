@@ -152,6 +152,7 @@ activemq-data/
 .envrc
 .browser-state/
 .status-discovery/
+.direct-replay/
 .phase4-browser-state/
 *.sqlite3
 *.sqlite3-shm

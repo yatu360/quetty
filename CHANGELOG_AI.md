@@ -4847,3 +4847,98 @@ fixture result is mechanism evidence only.
 ### Next Task
 
 Phase 8 Prompt 3 — Direct Request Replay and State Sufficiency Experiment.
+
+## 2026-09-29 — Phase 8 Prompt 3 — Direct Request Replay and State Sufficiency Experiment
+
+### Goal
+
+Add a deliberately bounded experiment that can replay only a genuine visitor-status
+request captured from the same legitimate browser session, determine what persisted
+state is sufficient, and keep normal production monitoring unchanged.
+
+### Changes
+
+- Added `direct_replay`, with strict protected-artifact loading. A recipe is accepted
+  only when its Prompt 2 schema/scope, session ID, authoritative Queue ID, selected
+  exchange, exact URL/method/body, and status-candidate classification all match.
+  Truncated bodies and synthesized or identity-free recipes are rejected.
+- Added a bounded async HTTP client with explicit timeout, response-size limit, at most
+  two connections, one in-flight request per session, redirects disabled, and distinct
+  network, timeout, HTTP, redirect, schema, rejected-state, and identity failures.
+- Initial cookies come from the existing integrity-checked browser `storage_state`;
+  captured Cookie headers are discarded. Response cookies are retained and atomically
+  persisted in separate mode-0600, recipe/session-bound experimental state beneath a
+  mode-0700 ignore-all directory for restart trials.
+- Added repeated `full_derived` versus `minimal` header profiles. Browser transport and
+  hop-by-hop headers are never blindly copied. Added bounded per-cookie omission trials
+  requiring at least three consistent outcomes before classifying a cookie as required
+  or repeatedly unnecessary in the tested scope.
+- Added conservative state classification using `event-stable`, `session-stable`,
+  `request-transient`, `response-refreshed`, and `unknown`. One-session evidence can
+  never establish event stability.
+- Added the triple-gated `queue-load-test-phase8-direct-replay` harness. It requires an
+  existing Direct run/session/browser-state document, an authorised Prompt 2 artifact,
+  persisted monitoring paused with no automatic/manual session owner,
+  `RUN_STAGING_TESTS=1`, `RUN_PHASE8_DIRECT_REPLAY=1`, and an explicit confirmation.
+- Dedicated reports are protected and git-ignored. Normal logs contain only sanitized
+  profile/status/failure/count fields. No raw cookie or Set-Cookie value, Authorization,
+  token, storage state, transfer URL, full request URL, or raw body reaches normal logs,
+  metrics, dashboard HTML, SQLite, or aggregate acceptance/benchmark reports.
+- Production strategy dispatch was not changed: Direct and Headed Window runs retain
+  the existing browser-backed monitor, and Manual Open remains independent.
+- Created `docs/phase8_direct_replay.md` and updated PROJECT_CONTEXT and PHASE_PLAN.
+
+### Tests
+
+- Focused replay/discovery/monitoring/UI suite: **86 passed**.
+- Full non-staging suite: **583 passed, 4 staging deselected** in 226.29 seconds.
+- `python3 -m ruff check src tests`: **PASS**.
+- `python3 -m mypy src`: **PASS** (strict, 86 source files).
+- `git diff --check`: **PASS**.
+
+Coverage includes exact captured query/body replay, storage-state cookies, response
+cookie updates, protected state permissions/integrity and client restart, body/query
+rotation classification, redirect, rejected/expired state, timeout/network failure,
+unexpected content type, malformed/oversize JSON, identity mismatch, controlled header
+profiles, cancellation/cleanup, recipe mismatch, and sensitive log suppression.
+
+### Staging
+
+**NOT RUN.** No authorised Queue-it target or genuine Prompt 2 capture was supplied.
+Local deterministic HTTP fixtures prove only the replay mechanism. They do not prove a
+Queue-it visitor request, storage sufficiency, or browser equivalence.
+
+### Decisions
+
+- Conclusion: **UNKNOWN**. Outcomes A (`storage_state` alone), B (`storage_state` plus
+  non-secret event recipe), C (additional protected per-session state), and D (too
+  dependent on browser runtime) all remain unproven.
+- The exact captured recipe remains protected because evidence has not shown which URL,
+  header, body, or query components are non-secret event metadata.
+- A missing Queue ID in a JSON response is not identity confirmation; a different named
+  Queue ID is an explicit identity failure. No identity is ever constructed or
+  reacquired.
+- Repeated minimisation evidence is scoped to the tested session/event. A single
+  success never removes a value, and even repeated success does not make a production
+  monitoring decision.
+- Protected replay cookies are experimental continuation state and do not rewrite the
+  persisted browser state or establish the eventual production storage design.
+
+### Known Issues
+
+- All twelve Queue-it replay questions and all A/B/C/D storage outcomes are **UNKNOWN**.
+- No multi-session, browser-open, browser-closed Queue-it, or real application-restart
+  experiment was run. Cross-session event reuse and effects on a still-open browser are
+  unknown.
+- Header minimisation compares grouped profiles; identifying individually required
+  application headers needs authorised repeated evidence.
+- The existing Starlette `httpx` TestClient deprecation warning remains.
+
+### Next Task
+
+Resolve the Prompt 3 evidence blocker by running the gated experiment against genuine
+browser-observed requests from an authorised Queue-it staging event, with multiple
+sessions, repeated polls, open/closed browser cases, and an application restart.
+
+**Phase 8 Prompt 4 — Direct-vs-Browser Observation Equivalence is NOT READY and must
+not begin until that evidence resolves the state-sufficiency questions.**
