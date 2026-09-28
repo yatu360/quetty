@@ -694,6 +694,75 @@ def test_failed_camoufox_preflight_creates_no_run_and_explains_the_fix(tmp_path:
     assert runtime.started == []
 
 
+def test_patchright_preflight_records_backend_and_observed_browser_build(tmp_path: Path) -> None:
+    database = tmp_path / "patchright.sqlite3"
+    runtime = FakeRuntime()
+    calls: list[int] = []
+
+    async def ready() -> Any:
+        calls.append(1)
+        return SimpleNamespace(
+            passed=True,
+            error=None,
+            remedy="",
+            observed_browser_version="153.0.8010.54",
+        )
+
+    app = create_app(
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.PATCHRIGHT}
+        ),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        patchright_preflight=ready,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert calls == [1]
+    assert _run_rows(database) == [("patchright", "153.0.8010.54")]
+    assert runtime.started[0].browser_backend is BrowserBackendName.PATCHRIGHT
+
+
+def test_failed_patchright_preflight_persists_nothing_and_is_actionable(tmp_path: Path) -> None:
+    database = tmp_path / "patchright-failed.sqlite3"
+    runtime = FakeRuntime()
+
+    async def unavailable() -> Any:
+        return SimpleNamespace(
+            passed=False,
+            error="Error: executable does not exist",
+            remedy="Install Google Chrome with python -m patchright install chrome.",
+            observed_browser_version=None,
+        )
+
+    app = create_app(
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.PATCHRIGHT}
+        ),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        patchright_preflight=unavailable,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/", "requested_sessions": "2"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 503
+    assert "python -m patchright install chrome" in response.text
+    assert "BROWSER_BACKEND=chrome" in response.text
+    assert _run_rows(database) == []
+    assert runtime.started == []
+
+
 def test_new_run_defaults_to_chrome_skips_camoufox_preflight_and_records_no_build(
     tmp_path: Path,
 ) -> None:
@@ -751,6 +820,41 @@ async def test_existing_camoufox_run_restarts_as_camoufox_after_default_change(
     assert _run_rows(database) == [("camoufox", CAMOUFOX_BROWSER_VERSION)]
 
 
+async def test_existing_patchright_run_restarts_without_preflight_or_migration(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "existing-patchright.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await repository.create_run(
+        RunConfig(
+            run_id="patchright-run",
+            target_url="https://staging.example.test/",
+            requested_sessions=1,
+            created_at=datetime.now(UTC),
+            browser_backend=BrowserBackendName.PATCHRIGHT,
+            browser_build="153.0.8010.54",
+        )
+    )
+    await repository.close()
+    runtime = FakeRuntime()
+
+    async def must_not_run() -> Any:
+        raise AssertionError("existing runs never rerun new-run preflight")
+
+    app = create_app(
+        settings=settings(database),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+        patchright_preflight=must_not_run,
+    )
+    with TestClient(app) as client:
+        summary = client.get("/partials/summary").text
+
+    assert [run.browser_backend for run in runtime.started] == [BrowserBackendName.PATCHRIGHT]
+    assert "153.0.8010.54 via Patchright" in summary
+    assert _run_rows(database) == [("patchright", "153.0.8010.54")]
+
+
 def test_browser_build_label_never_hides_a_changed_pinned_build() -> None:
     def run(backend: BrowserBackendName, build: str | None) -> RunConfig:
         return RunConfig(
@@ -771,3 +875,6 @@ def test_browser_build_label_never_hides_a_changed_pinned_build() -> None:
         run(BrowserBackendName.CAMOUFOX, "1.0-old")
     )
     assert "not recorded" in browser_build_label(run(BrowserBackendName.CAMOUFOX, None))
+    assert "153.0 via Patchright" == browser_build_label(
+        run(BrowserBackendName.PATCHRIGHT, "153.0")
+    )

@@ -66,7 +66,7 @@ def is_browser_main_process(backend: BrowserBackendName, arguments: Sequence[str
 
     if not arguments:
         return False
-    if backend is BrowserBackendName.CHROME:
+    if backend in (BrowserBackendName.CHROME, BrowserBackendName.PATCHRIGHT):
         return "--remote-debugging-pipe" in arguments and not any(
             argument.startswith("--type=") for argument in arguments
         )
@@ -169,7 +169,10 @@ class PsutilProcessResourceProbe:
         for child in children:
             try:
                 is_main = _main(self._backend, child)
-                if self._backend is BrowserBackendName.CHROME:
+                if self._backend in (
+                    BrowserBackendName.CHROME,
+                    BrowserBackendName.PATCHRIGHT,
+                ):
                     # Every Chrome tree member carries "chrome" in its name.
                     members = [child] if "chrome" in child.name().casefold() else []
                 else:

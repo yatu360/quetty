@@ -29,8 +29,8 @@ class RunConfig:
     requested_sessions: int
     created_at: datetime
     browser_backend: BrowserBackendName = BrowserBackendName.CHROME
-    # Pinned browser build the run was created with (Camoufox only). Chrome is the
-    # installed, externally updated browser, so no build is pinned for it.
+    # Browser build provenance at run creation: pinned for Camoufox, observed installed
+    # Chrome for Patchright, and NULL for standard Chrome and legacy runs.
     browser_build: str | None = None
     status: RunStatus = RunStatus.ACTIVE
 

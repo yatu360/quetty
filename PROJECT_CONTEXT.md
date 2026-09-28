@@ -9,14 +9,34 @@ Camoufox backend for live monitoring.
 
 ## Current Status
 
+- **Phase 7 Prompt 2 is complete:** Patchright 1.63.0 is integrated behind the existing
+  `BrowserBackend` / `BrowserManager` seam (`docs/phase7_patchright_backend_integration.md`).
+  `BROWSER_BACKEND=chrome|camoufox|patchright` is supported, while Chrome remains the
+  default for new runs.
+  - `PatchrightBackend` owns a Patchright async controller and launches installed Google
+    Chrome with `channel="chrome"`. BrowserManager still owns all bounded slots,
+    contexts, shared capacity, deadlines, replacement, diagnostics, and shutdown.
+  - Patchright uses ordinary concurrent temporary contexts; no Camoufox serialization
+    was copied. Automatic, creation, and headed/manual pools select it through the same
+    factory.
+  - New Patchright setup runs a one-context local `data:` preflight before persistence.
+    Failure creates no run and gives an explicit Chrome install remedy. A successful run
+    records `browser_backend=patchright` and the observed Chrome build; its sessions
+    record Patchright provenance.
+  - Existing Chrome, Camoufox, and Patchright runs restart with persisted provenance.
+    Legacy rows remain Chrome, mismatch fails before context creation, and switching
+    still requires Stop & Reset.
+  - Patchright-specific Queue identity restoration remains deliberately unproven and is
+    Phase 7 Prompt 3. Camoufox is retained but excluded from Phase 7 validation. No
+    Queue-it traffic was sent; staging is **NOT RUN / UNKNOWN**.
 - **Phase 7 Prompt 1 is complete:** `PATCHRIGHT_READY_FOR_INTEGRATION` on local-only
   evidence (`docs/phase7_patchright_readiness.md`). Patchright 1.63.0 is pinned beside
   Playwright 1.62.0 and Camoufox 0.5.6 without resolver conflicts. Its async API launched
   installed Google Chrome 153.0.8010.54 through `channel="chrome"`, completed 20
   disposable-context/`data:` navigation cycles, and left zero contexts or new managed
   Chrome processes. No Patchright browser download is needed for this path.
-  - Patchright is not runtime-integrated or a `BROWSER_BACKEND` value yet; that is
-    Phase 7 Prompt 2.
+  - At the Prompt 1 checkpoint, Patchright was not yet runtime-integrated; Prompt 2
+    subsequently completed that work as recorded above.
   - Chrome is again the default for **new** runs. Existing persisted Chrome or Camoufox
     runs continue with their recorded backend; switching still requires Stop & Reset.
   - Camoufox is retained intact as dormant/experimental and is excluded from Phase 7
@@ -324,7 +344,7 @@ Camoufox backend for live monitoring.
 - `requested_sessions` remains the immutable initial target. A persisted signed
   operator population adjustment prevents restart acquisition from refilling a manual
   Delete or discounting a manual Add; Replace does not change it.
-- Exact next task: **Phase 7 Prompt 2 — Patchright runtime integration**
+- Exact next task: **Phase 7 Prompt 3 — Patchright Queue identity restoration**
 - Current phase: Phase 4 is complete through the final acceptance report. Both the
   authorised 10,000-ID acquisition and browser-backed 10,000-session Queue-it
   monitoring run are **NOT RUN**.
@@ -1199,7 +1219,7 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 Prompt 2 — Patchright runtime integration
+Phase 7 Prompt 3 — Patchright Queue identity restoration
 
 ## Instructions for Future AI Sessions
 

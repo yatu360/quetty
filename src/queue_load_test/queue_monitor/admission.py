@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlsplit
 
-from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+from queue_load_test.browser.errors import (
+    BROWSER_ERROR_TYPES,
+    BROWSER_TIMEOUT_ERROR_TYPES,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +87,7 @@ class AdmissionDetector:
                 timeout=wait_timeout_ms,
                 wait_until="domcontentloaded",
             )
-        except PlaywrightTimeoutError:
+        except BROWSER_TIMEOUT_ERROR_TYPES:
             return False
         return self.matches(page.url)
 
@@ -128,6 +131,6 @@ class QueueItTerminalStateDetector:
                 locator = page.locator(selector).first
                 if await locator.count() and await locator.is_visible():
                     return True
-            except PlaywrightError:
+            except BROWSER_ERROR_TYPES:
                 continue
         return False

@@ -5,6 +5,9 @@
 **Scope:** dependency and local lifecycle readiness only; runtime integration is not
 implemented. Queue-it staging is **NOT RUN / UNKNOWN**.
 
+> Historical Prompt 1 decision record. Runtime integration was subsequently completed
+> in Phase 7 Prompt 2; see `phase7_patchright_backend_integration.md`.
+
 ## Policy and boundary
 
 - Standard Chrome is the Phase 7 control/fallback and temporary default for **new**

@@ -1,5 +1,7 @@
 from typing import Any, cast
 
+import pytest
+
 from queue_load_test.harness.phase6_camoufox_benchmark import (
     CapacityCase,
     churn_failed,
@@ -21,6 +23,7 @@ def test_browser_main_process_classification_is_backend_specific() -> None:
     content = ["/x/plugin-container.app/Contents/MacOS/plugin-container", "-isForBrowser"]
 
     assert is_browser_main_process(BrowserBackendName.CHROME, chrome_main)
+    assert is_browser_main_process(BrowserBackendName.PATCHRIGHT, chrome_main)
     assert not is_browser_main_process(BrowserBackendName.CHROME, chrome_renderer)
     assert not is_browser_main_process(BrowserBackendName.CHROME, camoufox_main)
     assert is_browser_main_process(BrowserBackendName.CAMOUFOX, camoufox_main)
@@ -97,8 +100,12 @@ def test_probe_counts_the_camoufox_tree_not_chrome_or_the_driver() -> None:
     assert snapshot.chrome_ram_bytes == snapshot.browser_ram_bytes
 
 
-def test_probe_keeps_existing_chrome_accounting() -> None:
-    probe = PsutilProcessResourceProbe(_psutil(_camoufox_tree()))
+@pytest.mark.parametrize(
+    "backend",
+    [BrowserBackendName.CHROME, BrowserBackendName.PATCHRIGHT],
+)
+def test_probe_keeps_chrome_tree_accounting(backend: BrowserBackendName) -> None:
+    probe = PsutilProcessResourceProbe(_psutil(_camoufox_tree()), backend=backend)
 
     snapshot = probe.sample()
 

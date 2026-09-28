@@ -8,15 +8,18 @@ viable; it does not make Patchright selectable by an application run.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from importlib.metadata import PackageNotFoundError, version
 
 from patchright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
+from queue_load_test.browser.backend import (
+    PATCHRIGHT_BROWSER_CHANNEL,
+    PATCHRIGHT_PACKAGE_VERSION,
+)
 from queue_load_test.utils.asyncio_tools import await_bounded
 
-PATCHRIGHT_PACKAGE_VERSION = "1.63.0"
-PATCHRIGHT_BROWSER_CHANNEL = "chrome"
 _LOCAL_PAGE = "data:text/html,<title>quetty-patchright-preflight</title><p>local</p>"
 
 
@@ -83,6 +86,9 @@ class PatchrightPreflightResult:
         return "\n".join(lines) + "\n"
 
 
+type PatchrightPreflight = Callable[[], Awaitable[PatchrightPreflightResult]]
+
+
 def _installed(name: str) -> str | None:
     try:
         return version(name)
@@ -91,7 +97,7 @@ def _installed(name: str) -> str | None:
 
 
 async def run_patchright_preflight(
-    *, timeout_seconds: float = 60.0, context_cycles: int = 5
+    *, timeout_seconds: float = 60.0, context_cycles: int = 1
 ) -> PatchrightPreflightResult:
     """Use Patchright async APIs with installed Chrome and disposable contexts only."""
 

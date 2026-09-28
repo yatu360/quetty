@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from urllib.parse import SplitResult, parse_qsl, urljoin, urlsplit
 
-from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page
+
+from queue_load_test.browser.errors import BROWSER_ERROR_TYPES
 
 
 class TransferFailure(StrEnum):
@@ -216,7 +217,7 @@ class QueueItTransferExtractor:
                             ),
                             True,
                         )
-            except PlaywrightError as exc:
+            except BROWSER_ERROR_TYPES as exc:
                 selector_errors[error_key] = type(exc).__name__
         return None, ui_found
 

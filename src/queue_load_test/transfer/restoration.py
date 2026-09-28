@@ -11,9 +11,9 @@ from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import BrowserContext, Page
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserCapacityError, BrowserManager, OwnedBrowserContext
+from queue_load_test.browser.errors import BROWSER_TIMEOUT_ERROR_TYPES
 from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
@@ -774,7 +774,7 @@ class QueueSessionRestorer:
                     timeout=self._navigation_timeout_ms,
                 )
                 self._browser_manager.report_navigation(context, responsive=True)
-            except PlaywrightTimeoutError:
+            except BROWSER_TIMEOUT_ERROR_TYPES:
                 self._browser_manager.report_navigation(context, responsive=False)
                 if self._observability is not None:
                     self._observability.record_navigation_failure(timed_out=True)
@@ -897,7 +897,7 @@ class QueueSessionRestorer:
                         timeout=self._navigation_timeout_ms,
                     )
                     self._browser_manager.report_navigation(context, responsive=True)
-                except PlaywrightTimeoutError:
+                except BROWSER_TIMEOUT_ERROR_TYPES:
                     self._browser_manager.report_navigation(context, responsive=False)
                     if self._observability is not None:
                         self._observability.record_navigation_failure(timed_out=True)
@@ -970,7 +970,7 @@ class QueueSessionRestorer:
                 return attempt
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
-        except PlaywrightTimeoutError:
+        except BROWSER_TIMEOUT_ERROR_TYPES:
             failure = (
                 RestoreFailure.STATE_CONTEXT_FAILED
                 if method is RestoreMethod.STORAGE_STATE

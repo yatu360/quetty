@@ -9,7 +9,13 @@ import pytest
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics import PrometheusMetrics
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+)
 from queue_load_test.repository import QueueIdConflictError, SQLiteSessionRepository
 from queue_load_test.scheduler import (
     CreationOutcome,
@@ -701,6 +707,7 @@ async def test_hybrid_creator_retries_saves_state_persists_and_closes(
         staging_url="https://staging.test",
         state_directory=state_store.directory,
         mode=SessionMode.HYBRID,
+        browser_backend=BrowserBackendName.PATCHRIGHT,
         live_extractor=cast(Any, live_extractor),
         transfer_extractor_factory=lambda _: SuccessfulTransferExtractor(),
         retry_policy=CreationRetryPolicy(
@@ -723,6 +730,7 @@ async def test_hybrid_creator_retries_saves_state_persists_and_closes(
     assert persisted is not None
     assert persisted.status is QueueStatus.PARKED
     assert persisted.queue_id == "queue-created"
+    assert persisted.browser_backend is BrowserBackendName.PATCHRIGHT
     assert persisted.attempt_count == 2
     assert await state_store.load("created") is not None
     await repository.close()

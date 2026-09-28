@@ -9,14 +9,17 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Self
+from typing import Any, Self
 
-from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+from playwright.async_api import Playwright, async_playwright
 
 from queue_load_test.browser.backend import (
     BrowserBackend,
     BrowserBackendDiagnostics,
+    BrowserController,
     ChromeBackend,
+    ManagedBrowser,
+    ManagedBrowserContext,
     create_browser_backend,
 )
 from queue_load_test.browser.backend import ContextStorageState as BackendContextStorageState
@@ -27,7 +30,7 @@ from queue_load_test.utils.asyncio_tools import AbandonedOperationError, await_b
 
 logger = logging.getLogger(__name__)
 
-type PlaywrightStarter = Callable[[], Awaitable[Playwright]]
+type PlaywrightStarter = Callable[[], Awaitable[BrowserController]]
 type ContextStorageState = BackendContextStorageState
 
 
@@ -104,7 +107,7 @@ class BrowserCapacity:
 @dataclass(slots=True)
 class _BrowserSlot:
     index: int
-    browser: Browser
+    browser: ManagedBrowser
     contexts: set[OwnedBrowserContext] = field(default_factory=set)
     restart_task: asyncio.Task[bool] | None = None
     consecutive_navigation_timeouts: int = 0
@@ -128,7 +131,7 @@ class OwnedBrowserContext:
         self,
         manager: BrowserManager,
         slot: _BrowserSlot,
-        context: BrowserContext,
+        context: ManagedBrowserContext,
         *,
         creation_duration_seconds: float = 0.0,
         acquisition_wait_seconds: float = 0.0,
@@ -143,7 +146,7 @@ class OwnedBrowserContext:
         self._shared_capacity_reserved = shared_capacity_reserved
 
     @property
-    def context(self) -> BrowserContext:
+    def context(self) -> ManagedBrowserContext:
         return self._context
 
     @property
@@ -171,7 +174,7 @@ class OwnedBrowserContext:
     async def close(self) -> None:
         await self._manager.close_context(self)
 
-    async def __aenter__(self) -> BrowserContext:
+    async def __aenter__(self) -> ManagedBrowserContext:
         return self._context
 
     async def __aexit__(self, *_: object) -> None:
@@ -186,7 +189,7 @@ class OwnedBrowserContext:
             self._manager._release_shared_capacity()
 
 
-def _kill_playwright_driver(playwright: Playwright) -> None:
+def _kill_playwright_driver(playwright: Any) -> None:
     """Last resort when ``Playwright.stop()`` misses its deadline.
 
     ``stop()`` closes the driver's stdin and waits for the Node driver to exit, and
@@ -247,7 +250,7 @@ class BrowserManager:
         self._headless = headless
         self._playwright_starter = playwright_starter
         self._observability = observability
-        self._playwright: Playwright | None = None
+        self._playwright: BrowserController | None = None
         self._slots: list[_BrowserSlot] = []
         self._lock = asyncio.Lock()
         self._running = False
@@ -307,7 +310,7 @@ class BrowserManager:
 
         return self._unresponsive_restarts
 
-    def report_navigation(self, context: BrowserContext, *, responsive: bool) -> None:
+    def report_navigation(self, context: ManagedBrowserContext, *, responsive: bool) -> None:
         """Record whether a navigation in ``context`` completed or timed out.
 
         Only backends with an ``unresponsive_restart_threshold`` act on this. A slot
@@ -340,7 +343,7 @@ class BrowserManager:
             count=slot.consecutive_navigation_timeouts,
         )
 
-    def report_abandoned_operation(self, context: BrowserContext) -> None:
+    def report_abandoned_operation(self, context: ManagedBrowserContext) -> None:
         """Mark ``context``'s process for replacement after an unstoppable call.
 
         A Playwright call that ignores repeated cancellation means the browser has
@@ -363,7 +366,7 @@ class BrowserManager:
             error_type="AbandonedOperation",
         )
 
-    def _slot_for_context(self, context: BrowserContext) -> _BrowserSlot | None:
+    def _slot_for_context(self, context: ManagedBrowserContext) -> _BrowserSlot | None:
         return next(
             (
                 candidate
@@ -373,12 +376,12 @@ class BrowserManager:
             None,
         )
 
-    async def _discard_context(self, context: BrowserContext) -> None:
+    async def _discard_context(self, context: ManagedBrowserContext) -> None:
         """Close a context whose creation finished after its deadline (never owned)."""
 
         await self._bounded_close(self._backend.close_context(context), -1)
 
-    async def _discard_browser(self, browser: Browser) -> None:
+    async def _discard_browser(self, browser: ManagedBrowser) -> None:
         """Close a browser whose launch finished after its deadline (never managed)."""
 
         with contextlib.suppress(Exception):
@@ -416,7 +419,8 @@ class BrowserManager:
         async with self._lock:
             if self._running:
                 return
-            playwright = await self._playwright_starter()
+            controller_starter = self._backend.controller_starter or self._playwright_starter
+            playwright = await controller_starter()
             self._playwright = playwright
             try:
                 for index in range(self._browser_process_count):
@@ -448,7 +452,7 @@ class BrowserManager:
                 package_version=diagnostics.package_version if diagnostics else None,
             )
 
-    async def _launch_browser(self) -> Browser:
+    async def _launch_browser(self) -> ManagedBrowser:
         if self._playwright is None:
             raise BrowserManagerNotStartedError("Playwright is not running")
         return await await_bounded(
@@ -596,9 +600,9 @@ class BrowserManager:
 
     async def _new_context(
         self,
-        browser: Browser,
+        browser: ManagedBrowser,
         storage_state: ContextStorageState | None,
-    ) -> BrowserContext:
+    ) -> ManagedBrowserContext:
         return await self._backend.new_context(browser, storage_state=storage_state)
 
     @asynccontextmanager
@@ -606,7 +610,7 @@ class BrowserManager:
         self,
         *,
         storage_state: ContextStorageState | None = None,
-    ) -> AsyncIterator[BrowserContext]:
+    ) -> AsyncIterator[ManagedBrowserContext]:
         """Yield an isolated context and always release it on scope exit."""
 
         owned_context = await self.create_context(storage_state=storage_state)
@@ -726,7 +730,7 @@ class BrowserManager:
     async def _restart_slot(
         self,
         slot: _BrowserSlot,
-        old_browser: Browser,
+        old_browser: ManagedBrowser,
         lost_contexts: tuple[OwnedBrowserContext, ...],
     ) -> bool:
         restart_started = time.perf_counter()
@@ -761,7 +765,7 @@ class BrowserManager:
                 browser_id=slot.index,
                 error_type=type(exc).__name__,
             )
-        replacement: Browser | None = None
+        replacement: ManagedBrowser | None = None
         try:
             replacement = await self._launch_browser()
         except Exception as exc:  # noqa: BLE001

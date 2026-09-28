@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Protocol, Self, cast
 from uuid import uuid4
 
-from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Page
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager, BrowserManagerError
+from queue_load_test.browser.errors import (
+    BROWSER_ERROR_TYPES,
+    BROWSER_TIMEOUT_ERROR_TYPES,
+)
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
@@ -256,10 +258,9 @@ class QueueSessionCreator:
                 )
             except (
                 TransientCreationError,
-                PlaywrightTimeoutError,
-                PlaywrightError,
                 BrowserManagerError,
                 OSError,
+                *BROWSER_ERROR_TYPES,
             ) as exc:
                 temporary_failures += 1
                 if self._observability is not None:
@@ -302,12 +303,12 @@ class QueueSessionCreator:
                     timeout=self._navigation_timeout_ms,
                 )
                 self._browser_manager.report_navigation(context, responsive=True)
-            except PlaywrightTimeoutError:
+            except BROWSER_TIMEOUT_ERROR_TYPES:
                 self._browser_manager.report_navigation(context, responsive=False)
                 if self._observability is not None:
                     self._observability.record_navigation_failure(timed_out=True)
                 raise
-            except PlaywrightError:
+            except BROWSER_ERROR_TYPES:
                 if self._observability is not None:
                     self._observability.record_navigation_failure()
                 raise

@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Protocol
 
 from camoufox.async_api import AsyncNewBrowser, AsyncNewContext
+from patchright.async_api import async_playwright as async_patchright
 from playwright.async_api import Browser, BrowserContext, Playwright, StorageState
 
 from queue_load_test.models.browser import BrowserBackendName
 
 type ContextStorageState = str | Path | StorageState
+type BrowserController = Any
+type ManagedBrowser = Any
+type ManagedBrowserContext = Any
+type BrowserControllerStarter = Callable[[], Awaitable[BrowserController]]
 
 # The selector is deliberately exact. Passing it to AsyncNewBrowser uses an installed
 # browser or raises; unlike Camoufox's implicit active-version path, it cannot fetch.
@@ -22,6 +28,12 @@ CAMOUFOX_BROWSER_VERSION = "152.0.4-beta.30"
 # three requires the documented upgrade and validation procedure.
 CAMOUFOX_PACKAGE_VERSION = "0.5.6"
 PLAYWRIGHT_VERSION = "1.62.0"
+PATCHRIGHT_PACKAGE_VERSION = "1.63.0"
+PATCHRIGHT_BROWSER_CHANNEL = "chrome"
+
+
+async def _start_patchright_controller() -> BrowserController:
+    return await async_patchright().start()
 
 
 class BrowserBackendSetupError(RuntimeError):
@@ -43,22 +55,28 @@ class BrowserBackend(Protocol):
     @property
     def name(self) -> BrowserBackendName: ...
 
-    async def launch(self, playwright: Playwright, *, headless: bool) -> Browser: ...
+    controller_starter: BrowserControllerStarter | None
+
+    async def launch(
+        self, playwright: BrowserController, *, headless: bool
+    ) -> ManagedBrowser: ...
 
     async def new_context(
         self,
-        browser: Browser,
+        browser: ManagedBrowser,
         *,
         storage_state: ContextStorageState | None = None,
-    ) -> BrowserContext: ...
+    ) -> ManagedBrowserContext: ...
 
-    def is_connected(self, browser: Browser) -> bool: ...
+    def is_connected(self, browser: ManagedBrowser) -> bool: ...
 
-    async def close_context(self, context: BrowserContext) -> None: ...
+    async def close_context(self, context: ManagedBrowserContext) -> None: ...
 
-    async def close_browser(self, browser: Browser) -> None: ...
+    async def close_browser(self, browser: ManagedBrowser) -> None: ...
 
-    def diagnostics(self, browser: Browser | None = None) -> BrowserBackendDiagnostics: ...
+    def diagnostics(
+        self, browser: ManagedBrowser | None = None
+    ) -> BrowserBackendDiagnostics: ...
 
 
 class ChromeBackend:
@@ -67,6 +85,7 @@ class ChromeBackend:
     # One Chrome process hosts up to 25 contexts; restarting it because a slow target
     # timed out would discard healthy in-flight work, so Chrome relies on disconnects.
     unresponsive_restart_threshold: int | None = None
+    controller_starter: BrowserControllerStarter | None = None
 
     @property
     def name(self) -> BrowserBackendName:
@@ -123,6 +142,7 @@ class CamoufoxBackend:
     # navigations while still reporting connected; with one live context per process,
     # a restart can only discard the context that reported the timeout.
     unresponsive_restart_threshold: int | None = 3
+    controller_starter: BrowserControllerStarter | None = None
 
     def __init__(self, *, serialize_contexts: bool = True) -> None:
         self._serialize_contexts = serialize_contexts
@@ -198,6 +218,74 @@ class CamoufoxBackend:
         )
 
 
+class PatchrightBackend:
+    """Installed Google Chrome driven by Patchright's independent async controller."""
+
+    # Prompt 1 found no evidence requiring Camoufox-style context serialization.
+    # Use BrowserManager's ordinary concurrency and disconnect-based replacement.
+    unresponsive_restart_threshold: int | None = None
+
+    def __init__(
+        self,
+        *,
+        controller_starter: BrowserControllerStarter = _start_patchright_controller,
+    ) -> None:
+        self.controller_starter: BrowserControllerStarter | None = controller_starter
+
+    @property
+    def name(self) -> BrowserBackendName:
+        return BrowserBackendName.PATCHRIGHT
+
+    async def launch(
+        self,
+        controller: BrowserController,
+        *,
+        headless: bool,
+    ) -> ManagedBrowser:
+        try:
+            return await controller.chromium.launch(
+                channel=PATCHRIGHT_BROWSER_CHANNEL,
+                headless=headless,
+            )
+        except Exception as exc:
+            message = str(exc).casefold()
+            if "executable" not in message and "chrome" not in message:
+                raise
+            raise BrowserBackendSetupError(
+                "Google Chrome is unavailable to Patchright. Install Chrome explicitly "
+                "(for example: python -m patchright install chrome); runtime never downloads it."
+            ) from exc
+
+    async def new_context(
+        self,
+        browser: ManagedBrowser,
+        *,
+        storage_state: ContextStorageState | None = None,
+    ) -> ManagedBrowserContext:
+        if storage_state is None:
+            return await browser.new_context()
+        return await browser.new_context(storage_state=storage_state)
+
+    def is_connected(self, browser: ManagedBrowser) -> bool:
+        return bool(browser.is_connected())
+
+    async def close_context(self, context: ManagedBrowserContext) -> None:
+        await context.close()
+
+    async def close_browser(self, browser: ManagedBrowser) -> None:
+        await browser.close()
+
+    def diagnostics(
+        self,
+        browser: ManagedBrowser | None = None,
+    ) -> BrowserBackendDiagnostics:
+        return BrowserBackendDiagnostics(
+            name=self.name,
+            package_version=version("patchright"),
+            browser_version=browser.version if browser is not None else None,
+        )
+
+
 def create_browser_backend(name: BrowserBackendName) -> BrowserBackend:
     """Construct the configured backend without starting any browser process."""
 
@@ -205,6 +293,8 @@ def create_browser_backend(name: BrowserBackendName) -> BrowserBackend:
         return ChromeBackend()
     if name is BrowserBackendName.CAMOUFOX:
         return CamoufoxBackend()
+    if name is BrowserBackendName.PATCHRIGHT:
+        return PatchrightBackend()
     raise ValueError(f"Unsupported browser backend: {name!r}")
 
 

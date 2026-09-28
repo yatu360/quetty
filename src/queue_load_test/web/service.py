@@ -426,8 +426,12 @@ class ApplicationRunRuntime:
 def browser_build_label(run: RunConfig) -> str:
     """Operator-facing build provenance; a changed pinned build is shown, never hidden."""
 
-    if run.browser_backend is not BrowserBackendName.CAMOUFOX:
+    if run.browser_backend is BrowserBackendName.CHROME:
         return "installed Google Chrome"
+    if run.browser_backend is BrowserBackendName.PATCHRIGHT:
+        if run.browser_build is None:
+            return "installed Google Chrome via Patchright (run build not recorded)"
+        return f"{run.browser_build} via Patchright"
     if run.browser_build is None:
         return f"{CAMOUFOX_BROWSER_VERSION} (run build not recorded)"
     if run.browser_build != CAMOUFOX_BROWSER_VERSION:

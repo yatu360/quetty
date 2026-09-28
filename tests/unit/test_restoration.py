@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager
@@ -192,8 +193,13 @@ async def setup_restorer(
     )
 
 
+@pytest.mark.parametrize(
+    "foreign_backend",
+    [BrowserBackendName.CAMOUFOX, BrowserBackendName.PATCHRIGHT],
+)
 async def test_backend_provenance_mismatch_fails_without_opening_context(
     tmp_path: Path,
+    foreign_backend: BrowserBackendName,
 ) -> None:
     result = TransferExtractionResult(
         transfer_url="https://queue.staging.test/journey?q=queue-expected",
@@ -205,7 +211,7 @@ async def test_backend_provenance_mismatch_fails_without_opening_context(
         SessionMode.HYBRID,
         [result],
     )
-    persisted.browser_backend = BrowserBackendName.CAMOUFOX
+    persisted.browser_backend = foreign_backend
     await repository.update(persisted)
 
     restored = await restorer.restore(persisted)

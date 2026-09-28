@@ -4172,3 +4172,119 @@ Phase 7 Prompt 2 — Patchright runtime integration.
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
 - Working tree: Phase 7 Prompt 1 changes only before commit.
+
+## 2026-09-28 — Phase 7 Prompt 2 — Patchright Browser Backend Integration
+
+### Agent / Model
+
+Codex / GPT-5
+
+### Goal
+
+Integrate Patchright behind the existing BrowserManager/backend seam without forking the
+runtime, while preserving bounded resources, persisted backend selection, Chrome as the
+new-run default, and dormant Camoufox support.
+
+### Changes Made
+
+- Added `BrowserBackendName.PATCHRIGHT`, `PatchrightBackend`, and factory selection.
+  Patchright uses its own async controller and installed Google Chrome via
+  `channel="chrome"`; no installer, download, undocumented flag, or persistent profile
+  is used at runtime.
+- Kept BrowserManager authoritative for fixed process slots, per-process/global/shared
+  context capacity, bounded calls, one restart task per slot, disconnect replacement,
+  diagnostics, shutdown, and cleanup. Patchright uses normal shared-process concurrency
+  with no Camoufox serialization.
+- Kept one application runtime. Automatic monitoring, separate headed creation when
+  configured, and headed/manual Open all select Patchright through the existing backend
+  factory and capacity coordinator.
+- Added browser-library exception families beneath the browser boundary so application
+  services handle Playwright and Patchright errors without importing Patchright.
+- Wired new-run Patchright setup to the exact-version, one-context, local `data:`
+  preflight. Failure returns 503 and persists nothing; success records the observed
+  installed-Chrome build.
+- Extended run/session provenance to `patchright`. Existing Chrome/Camoufox/Patchright
+  runs restart with persisted provenance, legacy rows remain Chrome, and mismatches
+  still fail before context creation. Stop & Reset remains required to switch.
+- Added Patchright build display, Chrome-style process accounting, ordinary headed-pool
+  topology, and deterministic launch/capacity/failure/restart/shutdown tests.
+- Froze the historical Phase 5/6 workflow matrix explicitly to Chrome and Camoufox.
+  Adding the enum had otherwise pulled Patchright into the full Queue workflow that the
+  prompt reserves for Phase 7 Prompt 4.
+- Added `docs/phase7_patchright_backend_integration.md` and updated README,
+  `.env.example`, project context, phase plan, and the Prompt 1 historical record.
+
+### Files Added
+
+- `docs/phase7_patchright_backend_integration.md`
+- `src/queue_load_test/browser/errors.py`
+
+### Files Modified
+
+- `.env.example`
+- `README.md`
+- `PROJECT_CONTEXT.md`
+- `PHASE_PLAN.md`
+- `CHANGELOG_AI.md`
+- `docs/phase7_patchright_readiness.md`
+- browser backend, manager, preflight, model, web setup/runtime, diagnostics, process
+  accounting, creation, admission, extraction, and restoration modules
+- focused unit/integration tests and the historical workflow parameter list
+
+### Tests Run
+
+- Focused Patchright backend, installed-browser, setup/preflight, configuration,
+  provenance, mismatch, creation, recovery, manual/headed selection, extraction, and
+  Chrome recovery suite — **191 passed**.
+- `queue-load-test-patchright-preflight --context-cycles 5` — PASS; Patchright 1.63.0,
+  Chrome 153.0.8010.54, 5/5 local cycles, zero contexts and managed processes after
+  shutdown.
+- `python -m pytest -q` — **527 passed, 4 staging tests deselected**.
+- `python -m ruff check src tests` — PASS.
+- `python -m mypy src` — PASS, 73 source files.
+- `python -m pip check` — PASS; no broken requirements.
+
+An earlier full run exposed two test issues before the successful final rerun: the
+historical workflow's dynamic enum matrix unintentionally ran future Prompt 4
+Patchright coverage, and an unrelated manual-lease timing test failed intermittently
+then passed alone and in the final suite. No production behavior was changed for the
+timing flake.
+
+### Staging Tests
+
+- `python -m pytest -o addopts="" -m staging tests/staging` — **NOT RUN / UNKNOWN**.
+- No Queue-it traffic was authorised or sent. New Patchright integration navigation was
+  limited to in-memory `data:` URLs.
+
+### Important Decisions
+
+- Chrome remains the default/control. Patchright is selectable only when explicitly
+  configured; Camoufox remains selectable but excluded from Phase 7 validation.
+- The smallest controller extension lets each backend optionally supply its controller
+  starter. BrowserManager retains every resource/lifecycle responsibility.
+- Patchright uses ordinary concurrent BrowserContexts and disconnect-based replacement.
+  No serialization or special health threshold is added without evidence.
+- A Patchright run records the installed Chrome build observed during new-run preflight;
+  that is provenance, not an immutable browser pin.
+- Existing runs never rerun new-run preflight and never migrate silently.
+- Full Queue identity restoration remains out of scope until Prompt 3.
+
+### Known Issues
+
+- Queue ID continuity, transfer/state fidelity, and repeated park/reopen reconstruction
+  under Patchright remain unverified.
+- Installed Chrome may update externally after run creation; the recorded build makes
+  the creation-time version visible but does not pin the executable.
+- Sustained Patchright capacity/recovery and full headed workflow acceptance remain for
+  later Phase 7 prompts.
+- Staging behavior remains UNKNOWN.
+
+### Follow-Up
+
+Phase 7 Prompt 3 — Patchright Queue identity restoration.
+
+### Git State
+
+- Commit: pending at the time this entry was written.
+- Branch: `main`.
+- Working tree: Phase 7 Prompt 2 changes only before commit.

@@ -523,7 +523,7 @@ local evidence; Queue-it staging items S1–S8 NOT RUN / UNKNOWN.** See
   all sessions, progress and saved browser state, resets runtime controls, and returns
   to setup. If the wipe fails, nothing is deleted and the run restarts.
 
-**Next:** Phase 7 Prompt 2 — Patchright runtime integration
+**Next:** Phase 7 Prompt 3 — Patchright Queue identity restoration
 
 Later Phase 5 work must continue to use bounded workers, repository ownership, and
 existing lifecycle/restoration logic. Retargeting a live run is still unsupported;
@@ -715,9 +715,20 @@ switching continues to require Stop & Reset Run.
    - Chrome is again the default for new runs. Provenance schema, legacy migration,
      Camoufox implementation, and existing-run restart behavior are unchanged.
    - No Queue-it/staging traffic was sent; staging remains NOT RUN / UNKNOWN.
-2. **Patchright Runtime Integration** — next. Add the candidate behind the existing
-   backend boundary without changing identity safety or persisted-run semantics.
-3. **Patchright Queue Identity Restoration** — planned. Validate park/reopen identity
+2. **Patchright Runtime Integration** — **completed on 2026-09-28**
+   (`docs/phase7_patchright_backend_integration.md`).
+   - Added `PatchrightBackend` using Patchright's async controller and installed Chrome
+     channel, selected through the existing factory by `BROWSER_BACKEND=patchright`.
+   - BrowserManager remains the sole slot/capacity/restart/shutdown owner. Patchright
+     uses ordinary shared-process concurrency with no evidence-free serialization.
+   - New-run preflight blocks persistence on failure and records the observed Chrome
+     build on success. Run/session provenance, mismatch rejection, legacy Chrome
+     migration, and Stop & Reset switching rules are preserved.
+   - Automatic, creation, and headed/manual pools all use the backend seam; browser
+     library error families are normalized below application services.
+   - Chrome remains the default and regression control. Camoufox source/support remains
+     intact but is excluded from Phase 7 validation. Staging is NOT RUN / UNKNOWN.
+3. **Patchright Queue Identity Restoration** — next. Validate park/reopen identity
    restoration in fresh temporary contexts; do not infer it from Prompt 1 lifecycle
    evidence.
 

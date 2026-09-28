@@ -10,6 +10,7 @@ class BrowserBackendName(StrEnum):
 
     CHROME = "chrome"
     CAMOUFOX = "camoufox"
+    PATCHRIGHT = "patchright"
 
     @classmethod
     def parse(cls, value: str | BrowserBackendName) -> BrowserBackendName:

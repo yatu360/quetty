@@ -19,6 +19,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from queue_load_test.browser import CAMOUFOX_BROWSER_VERSION
+from queue_load_test.browser.patchright_preflight import (
+    PatchrightPreflight,
+    run_patchright_preflight,
+)
 from queue_load_test.browser.preflight import CamoufoxPreflight, run_camoufox_preflight
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
@@ -52,6 +56,7 @@ def create_app(
     runtime: RunRuntime | None = None,
     instance_lock: InstanceLock | None = None,
     camoufox_preflight: CamoufoxPreflight | None = None,
+    patchright_preflight: PatchrightPreflight | None = None,
 ) -> FastAPI:
     """Build the operator UI.
 
@@ -59,12 +64,13 @@ def create_app(
     then clears every persisted browser owner (all belong to dead processes).
     Without it only expired ownership is recovered.
 
-    ``camoufox_preflight`` checks the pinned Camoufox runtime before a new Camoufox
-    run is persisted; it is injectable for tests and defaults to the real local check.
-    Existing runs never re-run it: they restart with their persisted backend.
+    Backend-specific preflights run before a new Camoufox or Patchright run is
+    persisted. Existing runs never re-run them: they restart with their persisted
+    backend.
     """
 
-    preflight = camoufox_preflight or run_camoufox_preflight
+    camoufox_ready = camoufox_preflight or run_camoufox_preflight
+    patchright_ready = patchright_preflight or run_patchright_preflight
 
     run_runtime = runtime or ApplicationRunRuntime(settings=settings, repository=repository)
     dashboard = DashboardService(repository, run_runtime)
@@ -207,7 +213,7 @@ def create_app(
                 status_code=422,
             )
         if settings.browser_backend is BrowserBackendName.CAMOUFOX:
-            readiness = await preflight()
+            readiness = await camoufox_ready()
             if not readiness.passed:
                 log_event(
                     logger,
@@ -229,6 +235,36 @@ def create_app(
                     },
                     status_code=503,
                 )
+        patchright_build: str | None = None
+        if settings.browser_backend is BrowserBackendName.PATCHRIGHT:
+            patchright_readiness = await patchright_ready()
+            if not patchright_readiness.passed:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "patchright_preflight_failed",
+                    error_type=(
+                        patchright_readiness.error.split(":", 1)[0]
+                        if patchright_readiness.error
+                        else None
+                    ),
+                )
+                return templates.TemplateResponse(
+                    request,
+                    "setup.html",
+                    {
+                        "error": (
+                            "Patchright is not ready, so no run was created. "
+                            f"{patchright_readiness.remedy} To use standard Chrome "
+                            "instead, set BROWSER_BACKEND=chrome and restart."
+                        ),
+                        "target_url": raw_url,
+                        "requested_sessions": raw_count,
+                        "browser_backend": settings.browser_backend.value,
+                    },
+                    status_code=503,
+                )
+            patchright_build = patchright_readiness.observed_browser_version
         run = RunConfig(
             run_id=str(uuid4()),
             target_url=target_url,
@@ -238,7 +274,7 @@ def create_app(
             browser_build=(
                 CAMOUFOX_BROWSER_VERSION
                 if settings.browser_backend is BrowserBackendName.CAMOUFOX
-                else None
+                else patchright_build
             ),
         )
         try:

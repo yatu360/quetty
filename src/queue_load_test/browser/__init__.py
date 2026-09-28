@@ -3,12 +3,15 @@
 from queue_load_test.browser.backend import (
     CAMOUFOX_BROWSER_VERSION,
     CAMOUFOX_PACKAGE_VERSION,
+    PATCHRIGHT_BROWSER_CHANNEL,
+    PATCHRIGHT_PACKAGE_VERSION,
     PLAYWRIGHT_VERSION,
     BrowserBackend,
     BrowserBackendDiagnostics,
     BrowserBackendSetupError,
     CamoufoxBackend,
     ChromeBackend,
+    PatchrightBackend,
     create_browser_backend,
     manual_pool_topology,
 )
@@ -26,6 +29,8 @@ from queue_load_test.browser.manager import (
 __all__ = [
     "CAMOUFOX_BROWSER_VERSION",
     "CAMOUFOX_PACKAGE_VERSION",
+    "PATCHRIGHT_BROWSER_CHANNEL",
+    "PATCHRIGHT_PACKAGE_VERSION",
     "PLAYWRIGHT_VERSION",
     "BrowserBackend",
     "BrowserBackendDiagnostics",
@@ -40,6 +45,7 @@ __all__ = [
     "CamoufoxBackend",
     "ChromeBackend",
     "OwnedBrowserContext",
+    "PatchrightBackend",
     "create_browser_backend",
     "manual_pool_topology",
 ]

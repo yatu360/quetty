@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page
 
+from queue_load_test.browser.errors import BROWSER_ERROR_TYPES
 from queue_load_test.models import QueueExtractionDiagnostics, QueueProgress
 from queue_load_test.queue_monitor.parsing import (
     parse_connection_lost,
@@ -227,7 +227,7 @@ class QueueItLiveStateExtractor:
                 text = await locator.inner_text()
                 diagnostics.matched_selectors[field_name] = selector
                 return _ObservedElement(locator=locator, selector=selector, text=text)
-            except PlaywrightError as exc:
+            except BROWSER_ERROR_TYPES as exc:
                 diagnostics.error(field_name, exc)
         return None
 
@@ -273,7 +273,7 @@ class QueueItLiveStateExtractor:
             return None
         try:
             raw_value = await observed.locator.get_attribute("aria-valuenow")
-        except PlaywrightError as exc:
+        except BROWSER_ERROR_TYPES as exc:
             diagnostics.error("progress_percentage", exc)
             return None
         parsed = parse_progress_percentage(raw_value)
@@ -304,7 +304,7 @@ class QueueItLiveStateExtractor:
                 "secondsToStart": await body.get_attribute("data-seconds-to-start"),
                 "eventStartTime": await body.get_attribute("data-event-start-time"),
             }
-        except PlaywrightError as exc:
+        except BROWSER_ERROR_TYPES as exc:
             diagnostics.error("pre_queue_body", exc)
 
         body_class = body_values.get("class") or ""
@@ -350,7 +350,7 @@ class QueueItLiveStateExtractor:
                 }
                 """
             )
-        except PlaywrightError as exc:
+        except BROWSER_ERROR_TYPES as exc:
             diagnostics.error("pre_queue_page_state", exc)
             return {}
         if not isinstance(value, dict):

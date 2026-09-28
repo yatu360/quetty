@@ -19,6 +19,7 @@ async def test_unsupported_patchright_version_fails_without_launch(monkeypatch: 
     assert not result.passed
     assert not result.supported_version
     assert not result.async_launch
+    assert result.context_cycles_requested == 1
     assert "patchright==1.63.0" in result.remedy
     assert result.managed_processes_after_shutdown == 0
 

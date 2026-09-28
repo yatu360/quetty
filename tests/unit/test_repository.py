@@ -736,3 +736,32 @@ async def test_browser_backend_provenance_round_trips_and_legacy_defaults_to_chr
     assert (await legacy.get_active_run()).browser_build is None  # type: ignore[union-attr]
     assert (await legacy.get("legacy-session")).browser_backend is BrowserBackendName.CHROME  # type: ignore[union-attr]
     await legacy.close()
+
+
+async def test_patchright_backend_and_build_provenance_round_trip(tmp_path: Path) -> None:
+    database = tmp_path / "patchright-backend.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    run = RunConfig(
+        run_id="patchright-run",
+        target_url="https://staging.example.test/queue",
+        requested_sessions=1,
+        created_at=NOW,
+        browser_backend=BrowserBackendName.PATCHRIGHT,
+        browser_build="153.0.8010.54",
+    )
+    item = make_session("patchright-session", queue_id="patchright-queue")
+    item.browser_backend = BrowserBackendName.PATCHRIGHT
+    await repository.create_run(run)
+    await repository.create(item)
+    await repository.close()
+
+    reopened = SQLiteSessionRepository(database)
+    persisted_run = await reopened.get_active_run()
+    persisted_session = await reopened.get(item.session_id)
+
+    assert persisted_run is not None
+    assert persisted_run.browser_backend is BrowserBackendName.PATCHRIGHT
+    assert persisted_run.browser_build == "153.0.8010.54"
+    assert persisted_session is not None
+    assert persisted_session.browser_backend is BrowserBackendName.PATCHRIGHT
+    await reopened.close()

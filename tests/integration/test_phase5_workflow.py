@@ -1,4 +1,4 @@
-"""The Phase 5 operator workflow on each installed backend (local simulator only)."""
+"""The completed Phase 5/6 backend workflow matrix (local simulator only)."""
 
 from pathlib import Path
 
@@ -10,7 +10,10 @@ from queue_load_test.models import BrowserBackendName
 pytest.importorskip("psutil")
 
 
-@pytest.mark.parametrize("backend", list(BrowserBackendName))
+@pytest.mark.parametrize(
+    "backend",
+    [BrowserBackendName.CHROME, BrowserBackendName.CAMOUFOX],
+)
 async def test_phase5_operator_workflow_passes_every_check(
     tmp_path: Path,
     backend: BrowserBackendName,

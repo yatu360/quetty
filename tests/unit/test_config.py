@@ -235,6 +235,10 @@ def test_browser_backend_parsing_and_validation() -> None:
         Settings(**settings_kwargs(BROWSER_BACKEND="CAMOUFOX")).browser_backend
         is BrowserBackendName.CAMOUFOX
     )
+    assert (
+        Settings(**settings_kwargs(BROWSER_BACKEND="patchright")).browser_backend
+        is BrowserBackendName.PATCHRIGHT
+    )
     with pytest.raises(ValidationError, match="Unknown browser backend"):
         Settings(**settings_kwargs(BROWSER_BACKEND="firefox"))
 

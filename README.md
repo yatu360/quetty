@@ -29,8 +29,8 @@ post-admission workflows.
 ## Install
 
 During Phase 7 development, standard Chrome is the safe default for new runs.
-Camoufox remains installed and selectable as a dormant/experimental backend. Patchright
-is pinned and locally probed, but is not yet a runtime-selectable backend.
+Patchright is the integrated candidate backend. Camoufox remains installed and
+selectable as a dormant/experimental backend.
 
 ```powershell
 python -m venv .venv
@@ -47,7 +47,8 @@ Playwright 1.62.0, and Camoufox browser build `official/stable/152.0.4-beta.30`.
 Patchright uses its own `patchright.*` namespace and driver, so it coexists with the
 retained Playwright/Camoufox pins. Its probe launches already-installed Google Chrome
 with `channel="chrome"`; no Patchright Chromium download is required and runtime code
-does not install a browser. See `docs/phase7_patchright_readiness.md`.
+does not install a browser. See `docs/phase7_patchright_readiness.md` and
+`docs/phase7_patchright_backend_integration.md`.
 
 The preflight launches one Camoufox process, opens one context, loads only an in-memory
 `data:` page, and verifies complete cleanup. It sends no Queue-it or staging traffic.
@@ -60,8 +61,8 @@ and rollback procedure.
 
 ### Browser backend
 
-`BROWSER_BACKEND=chrome|camoufox` selects the backend for **new** runs. Chrome is the
-temporary Phase 7 default:
+`BROWSER_BACKEND=chrome|camoufox|patchright` selects the backend for **new** runs.
+Chrome is the temporary Phase 7 default:
 - **Recorded per run and session.** The backend is persisted on the immutable run and
   on every session. An existing run always restarts with the backend it was created
   with; changing `BROWSER_BACKEND` never migrates it. To switch backends, use **Stop &
@@ -70,24 +71,32 @@ temporary Phase 7 default:
   provenance and are treated as Chrome.
 - **No cross-engine fallback.** Cross-backend storage-state restoration is refused
   before any browser work.
-- **Build shown and logged.** Camoufox runs also record the pinned build. A changed
-  build is shown in run info and logged (`run_browser_build_changed`), never applied
-  silently.
+- **Build provenance.** Camoufox runs record the pinned build; a changed Camoufox build
+  is shown and logged (`run_browser_build_changed`). Patchright runs record and display
+  the installed Chrome version observed by their successful new-run preflight.
 
 **Chrome fallback:** set `BROWSER_BACKEND=chrome` before creating a run. Chrome uses
 installed Google Chrome (`channel="chrome"`) and remains covered by the regression
 workflow.
 
+**Patchright candidate:** set `BROWSER_BACKEND=patchright` before creating a run. Setup
+runs the exact-package local preflight before persisting anything. Patchright uses its
+own async controller beneath the existing `BrowserManager`; the same bounded slots,
+context capacity, shared headed/headless budget, deadlines, replacement, and cleanup
+rules apply. Patchright uses ordinary shared-process contexts with no Camoufox-style
+serialization. Existing runs never rerun new-run preflight and always retain their
+persisted backend.
+
 Queue ID is the authoritative persisted identity. Transfer URL and same-backend HYBRID
 storage state restore it in a fresh, disposable context. Fresh Camoufox contexts may
 present different fingerprint characteristics, and that is expected. Fingerprint
 continuity is neither available in 0.5.6 nor required, and no fingerprint data is
-persisted. Neither backend adds proxy rotation, CAPTCHA solving, WAF-specific
+persisted. No backend adds proxy rotation, CAPTCHA solving, WAF-specific
 behavior, or traffic interception.
 
 Camoufox 0.5.6 runs one live context per managed process. This means:
 - automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4; the name is
-  historical and applies to either backend);
+  historical and applies to every backend);
 - `MONITOR_WORKERS` beyond that number wait for a free process;
 - the headed manual pool gives each open window its own process, up to
   `MAX_MANUAL_OPEN_SESSIONS`, while Chrome shares one headed process;
@@ -106,8 +115,9 @@ queue-load-test-phase6-camoufox-benchmark --headed --output docs/results/phase6_
 
 Results and limits are in `docs/phase6_camoufox_benchmark.md`.
 
-Phase 7 dependency, browser-install, temporary-context, and safe-default findings are
-recorded in `docs/phase7_patchright_readiness.md`.
+Phase 7 dependency/readiness findings and runtime integration are recorded in
+`docs/phase7_patchright_readiness.md` and
+`docs/phase7_patchright_backend_integration.md`.
 
 The application is configured through environment variables. Start from:
 
