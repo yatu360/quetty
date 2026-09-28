@@ -11,6 +11,7 @@ from typing import TypeVar
 from queue_load_test.models import (
     BrowserBackendName,
     BrowserRuntimeState,
+    MonitoringStrategy,
     QueueProgress,
     QueueSession,
     QueueStatus,
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS run_config (
     requested_sessions INTEGER NOT NULL CHECK (requested_sessions > 0),
     browser_backend TEXT NOT NULL DEFAULT 'chrome',
     browser_build TEXT,
+    monitoring_strategy TEXT NOT NULL DEFAULT 'headed_window',
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
@@ -356,7 +358,7 @@ class SQLiteSessionRepository:
             row = self._connect().execute(
                 """
                 SELECT run_id, target_url, requested_sessions, browser_backend,
-                       browser_build, created_at, status
+                       browser_build, monitoring_strategy, created_at, status
                 FROM run_config WHERE current_run = 1
                 """
             ).fetchone()
@@ -370,6 +372,7 @@ class SQLiteSessionRepository:
                 target_url=str(row["target_url"]),
                 requested_sessions=int(row["requested_sessions"]),
                 browser_backend=BrowserBackendName.parse(row["browser_backend"]),
+                monitoring_strategy=MonitoringStrategy.parse(row["monitoring_strategy"]),
                 browser_build=(
                     str(row["browser_build"]) if row["browser_build"] is not None else None
                 ),
@@ -396,8 +399,8 @@ class SQLiteSessionRepository:
                     """
                     INSERT INTO run_config (
                         run_id, target_url, requested_sessions, browser_backend,
-                        browser_build, created_at, status, current_run
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                        browser_build, monitoring_strategy, created_at, status, current_run
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         run.run_id,
@@ -405,6 +408,7 @@ class SQLiteSessionRepository:
                         run.requested_sessions,
                         run.browser_backend.value,
                         run.browser_build,
+                        run.monitoring_strategy.value,
                         _to_storage(run.created_at),
                         run.status.value,
                     ),
@@ -871,6 +875,12 @@ class SQLiteSessionRepository:
         if "browser_build" not in columns:
             # Unknown for runs created before build provenance was recorded.
             connection.execute("ALTER TABLE run_config ADD COLUMN browser_build TEXT")
+        if "monitoring_strategy" not in columns:
+            # Every pre-Phase-8 run used the browser restore + live DOM path.
+            connection.execute(
+                "ALTER TABLE run_config ADD COLUMN "
+                "monitoring_strategy TEXT NOT NULL DEFAULT 'headed_window'"
+            )
 
     @staticmethod
     def _migrate_runtime_control_columns(connection: sqlite3.Connection) -> None:

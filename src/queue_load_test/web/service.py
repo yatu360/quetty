@@ -22,7 +22,7 @@ from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import log_event
-from queue_load_test.models import BrowserBackendName, RunConfig
+from queue_load_test.models import BrowserBackendName, MonitoringStrategy, RunConfig
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
@@ -44,6 +44,23 @@ from queue_load_test.web.actions import (
 from queue_load_test.web.manual import ManualChromeSessionManager, ManualOpenResult
 
 logger = logging.getLogger(__name__)
+
+
+def _automatic_monitor_for_strategy(
+    strategy: MonitoringStrategy,
+    *,
+    browser_monitor: QueueSessionMonitor,
+) -> QueueSessionMonitor:
+    """Select the run's automatic monitor without implementing Phase 8 direct I/O.
+
+    Prompt 1 persists and dispatches the strategy boundary only. The direct strategy
+    therefore uses its specified browser fallback for every check until browser-observed
+    visitor-status discovery provides a supported direct checker in a later prompt.
+    """
+
+    if strategy in (MonitoringStrategy.HEADED_WINDOW, MonitoringStrategy.DIRECT):
+        return browser_monitor
+    raise ValueError(f"Unsupported monitoring strategy: {strategy!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +155,7 @@ class ApplicationRunRuntime:
                     "staging_url": validated_url,
                     "target_queue_ids": run.requested_sessions,
                     "browser_backend": run.browser_backend,
+                    "monitoring_strategy": run.monitoring_strategy,
                 }
             )
             metrics = PrometheusMetrics()
@@ -203,6 +221,10 @@ class ApplicationRunRuntime:
                 retry_policy=MonitoringRetryPolicy.from_settings(settings),
                 observability=metrics,
             )
+            automatic_monitor = _automatic_monitor_for_strategy(
+                run.monitoring_strategy,
+                browser_monitor=monitor,
+            )
             manual_processes, manual_contexts_per_process = manual_pool_topology(
                 settings.browser_backend, settings.max_manual_open_sessions
             )
@@ -248,7 +270,7 @@ class ApplicationRunRuntime:
             scheduler = ParkedSessionScheduler.from_settings(
                 settings,
                 repository=self._repository,
-                handler=monitor,
+                handler=automatic_monitor,
                 observability=metrics,
             )
             runtime = ApplicationRuntime(
@@ -445,6 +467,7 @@ class DashboardSummary:
     requested_sessions: int
     browser_backend: str
     browser_build: str
+    monitoring_strategy: str
     valid_managed_sessions: int
     remaining_to_initial_target: int
     creation: str
@@ -483,6 +506,7 @@ class DashboardService:
             requested_sessions=run.requested_sessions,
             browser_backend=run.browser_backend.value,
             browser_build=browser_build_label(run),
+            monitoring_strategy=run.monitoring_strategy.label,
             valid_managed_sessions=recovery.valid_queue_ids,
             remaining_to_initial_target=max(
                 0, run.requested_sessions - recovery.valid_queue_ids

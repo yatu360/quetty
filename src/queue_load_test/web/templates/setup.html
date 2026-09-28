@@ -31,6 +31,25 @@
         <label for="requested_sessions">Number of sessions</label>
         <input id="requested_sessions" name="requested_sessions" type="number"
                min="1" required value="{{ requested_sessions }}">
+        <fieldset>
+          <legend>Monitoring strategy</legend>
+          {% for strategy in monitoring_strategies %}
+          <label class="strategy-option" for="monitoring_strategy_{{ strategy.value }}">
+            <input id="monitoring_strategy_{{ strategy.value }}" name="monitoring_strategy"
+                   type="radio" value="{{ strategy.value }}" required
+                   {% if selected_monitoring_strategy == strategy.value %}checked{% endif %}>
+            <strong>{{ strategy.label }}</strong>
+            <span class="muted">
+              {% if strategy.value == "headed_window" %}
+              Existing browser-backed restore and live Queue-it page inspection.
+              {% else %}
+              Browser-established sessions with direct visitor-status checking where
+              available, with browser fallback.
+              {% endif %}
+            </span>
+          </label>
+          {% endfor %}
+        </fieldset>
         <button type="submit">Start</button>
       </form>
     </section>

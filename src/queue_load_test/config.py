@@ -8,6 +8,7 @@ from pydantic import Field, HttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from queue_load_test.models.browser import BrowserBackendName
+from queue_load_test.models.run import MonitoringStrategy
 from queue_load_test.models.session import SessionMode
 
 
@@ -23,6 +24,12 @@ class Settings(BaseSettings):
     browser_backend: BrowserBackendName = Field(
         default=BrowserBackendName.PATCHRIGHT,
         alias="BROWSER_BACKEND",
+    )
+    # Setup may override this for a new run. Persisted run provenance always wins
+    # after creation, so changing the environment never migrates an existing run.
+    monitoring_strategy: MonitoringStrategy = Field(
+        default=MonitoringStrategy.HEADED_WINDOW,
+        alias="MONITORING_STRATEGY",
     )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
@@ -149,6 +156,13 @@ class Settings(BaseSettings):
         if not isinstance(value, str | BrowserBackendName):
             raise ValueError("BROWSER_BACKEND must be a string")  # noqa: TRY004
         return BrowserBackendName.parse(value)
+
+    @field_validator("monitoring_strategy", mode="before")
+    @classmethod
+    def parse_monitoring_strategy(cls, value: object) -> MonitoringStrategy:
+        if not isinstance(value, str | MonitoringStrategy):
+            raise ValueError("MONITORING_STRATEGY must be a string")  # noqa: TRY004
+        return MonitoringStrategy.parse(value)
 
     @model_validator(mode="after")
     def validate_capacity(self) -> "Settings":

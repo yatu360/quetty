@@ -8,6 +8,7 @@ import pytest
 from queue_load_test.harness.phase3_repository import seed_synthetic_sessions
 from queue_load_test.models import (
     BrowserBackendName,
+    MonitoringStrategy,
     QueueProgress,
     QueueSession,
     QueueStatus,
@@ -765,3 +766,60 @@ async def test_patchright_backend_and_build_provenance_round_trip(tmp_path: Path
     assert persisted_session is not None
     assert persisted_session.browser_backend is BrowserBackendName.PATCHRIGHT
     await reopened.close()
+
+
+async def test_monitoring_strategy_round_trips_and_legacy_run_migrates_to_headed(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "strategy.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    await repository.create_run(
+        RunConfig(
+            run_id="direct-run",
+            target_url="https://staging.example.test/queue",
+            requested_sessions=1,
+            created_at=NOW,
+            browser_backend=BrowserBackendName.PATCHRIGHT,
+            monitoring_strategy=MonitoringStrategy.DIRECT,
+        )
+    )
+    await repository.close()
+
+    reopened = SQLiteSessionRepository(database)
+    persisted = await reopened.get_active_run()
+    assert persisted is not None
+    assert persisted.monitoring_strategy is MonitoringStrategy.DIRECT
+    assert persisted.browser_backend is BrowserBackendName.PATCHRIGHT
+    await reopened.close()
+
+    legacy_database = tmp_path / "legacy-strategy.sqlite3"
+    with sqlite3.connect(legacy_database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE run_config (
+                run_id TEXT PRIMARY KEY, target_url TEXT NOT NULL,
+                requested_sessions INTEGER NOT NULL, browser_backend TEXT NOT NULL,
+                browser_build TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL,
+                current_run INTEGER NOT NULL UNIQUE
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO run_config VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            (
+                "legacy",
+                "https://staging.example.test/queue",
+                1,
+                "camoufox",
+                "152.0.4-beta.30",
+                NOW.isoformat(),
+                "ACTIVE",
+            ),
+        )
+
+    legacy = SQLiteSessionRepository(legacy_database)
+    migrated = await legacy.get_active_run()
+    assert migrated is not None
+    assert migrated.monitoring_strategy is MonitoringStrategy.HEADED_WINDOW
+    assert migrated.browser_backend is BrowserBackendName.CAMOUFOX
+    await legacy.close()

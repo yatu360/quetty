@@ -788,6 +788,37 @@ switching continues to require Stop & Reset Run.
    - Queue-it staging is **NOT RUN / UNKNOWN**. An authorised staging validation of the
      Patchright default is the open follow-up.
 
+## Phase 8 — Monitoring Strategy and Direct Status Research — **IN PROGRESS**
+
+Phase 8 introduces an explicit run-level monitoring strategy without weakening Queue ID
+identity, parked-session ownership, browser-backend provenance, or bounded scheduling.
+Direct status work must be based only on the Queue-it visitor page's own
+browser-observed behavior; undocumented URL construction is out of scope.
+
+1. **Monitoring Strategy Boundary and Setup UI** — **completed on 2026-09-29**
+   (`docs/phase8_monitoring_strategy.md`).
+   - Added stable `headed_window` and `direct` values with exact operator labels
+     **Headed Window Strategy** and **Direct Monitoring Strategy**.
+   - First-run setup selects the strategy beside target/count and configured browser
+     backend information. The protected-destination warning remains.
+   - `run_config.monitoring_strategy` is immutable run provenance. Restart uses the
+     persisted value; environment/default changes cannot migrate it; Stop & Reset Run
+     permits a different selection for the next run.
+   - Legacy runs migrate to `headed_window`, matching historical behavior. Browser
+     backend and monitoring strategy are independent; no Queue ID/session data is
+     rewritten.
+   - Runtime strategy dispatch exists, but both selections intentionally use the
+     existing browser restore/live-DOM monitor in Prompt 1. Manual Open and
+     pause/resume semantics are unchanged.
+   - No direct request replay or undocumented Queue-it URL was implemented. Staging is
+     **NOT RUN / UNKNOWN**.
+
+2. **Browser-Observed Visitor Status Discovery** — next task.
+   - Observe and document only the visitor page's own supported request behavior in an
+     authorised environment.
+   - Do not infer or manually construct undocumented endpoints.
+   - Preserve browser fallback, Queue ID authority, and all bounded ownership rules.
+
 ## Scaling Gates
 
 ### Phase 1 → Phase 2

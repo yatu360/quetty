@@ -11,6 +11,7 @@ from queue_load_test.models.lifecycle import (
 from queue_load_test.models.progress import QueueExtractionDiagnostics, QueueProgress
 from queue_load_test.models.run import (
     BrowserRuntimeState,
+    MonitoringStrategy,
     RunConfig,
     RunStatus,
     SessionSummary,
@@ -23,6 +24,7 @@ __all__ = [
     "BrowserBackendName",
     "BrowserRuntimeState",
     "InvalidQueueTransition",
+    "MonitoringStrategy",
     "QueueExtractionDiagnostics",
     "QueuePageSignals",
     "QueueProgress",

@@ -5,6 +5,11 @@ body { margin: 0; }
 .dashboard-shell { max-width: 1500px; margin: 0 auto; padding: 2rem; }
 .panel { background: #fff; border: 1px solid #d8dfd9; border-radius: 12px; box-shadow: 0 4px 20px #24352a12; padding: 1.25rem; margin-bottom: 1rem; }
 .setup-panel { width: min(100%, 560px); }
+.setup-panel fieldset { display: grid; gap: .65rem; border: 1px solid #d8dfd9; border-radius: 8px; padding: .85rem; }
+.setup-panel legend { font-size: .85rem; font-weight: 700; padding: 0 .3rem; }
+.strategy-option { display: grid; grid-template-columns: auto 1fr; column-gap: .55rem; align-items: start; }
+.strategy-option input { grid-row: 1 / span 2; margin-top: .15rem; }
+.strategy-option .muted { font-weight: 400; line-height: 1.4; }
 .eyebrow { color: #42624f; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 h1 { margin: .25rem 0 1rem; }
 form { display: grid; gap: .75rem; }

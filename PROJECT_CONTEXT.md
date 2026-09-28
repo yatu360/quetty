@@ -10,6 +10,27 @@ live monitoring.
 
 ## Current Status
 
+### Monitoring strategy policy (Phase 8 Prompt 1, 2026-09-29)
+
+- Every run now persists one immutable monitoring strategy independently from its
+  browser backend: `headed_window` (**Headed Window Strategy**) or `direct`
+  (**Direct Monitoring Strategy**).
+- Headed Window Strategy is the historical automatic path: restore through the
+  persisted backend, inspect the live page/DOM, persist, and park. Its operator-facing
+  name does not force the automatic pool to become visibly headed; `HEADLESS` is
+  unchanged and Manual Open remains the explicit headed window.
+- Direct Monitoring Strategy is configuration/UI/provenance only in Prompt 1. Its
+  strategy dispatch currently uses the existing browser monitor as fallback for every
+  check. No Queue-it status request is discovered, constructed, or called.
+- Setup selects and persists the strategy. Startup uses
+  `run_config.monitoring_strategy`, never a changed environment default. Legacy runs
+  migrate to `headed_window`; changing strategy requires Stop & Reset Run.
+- Queue IDs and session rows are not migrated or reacquired. Browser backend and
+  monitoring strategy remain independent run dimensions. See
+  `docs/phase8_monitoring_strategy.md`.
+- Staging is **NOT RUN / UNKNOWN**. Next: **Phase 8 Prompt 2 — Browser-Observed Visitor
+  Status Discovery**.
+
 ### Browser backend policy (authoritative, Phase 7 accepted 2026-09-28)
 
 - **Patchright is the default for NEW runs** (`BROWSER_BACKEND=patchright`, also the
@@ -623,8 +644,9 @@ close the context, release the lease, and park them again.
 extraction diagnostics. All Queue-it layout fields can be `None`.
 
 `RunConfig` holds the immutable current `run_id`, sensitive-in-logs `target_url`,
-`requested_sessions`, `created_at`, and `ACTIVE` run status. `SessionSummary` is a safe
-dashboard projection and never contains transfer URLs or browser-state paths.
+`requested_sessions`, independent `browser_backend`/`browser_build` provenance,
+`monitoring_strategy`, `created_at`, and `ACTIVE` run status. `SessionSummary` is a
+safe dashboard projection and never contains transfer URLs or browser-state paths.
 
 Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUEUE`,
 `ACTIVE_QUEUE`, `PARKED`, `CHECKING`, `PAUSED`, `SERVICED_SOON`, `TURN_STARTED`,
@@ -643,8 +665,9 @@ Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUE
   uses a partial ordered expression index on
   `COALESCE(next_check_at, created_at), created_at, session_id` for monitorable states.
   Existing Phase 2 indexes are migrated in place during initialization.
-- SQLite also has a singleton `run_config` table. Setup is insert-only in Prompt 1;
-  there is no target-changing operation.
+- SQLite also has a singleton `run_config` table. Setup is insert-only; target, browser
+  backend, and monitoring strategy are immutable provenance. Legacy strategy-less rows
+  migrate to `headed_window`, their historical behavior.
 - SQLite has a singleton `runtime_control` table containing `monitoring_paused` and the
   signed `operator_population_adjustment`. Both O(1) values survive restart; the claim
   transaction checks pause before selecting rows and startup applies the population
@@ -785,6 +808,12 @@ identity when present, detects ambiguous IDs, and reports expected/observed iden
 mismatch without replacing the expected ID.
 
 ## Monitoring Model
+
+`RunConfig.monitoring_strategy` selects one immutable run-level automatic-monitoring
+strategy. `headed_window` is the existing browser restore/live-DOM path. `direct` is a
+Phase 8 boundary only and currently selects that same browser monitor as its fallback;
+no visitor-status request exists in the implementation yet. The scheduler, leases,
+pause gate, manual/operator paths, and browser-backend provenance are unchanged.
 
 `ParkedSessionScheduler` selects only due, unleased, non-terminal sessions through the
 repository, claims at most the free space in a bounded `asyncio.Queue`, and feeds a
@@ -1116,6 +1145,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
 - `docs/phase3-acceptance.md` — Phase 3 acceptance matrix and evidence limits.
 - `docs/phase4_readiness.md` — Phase 4 capacity model, measured baselines, conditional
   persistence/distribution gates, and remaining unknowns.
+- `docs/phase8_monitoring_strategy.md` — Phase 8 strategy values, persistence/migration
+  rules, setup/dashboard behavior, browser fallback boundary, and Prompt 2 handoff.
 - `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
   lease-fencing audit, PostgreSQL deferral, and future `SKIP LOCKED` design.
 - `docs/phase4_state_storage_readiness.md` — 10,000-file local state results, state
@@ -1305,9 +1336,9 @@ python -m mypy src
 
 ## Next Task
 
-Phase 7 is complete. Next: authorised Queue-it staging validation of the Patchright
-default (requires an authorised staging configuration; never claim staging PASS
-without it).
+Phase 8 Prompt 1 is complete. Next: **Phase 8 Prompt 2 — Browser-Observed Visitor
+Status Discovery**. Authorised Queue-it staging validation of the Patchright default
+also remains open; never claim staging PASS without an authorised run.
 
 ## Instructions for Future AI Sessions
 

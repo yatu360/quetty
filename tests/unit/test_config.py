@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from queue_load_test.config import Settings
-from queue_load_test.models import BrowserBackendName, SessionMode
+from queue_load_test.models import BrowserBackendName, MonitoringStrategy, SessionMode
 
 
 def settings_kwargs(**overrides: object) -> dict[str, object]:
@@ -241,6 +241,19 @@ def test_browser_backend_parsing_and_validation() -> None:
     )
     with pytest.raises(ValidationError, match="Unknown browser backend"):
         Settings(**settings_kwargs(BROWSER_BACKEND="firefox"))
+
+
+def test_monitoring_strategy_parsing_and_validation() -> None:
+    assert (
+        Settings(**settings_kwargs(MONITORING_STRATEGY="headed_window")).monitoring_strategy
+        is MonitoringStrategy.HEADED_WINDOW
+    )
+    assert (
+        Settings(**settings_kwargs(MONITORING_STRATEGY="DIRECT")).monitoring_strategy
+        is MonitoringStrategy.DIRECT
+    )
+    with pytest.raises(ValidationError, match="Unknown monitoring strategy"):
+        Settings(**settings_kwargs(MONITORING_STRATEGY="invented"))
 
 
 @pytest.mark.parametrize(

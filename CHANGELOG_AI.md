@@ -4687,3 +4687,77 @@ Phase 7 prompts.
 - Commit: pending at the time this entry was written.
 - Branch: `main`.
 - Working tree: Phase 7 Prompt 6 changes only before commit.
+
+## 2026-09-29 — Phase 8 Prompt 1 — Monitoring Strategy Boundary and Setup UI
+
+### Goal
+
+Begin Phase 8 with an explicit, immutable run-level monitoring-strategy boundary and
+operator setup choice, without implementing direct Queue-it visitor-status requests or
+changing the existing browser-backed monitor.
+
+### Changes
+
+- Added typed `MonitoringStrategy` values `headed_window` and `direct`, with exact
+  operator labels **Headed Window Strategy** and **Direct Monitoring Strategy**.
+- Added `MONITORING_STRATEGY` as a new-run setup default. The setup form presents both
+  strategies, preserves the protected-destination warning, explains browser-backed
+  inspection versus future direct checking with browser fallback, and rejects unknown
+  values with HTTP 422 before persistence.
+- Persisted `monitoring_strategy` on immutable `run_config`. Startup copies the
+  persisted value into runtime configuration, so environment/default changes cannot
+  migrate an existing run. The dashboard shows its operator label.
+- Added an additive SQLite migration with `headed_window` as the default for all
+  pre-Phase-8 rows, matching their historical behavior. No session or Queue ID data is
+  rewritten.
+- Added an explicit automatic-monitor selector. Both strategies intentionally select
+  the existing `QueueSessionMonitor` in Prompt 1; `direct` is using its browser fallback
+  for every check until a later prompt supplies a supported direct checker.
+- Kept Manual Open, Refresh, Add, Replace, Delete, pause/resume, scheduler leases,
+  browser capacity, timeouts, identity checks, and parking behavior unchanged.
+- Added `docs/phase8_monitoring_strategy.md`; updated `.env.example`, README,
+  PROJECT_CONTEXT, and PHASE_PLAN with the strategy/provenance boundary.
+
+### Tests
+
+- Focused configuration, repository, and web UI suite: **112 passed**.
+- Full non-staging suite: **556 passed, 4 staging deselected** in 227.62 seconds.
+- `python -m ruff check src tests`: **PASS**.
+- `python -m mypy src`: **PASS** (strict, 77 source files).
+- `git diff --check`: **PASS**.
+
+Coverage added for both fresh setup selections; strategy and browser-backend
+provenance; restart/default-change immunity; legacy migration; Stop & Reset followed
+by a different selection; unchanged browser monitor dispatch; Manual Open and
+pause/resume under both strategies; and unknown-value rejection.
+
+### Staging
+
+**NOT RUN.** No authorised Queue-it staging traffic was sent. Local tests do not prove
+Queue-it visitor-status behavior.
+
+### Decisions
+
+- Browser backend and monitoring strategy are independent immutable run dimensions.
+- “Headed Window Strategy” retains the existing automatic implementation and does not
+  force automatic checks to become visibly headed. Manual Open remains the explicitly
+  headed operator window.
+- Direct Monitoring Strategy is configuration/UI/provenance plus browser fallback in
+  Prompt 1. No request replay, traffic discovery, or undocumented URL construction was
+  added.
+- Queue ID remains authoritative. Strategy selection never migrates, replaces, or
+  reacquires an existing identity.
+- Patchright remains the default backend, Chrome the supported fallback, and Camoufox
+  retained under the Phase 7 experimental/uncertified policy.
+
+### Known Issues
+
+- Direct visitor-status checking is not implemented yet; Direct Monitoring Strategy
+  currently performs the same browser-backed automatic checks as Headed Window
+  Strategy.
+- The existing Starlette `httpx` TestClient deprecation warning remains.
+- Queue-it staging behavior remains UNKNOWN.
+
+### Next Task
+
+Phase 8 Prompt 2 — Browser-Observed Visitor Status Discovery.

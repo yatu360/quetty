@@ -29,6 +29,7 @@ from queue_load_test.metrics.logging import log_event
 from queue_load_test.models import (
     BrowserBackendName,
     BrowserRuntimeState,
+    MonitoringStrategy,
     QueueStatus,
     RunConfig,
     SessionSummaryPage,
@@ -167,6 +168,8 @@ def create_app(
                 "target_url": "",
                 "requested_sessions": "",
                 "browser_backend": settings.browser_backend.value,
+                "monitoring_strategies": tuple(MonitoringStrategy),
+                "selected_monitoring_strategy": settings.monitoring_strategy.value,
             },
         )
 
@@ -179,6 +182,9 @@ def create_app(
         form = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
         raw_url = form.get("target_url", [""])[0].strip()
         raw_count = form.get("requested_sessions", [""])[0].strip()
+        raw_strategy = form.get(
+            "monitoring_strategy", [settings.monitoring_strategy.value]
+        )[0].strip()
         error: str | None = None
         try:
             validated_url = TypeAdapter(HttpUrl).validate_python(raw_url)
@@ -200,6 +206,11 @@ def create_app(
                 f"Requested sessions cannot exceed the configured safety limit of "
                 f"{settings.max_manual_requested_sessions}."
             )
+        try:
+            monitoring_strategy = MonitoringStrategy.parse(raw_strategy)
+        except ValueError:
+            monitoring_strategy = settings.monitoring_strategy
+            error = error or "Select a valid monitoring strategy."
         if error is not None:
             return templates.TemplateResponse(
                 request,
@@ -209,6 +220,8 @@ def create_app(
                     "target_url": raw_url,
                     "requested_sessions": raw_count,
                     "browser_backend": settings.browser_backend.value,
+                    "monitoring_strategies": tuple(MonitoringStrategy),
+                    "selected_monitoring_strategy": raw_strategy,
                 },
                 status_code=422,
             )
@@ -232,6 +245,8 @@ def create_app(
                         "target_url": raw_url,
                         "requested_sessions": raw_count,
                         "browser_backend": settings.browser_backend.value,
+                        "monitoring_strategies": tuple(MonitoringStrategy),
+                        "selected_monitoring_strategy": monitoring_strategy.value,
                     },
                     status_code=503,
                 )
@@ -261,6 +276,8 @@ def create_app(
                         "target_url": raw_url,
                         "requested_sessions": raw_count,
                         "browser_backend": settings.browser_backend.value,
+                        "monitoring_strategies": tuple(MonitoringStrategy),
+                        "selected_monitoring_strategy": monitoring_strategy.value,
                     },
                     status_code=503,
                 )
@@ -271,6 +288,7 @@ def create_app(
             requested_sessions=requested_sessions,
             created_at=datetime.now(UTC),
             browser_backend=settings.browser_backend,
+            monitoring_strategy=monitoring_strategy,
             browser_build=(
                 CAMOUFOX_BROWSER_VERSION
                 if settings.browser_backend is BrowserBackendName.CAMOUFOX
@@ -292,6 +310,8 @@ def create_app(
                     "target_url": raw_url,
                     "requested_sessions": raw_count,
                     "browser_backend": settings.browser_backend.value,
+                    "monitoring_strategies": tuple(MonitoringStrategy),
+                    "selected_monitoring_strategy": monitoring_strategy.value,
                 },
                 status_code=409,
             )

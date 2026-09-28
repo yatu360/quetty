@@ -1,5 +1,7 @@
 """Persisted operator run and dashboard-only view models."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -22,6 +24,31 @@ class BrowserRuntimeState(StrEnum):
     OPEN_IN_CHROME = "OPEN_IN_CHROME"
 
 
+class MonitoringStrategy(StrEnum):
+    """Immutable run-level automatic-monitoring strategy."""
+
+    HEADED_WINDOW = "headed_window"
+    DIRECT = "direct"
+
+    @classmethod
+    def parse(cls, value: str | MonitoringStrategy) -> MonitoringStrategy:
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value.strip().lower())
+        except ValueError as exc:
+            supported = ", ".join(strategy.value for strategy in cls)
+            raise ValueError(
+                f"Unknown monitoring strategy {value!r}; expected one of: {supported}"
+            ) from exc
+
+    @property
+    def label(self) -> str:
+        if self is MonitoringStrategy.HEADED_WINDOW:
+            return "Headed Window Strategy"
+        return "Direct Monitoring Strategy"
+
+
 @dataclass(frozen=True, slots=True)
 class RunConfig:
     run_id: str
@@ -29,6 +56,7 @@ class RunConfig:
     requested_sessions: int
     created_at: datetime
     browser_backend: BrowserBackendName = BrowserBackendName.CHROME
+    monitoring_strategy: MonitoringStrategy = MonitoringStrategy.HEADED_WINDOW
     # Browser build provenance at run creation: pinned for Camoufox, observed installed
     # Chrome for Patchright, and NULL for standard Chrome and legacy runs.
     browser_build: str | None = None

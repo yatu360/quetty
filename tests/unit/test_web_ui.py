@@ -3,7 +3,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +14,7 @@ from queue_load_test.config import Settings
 from queue_load_test.models import (
     BrowserBackendName,
     BrowserRuntimeState,
+    MonitoringStrategy,
     QueueProgress,
     QueueSession,
     QueueStatus,
@@ -28,7 +29,11 @@ from queue_load_test.web.actions import (
     OperatorActionStatus,
 )
 from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
-from queue_load_test.web.service import RuntimeCapacity, browser_build_label
+from queue_load_test.web.service import (
+    RuntimeCapacity,
+    _automatic_monitor_for_strategy,
+    browser_build_label,
+)
 
 
 class FakeRuntime:
@@ -958,4 +963,226 @@ def test_browser_build_label_never_hides_a_changed_pinned_build() -> None:
     assert "not recorded" in browser_build_label(run(BrowserBackendName.CAMOUFOX, None))
     assert "153.0 via Patchright" == browser_build_label(
         run(BrowserBackendName.PATCHRIGHT, "153.0")
+    )
+
+
+@pytest.mark.parametrize("strategy", tuple(MonitoringStrategy))
+@pytest.mark.parametrize("backend", tuple(BrowserBackendName))
+def test_setup_persists_each_monitoring_strategy_independently_of_browser_backend(
+    tmp_path: Path,
+    strategy: MonitoringStrategy,
+    backend: BrowserBackendName,
+) -> None:
+    database = tmp_path / f"{strategy.value}-{backend.value}.sqlite3"
+    runtime = FakeRuntime()
+    configured = settings(database).model_copy(update={"browser_backend": backend})
+    app = create_app(
+        settings=configured,
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+    )
+
+    with TestClient(app) as client:
+        setup = client.get("/setup")
+        assert "Headed Window Strategy" in setup.text
+        assert "Direct Monitoring Strategy" in setup.text
+        assert "do not enter the Queue-it" in setup.text
+        response = client.post(
+            "/setup",
+            data={
+                "target_url": "https://staging.example.test/",
+                "requested_sessions": "2",
+                "monitoring_strategy": strategy.value,
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        dashboard = client.get("/dashboard")
+        assert strategy.label in dashboard.text
+
+    assert len(runtime.started) == 1
+    assert runtime.started[0].monitoring_strategy is strategy
+    assert runtime.started[0].browser_backend is backend
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT monitoring_strategy, browser_backend FROM run_config"
+        ).fetchone()
+    assert row == (strategy.value, backend.value)
+
+
+def test_restart_uses_persisted_strategy_when_environment_default_changes(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "strategy-restart.sqlite3"
+    first_runtime = FakeRuntime()
+    first_settings = settings(database).model_copy(
+        update={
+            "browser_backend": BrowserBackendName.CHROME,
+            "monitoring_strategy": MonitoringStrategy.HEADED_WINDOW,
+        }
+    )
+    with TestClient(
+        create_app(
+            settings=first_settings,
+            repository=SQLiteSessionRepository(database),
+            runtime=first_runtime,
+        )
+    ) as client:
+        assert client.post(
+            "/setup",
+            data={
+                "target_url": "https://staging.example.test/",
+                "requested_sessions": "1",
+                "monitoring_strategy": "direct",
+            },
+            follow_redirects=False,
+        ).status_code == 303
+
+    restarted_runtime = FakeRuntime()
+    changed_defaults = settings(database).model_copy(
+        update={
+            "browser_backend": BrowserBackendName.PATCHRIGHT,
+            "monitoring_strategy": MonitoringStrategy.HEADED_WINDOW,
+        }
+    )
+    with TestClient(
+        create_app(
+            settings=changed_defaults,
+            repository=SQLiteSessionRepository(database),
+            runtime=restarted_runtime,
+        )
+    ):
+        pass
+
+    assert len(restarted_runtime.started) == 1
+    assert restarted_runtime.started[0].monitoring_strategy is MonitoringStrategy.DIRECT
+    assert restarted_runtime.started[0].browser_backend is BrowserBackendName.CHROME
+
+
+def test_stop_and_reset_allows_a_different_monitoring_strategy(tmp_path: Path) -> None:
+    database = tmp_path / "strategy-reset.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(repository)
+    app = create_app(
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.CHROME}
+        ),
+        repository=repository,
+        runtime=runtime,
+    )
+    setup_base = {
+        "target_url": "https://staging.example.test/",
+        "requested_sessions": "1",
+    }
+
+    with TestClient(app) as client:
+        assert client.post(
+            "/setup",
+            data={**setup_base, "monitoring_strategy": "headed_window"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post("/run/reset", follow_redirects=False).status_code == 303
+        assert client.post(
+            "/setup",
+            data={**setup_base, "monitoring_strategy": "direct"},
+            follow_redirects=False,
+        ).status_code == 303
+
+    assert [run.monitoring_strategy for run in runtime.started] == [
+        MonitoringStrategy.HEADED_WINDOW,
+        MonitoringStrategy.DIRECT,
+    ]
+
+
+@pytest.mark.parametrize("strategy", tuple(MonitoringStrategy))
+def test_manual_open_and_pause_resume_remain_available_for_each_strategy(
+    tmp_path: Path,
+    strategy: MonitoringStrategy,
+) -> None:
+    database = tmp_path / f"controls-{strategy.value}.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime(repository)
+    app = create_app(
+        settings=settings(database).model_copy(
+            update={"browser_backend": BrowserBackendName.CHROME}
+        ),
+        repository=repository,
+        runtime=runtime,
+    )
+
+    with TestClient(app) as client:
+        assert client.post(
+            "/setup",
+            data={
+                "target_url": "https://staging.example.test/",
+                "requested_sessions": "1",
+                "monitoring_strategy": strategy.value,
+            },
+            follow_redirects=False,
+        ).status_code == 303
+        asyncio.run(
+            repository.create(
+                QueueSession(
+                    session_id="session-1",
+                    queue_id="queue-1",
+                    transfer_url="https://secret.invalid/transfer",
+                    mode=SessionMode.HYBRID,
+                    status=QueueStatus.PARKED,
+                    state_path=Path("state.json"),
+                )
+            )
+        )
+        assert client.post("/sessions/session-1/open").status_code == 200
+        assert client.post("/monitoring/pause").status_code == 200
+        assert asyncio.run(repository.is_monitoring_paused())
+        assert client.post("/monitoring/resume").status_code == 200
+        assert not asyncio.run(repository.is_monitoring_paused())
+
+    assert runtime.open_calls == ["session-1"]
+    assert runtime.pause_calls == 1
+    assert runtime.resume_calls == 1
+
+
+def test_setup_rejects_unknown_monitoring_strategy_without_persisting(tmp_path: Path) -> None:
+    database = tmp_path / "unknown-strategy.sqlite3"
+    runtime = FakeRuntime()
+    app = create_app(
+        settings=settings(database),
+        repository=SQLiteSessionRepository(database),
+        runtime=runtime,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/setup",
+            data={
+                "target_url": "https://staging.example.test/",
+                "requested_sessions": "1",
+                "monitoring_strategy": "unknown",
+            },
+        )
+
+    assert response.status_code == 422
+    assert "valid monitoring strategy" in response.text
+    assert runtime.started == []
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM run_config").fetchone()[0] == 0
+
+
+def test_phase8_strategy_boundary_keeps_existing_browser_monitor_path() -> None:
+    browser_monitor = cast(Any, object())
+
+    assert (
+        _automatic_monitor_for_strategy(
+            MonitoringStrategy.HEADED_WINDOW,
+            browser_monitor=browser_monitor,
+        )
+        is browser_monitor
+    )
+    assert (
+        _automatic_monitor_for_strategy(
+            MonitoringStrategy.DIRECT,
+            browser_monitor=browser_monitor,
+        )
+        is browser_monitor
     )

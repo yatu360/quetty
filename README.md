@@ -107,6 +107,23 @@ continuity is neither available in 0.5.6 nor required, and no fingerprint data i
 persisted. No backend adds proxy rotation, CAPTCHA solving, WAF-specific
 behavior, or traffic interception.
 
+### Monitoring strategy
+
+First-run setup persists an immutable strategy independently from the browser backend:
+
+- **Headed Window Strategy** (`headed_window`) is the existing automatic restore,
+  live-page inspection, persistence, and park path. The name does not change automatic
+  `HEADLESS` behavior; Manual Open remains the explicit headed operator window.
+- **Direct Monitoring Strategy** (`direct`) is a Phase 8 run-provenance choice for
+  browser-established sessions with direct visitor-status checking where available and
+  browser fallback. In Prompt 1 it uses the existing browser fallback for every check;
+  no direct Queue-it request is implemented yet.
+
+`MONITORING_STRATEGY` controls only the default selected for a new setup. Existing runs
+restart with `run_config.monitoring_strategy`; changing the environment cannot migrate
+them. Legacy runs use `headed_window`, and switching requires Stop & Reset Run. See
+`docs/phase8_monitoring_strategy.md`.
+
 Camoufox 0.5.6 runs one live context per managed process. This means:
 - automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4; the name is
   historical and applies to every backend);
