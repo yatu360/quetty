@@ -813,11 +813,26 @@ browser-observed behavior; undocumented URL construction is out of scope.
    - No direct request replay or undocumented Queue-it URL was implemented. Staging is
      **NOT RUN / UNKNOWN**.
 
-2. **Browser-Observed Visitor Status Discovery** — next task.
-   - Observe and document only the visitor page's own supported request behavior in an
-     authorised environment.
-   - Do not infer or manually construct undocumented endpoints.
-   - Preserve browser fallback, Queue ID authority, and all bounded ownership rules.
+2. **Browser-Observed Visitor Status Discovery** — **completed on 2026-09-29**
+   (`docs/phase8_status_discovery.md`).
+   - Added an opt-in page-level observer around the existing Direct-strategy browser
+     fallback. Session creation and Headed Window Strategy are unchanged.
+   - Capture is bounded by exchange/body/event limits and records request/response,
+     redirect, cookies, timing/cadence, genuinely observed identifiers, and correlation
+     with the same page's DOM state in protected local evidence only.
+   - Raw artifacts are mode 0600 beneath a mode-0700 git-ignored directory. Normal
+     logging contains sanitized classifications/counts; no raw data reaches metrics,
+     dashboard, SQLite, or aggregate reports.
+   - Chrome and Patchright passed the observation seam against a local non-Queue-it
+     fixture. Queue-it staging was **NOT RUN**, so every vendor-protocol evidence
+     question remains **UNKNOWN**.
+   - No status URL/path/method/body was assumed, constructed, or replayed. Historical
+     2025 Glastonbury JavaScript remains a clue only.
+
+3. **Direct Request Replay and State Sufficiency Experiment** — next task.
+   - Requires genuine browser-observed authorised evidence from Prompt 2 capture.
+   - Keep replay experimental and separate from production monitoring until browser
+     state, cookies, rotating values, admission behavior, and fallback safety are proven.
 
 ## Scaling Gates
 

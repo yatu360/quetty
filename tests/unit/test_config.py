@@ -256,6 +256,34 @@ def test_monitoring_strategy_parsing_and_validation() -> None:
         Settings(**settings_kwargs(MONITORING_STRATEGY="invented"))
 
 
+def test_status_discovery_is_opt_in_bounded_and_authorized_scope_is_gated() -> None:
+    defaults = Settings(**settings_kwargs())
+    assert not defaults.status_discovery_enabled
+    assert defaults.status_discovery_max_exchanges == 100
+    assert defaults.status_discovery_event_queue_capacity == 100
+    assert defaults.status_discovery_observe_seconds == 30.0
+
+    with pytest.raises(ValidationError, match="CONFIRM_AUTHORIZED_STAGING"):
+        Settings(
+            **settings_kwargs(
+                STATUS_DISCOVERY_ENABLED=True,
+                STATUS_DISCOVERY_SCOPE="authorized_queue_it_staging",
+            )
+        )
+
+    enabled = Settings(
+        **settings_kwargs(
+            STATUS_DISCOVERY_ENABLED=True,
+            STATUS_DISCOVERY_SCOPE="authorized_queue_it_staging",
+            STATUS_DISCOVERY_CONFIRM_AUTHORIZED_STAGING=True,
+        )
+    )
+    assert enabled.status_discovery_confirm_authorized_staging
+
+    with pytest.raises(ValidationError, match="STATUS_DISCOVERY_SCOPE"):
+        Settings(**settings_kwargs(STATUS_DISCOVERY_SCOPE="fabricated"))
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

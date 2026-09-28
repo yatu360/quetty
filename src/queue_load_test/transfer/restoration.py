@@ -18,7 +18,13 @@ from queue_load_test.browser.manager import ContextStorageState
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
-from queue_load_test.models import BrowserBackendName, QueueProgress, QueueSession, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    QueueProgress,
+    QueueSession,
+    SessionMode,
+    evaluate_queue_status,
+)
 from queue_load_test.queue_monitor import (
     AdmissionDetector,
     QueueItLiveStateExtractor,
@@ -31,6 +37,10 @@ from queue_load_test.state import (
     StateStore,
     StateStoreError,
     StateUnreadableError,
+)
+from queue_load_test.status_discovery import (
+    DiscoveryDomSnapshot,
+    StatusDiscoveryFactoryProtocol,
 )
 from queue_load_test.transfer.extractor import (
     QueueItTransferExtractor,
@@ -162,6 +172,7 @@ class QueueSessionRestorer:
         observability: PrometheusMetrics | None = None,
         attempt_timeout_seconds: float | None = None,
         browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
+        status_discovery_factory: StatusDiscoveryFactoryProtocol | None = None,
     ) -> None:
         if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
             raise ValueError("attempt_timeout_seconds must be positive")
@@ -189,6 +200,7 @@ class QueueSessionRestorer:
         self._sleep = sleep
         self._observability = observability
         self._browser_backend = BrowserBackendName.parse(browser_backend)
+        self._status_discovery_factory = status_discovery_factory
         # Bound the whole attempt: some Playwright calls (for example new_page after
         # the Chrome process is killed) never settle and have no timeout of their own.
         self._attempt_timeout_seconds = attempt_timeout_seconds or (
@@ -884,90 +896,30 @@ class QueueSessionRestorer:
         try:
             async with self._browser_manager.context(storage_state=storage_state) as context:
                 page = await context.new_page()
-                navigation_url = (
-                    self._storage_navigation_url or session.transfer_url
-                    if method is RestoreMethod.STORAGE_STATE
-                    else session.transfer_url
+                factory = self._status_discovery_factory
+                if factory is None:
+                    return await self._inspect_browser_page(
+                        context,
+                        page,
+                        session,
+                        method=method,
+                        refresh_state=refresh_state,
+                    )
+                observation = factory.create(
+                    page=page,
+                    context=context,
+                    session_id=session.session_id,
+                    expected_queue_id=session.queue_id,
+                    dom_snapshot_provider=lambda: self._discovery_dom_snapshot(page, session),
                 )
-                navigation_started = time.perf_counter()
-                try:
-                    response = await page.goto(
-                        navigation_url,
-                        wait_until="domcontentloaded",
-                        timeout=self._navigation_timeout_ms,
-                    )
-                    self._browser_manager.report_navigation(context, responsive=True)
-                except BROWSER_TIMEOUT_ERROR_TYPES:
-                    self._browser_manager.report_navigation(context, responsive=False)
-                    if self._observability is not None:
-                        self._observability.record_navigation_failure(timed_out=True)
-                    failure = (
-                        RestoreFailure.STATE_CONTEXT_FAILED
-                        if method is RestoreMethod.STORAGE_STATE
-                        else RestoreFailure.NAVIGATION_FAILED
-                    )
-                    return RestoreAttempt(method=method, success=False, failure=failure)
-                except Exception:  # noqa: BLE001 - browser adapter boundary
-                    if self._observability is not None:
-                        self._observability.record_navigation_failure()
-                    failure = (
-                        RestoreFailure.STATE_CONTEXT_FAILED
-                        if method is RestoreMethod.STORAGE_STATE
-                        else RestoreFailure.NAVIGATION_FAILED
-                    )
-                    return RestoreAttempt(method=method, success=False, failure=failure)
-                finally:
-                    if self._observability is not None:
-                        self._observability.record_navigation_duration(
-                            time.perf_counter() - navigation_started
-                        )
-                if response is not None and response.status == 410:
-                    if self._observability is not None:
-                        self._observability.record_navigation_failure()
-                    return RestoreAttempt(
+                async with observation:
+                    return await self._inspect_browser_page(
+                        context,
+                        page,
+                        session,
                         method=method,
-                        success=False,
-                        failure=RestoreFailure.SESSION_EXPIRED,
-                        expired=True,
+                        refresh_state=refresh_state,
                     )
-                if response is not None and response.status >= 400:
-                    if self._observability is not None:
-                        self._observability.record_navigation_failure()
-                    failure = (
-                        RestoreFailure.HTTP_FAILURE
-                        if response.status >= 500 or response.status in {408, 429}
-                        else RestoreFailure.INVALID_TRANSFER_URL
-                    )
-                    return RestoreAttempt(
-                        method=method,
-                        success=False,
-                        failure=failure,
-                    )
-                if self._admission_detector is not None and await self._admission_detector.detect(
-                    page
-                ):
-                    return RestoreAttempt(
-                        method=method,
-                        success=True,
-                        identity_match=True,
-                        admitted=True,
-                    )
-                attempt = await self._observe(page, session, method)
-                if attempt.success and session.mode is SessionMode.HYBRID and refresh_state:
-                    try:
-                        state = cast(BrowserState, await context.storage_state())
-                        session.state_path = await self._state_store.save(
-                            session.session_id,
-                            state,
-                        )
-                    except Exception:  # noqa: BLE001
-                        return replace(
-                            attempt,
-                            success=False,
-                            failure=RestoreFailure.STATE_REFRESH_FAILED,
-                        )
-                    return replace(attempt, state_refreshed=True)
-                return attempt
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
         except BROWSER_TIMEOUT_ERROR_TYPES:
@@ -984,6 +936,123 @@ class QueueSessionRestorer:
                 else RestoreFailure.NAVIGATION_FAILED
             )
             return RestoreAttempt(method=method, success=False, failure=failure)
+
+    async def _inspect_browser_page(
+        self,
+        context: BrowserContext,
+        page: Page,
+        session: QueueSession,
+        *,
+        method: RestoreMethod,
+        refresh_state: bool,
+    ) -> RestoreAttempt:
+        """Run the existing browser restore path, optionally surrounded by observation."""
+
+        navigation_url = (
+            self._storage_navigation_url or session.transfer_url
+            if method is RestoreMethod.STORAGE_STATE
+            else session.transfer_url
+        )
+        navigation_started = time.perf_counter()
+        try:
+            response = await page.goto(
+                navigation_url,
+                wait_until="domcontentloaded",
+                timeout=self._navigation_timeout_ms,
+            )
+            self._browser_manager.report_navigation(context, responsive=True)
+        except BROWSER_TIMEOUT_ERROR_TYPES:
+            self._browser_manager.report_navigation(context, responsive=False)
+            if self._observability is not None:
+                self._observability.record_navigation_failure(timed_out=True)
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
+        except Exception:  # noqa: BLE001 - browser adapter boundary
+            if self._observability is not None:
+                self._observability.record_navigation_failure()
+            failure = (
+                RestoreFailure.STATE_CONTEXT_FAILED
+                if method is RestoreMethod.STORAGE_STATE
+                else RestoreFailure.NAVIGATION_FAILED
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
+        finally:
+            if self._observability is not None:
+                self._observability.record_navigation_duration(
+                    time.perf_counter() - navigation_started
+                )
+        if response is not None and response.status == 410:
+            if self._observability is not None:
+                self._observability.record_navigation_failure()
+            return RestoreAttempt(
+                method=method,
+                success=False,
+                failure=RestoreFailure.SESSION_EXPIRED,
+                expired=True,
+            )
+        if response is not None and response.status >= 400:
+            if self._observability is not None:
+                self._observability.record_navigation_failure()
+            failure = (
+                RestoreFailure.HTTP_FAILURE
+                if response.status >= 500 or response.status in {408, 429}
+                else RestoreFailure.INVALID_TRANSFER_URL
+            )
+            return RestoreAttempt(method=method, success=False, failure=failure)
+        if self._admission_detector is not None and await self._admission_detector.detect(page):
+            return RestoreAttempt(
+                method=method,
+                success=True,
+                identity_match=True,
+                admitted=True,
+            )
+        attempt = await self._observe(page, session, method)
+        if attempt.success and session.mode is SessionMode.HYBRID and refresh_state:
+            try:
+                state = cast(BrowserState, await context.storage_state())
+                session.state_path = await self._state_store.save(
+                    session.session_id,
+                    state,
+                )
+            except Exception:  # noqa: BLE001
+                return replace(
+                    attempt,
+                    success=False,
+                    failure=RestoreFailure.STATE_REFRESH_FAILED,
+                )
+            return replace(attempt, state_refreshed=True)
+        return attempt
+
+    async def _discovery_dom_snapshot(
+        self,
+        page: Page,
+        session: QueueSession,
+    ) -> DiscoveryDomSnapshot:
+        progress = await self._live_extractor.extract(page, session_id=session.session_id)
+        lifecycle = evaluate_queue_status(progress).value
+        return DiscoveryDomSnapshot(
+            observed_at=datetime.now(UTC).isoformat(),
+            page_url=page.url,
+            lifecycle_status=lifecycle,
+            queue_number=progress.queue_number,
+            users_ahead=progress.users_ahead,
+            progress_percentage=progress.progress_percentage,
+            estimated_wait_text=progress.estimated_wait_text,
+            expected_service_time=(
+                progress.expected_service_time.isoformat()
+                if progress.expected_service_time is not None
+                else None
+            ),
+            queue_paused=progress.queue_paused,
+            serviced_soon=progress.serviced_soon,
+            turn_started=progress.turn_started,
+            pre_queue=progress.pre_queue,
+            active_queue=progress.active_queue,
+        )
 
     async def _observe(
         self,

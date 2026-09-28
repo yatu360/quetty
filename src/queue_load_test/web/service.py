@@ -35,6 +35,7 @@ from queue_load_test.scheduler import (
     SessionCreationController,
 )
 from queue_load_test.state import FileSystemStateStore
+from queue_load_test.status_discovery import StatusDiscoveryFactory
 from queue_load_test.transfer import QueueSessionRestorer
 from queue_load_test.web.actions import (
     OperatorAction,
@@ -61,6 +62,28 @@ def _automatic_monitor_for_strategy(
     if strategy in (MonitoringStrategy.HEADED_WINDOW, MonitoringStrategy.DIRECT):
         return browser_monitor
     raise ValueError(f"Unsupported monitoring strategy: {strategy!r}")
+
+
+def _status_discovery_for_run(
+    run: RunConfig,
+    settings: Settings,
+) -> StatusDiscoveryFactory | None:
+    """Enable sensitive evidence only for an explicitly opted-in Direct run."""
+
+    if (
+        run.monitoring_strategy is not MonitoringStrategy.DIRECT
+        or not settings.status_discovery_enabled
+    ):
+        return None
+    return StatusDiscoveryFactory(
+        evidence_directory=settings.status_discovery_directory,
+        scope=settings.status_discovery_scope,
+        max_exchanges=settings.status_discovery_max_exchanges,
+        max_body_bytes=settings.status_discovery_max_body_bytes,
+        event_queue_capacity=settings.status_discovery_event_queue_capacity,
+        cleanup_timeout_seconds=settings.status_discovery_cleanup_timeout_seconds,
+        observe_seconds=settings.status_discovery_observe_seconds,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +190,7 @@ class ApplicationRunRuntime:
                 shared_capacity=shared_capacity,
             )
             target_url = str(validated_url)
+            status_discovery = _status_discovery_for_run(run, settings)
             # Acquisition (setup, Add, Replace) may use its own visible browser while
             # monitoring stays headless. The creator closes its context once the
             # Queue ID is persisted, so a session never moves between live browsers.
@@ -213,6 +237,7 @@ class ApplicationRunRuntime:
                 admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
                 observability=metrics,
                 browser_backend=run.browser_backend,
+                status_discovery_factory=status_discovery,
             )
             monitor = QueueSessionMonitor(
                 repository=self._repository,

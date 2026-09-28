@@ -32,6 +32,7 @@ from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
 from queue_load_test.web.service import (
     RuntimeCapacity,
     _automatic_monitor_for_strategy,
+    _status_discovery_for_run,
     browser_build_label,
 )
 
@@ -1185,4 +1186,39 @@ def test_phase8_strategy_boundary_keeps_existing_browser_monitor_path() -> None:
             browser_monitor=browser_monitor,
         )
         is browser_monitor
+    )
+
+
+def test_status_discovery_is_opt_in_for_direct_runs_and_never_changes_headed_runs(
+    tmp_path: Path,
+) -> None:
+    enabled = settings(tmp_path / "discovery.sqlite3").model_copy(
+        update={
+            "status_discovery_enabled": True,
+            "status_discovery_directory": tmp_path / "evidence",
+        }
+    )
+    headed = RunConfig(
+        run_id="headed",
+        target_url="https://staging.example.test/",
+        requested_sessions=1,
+        created_at=datetime.now(UTC),
+        monitoring_strategy=MonitoringStrategy.HEADED_WINDOW,
+    )
+    direct = RunConfig(
+        run_id="direct",
+        target_url="https://staging.example.test/",
+        requested_sessions=1,
+        created_at=datetime.now(UTC),
+        monitoring_strategy=MonitoringStrategy.DIRECT,
+    )
+
+    assert _status_discovery_for_run(headed, enabled) is None
+    assert _status_discovery_for_run(direct, enabled) is not None
+    assert (
+        _status_discovery_for_run(
+            direct,
+            enabled.model_copy(update={"status_discovery_enabled": False}),
+        )
+        is None
     )

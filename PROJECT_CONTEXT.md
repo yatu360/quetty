@@ -10,7 +10,7 @@ live monitoring.
 
 ## Current Status
 
-### Monitoring strategy policy (Phase 8 Prompt 1, 2026-09-29)
+### Monitoring strategy and discovery policy (Phase 8 Prompts 1–2, 2026-09-29)
 
 - Every run now persists one immutable monitoring strategy independently from its
   browser backend: `headed_window` (**Headed Window Strategy**) or `direct`
@@ -19,17 +19,21 @@ live monitoring.
   persisted backend, inspect the live page/DOM, persist, and park. Its operator-facing
   name does not force the automatic pool to become visibly headed; `HEADLESS` is
   unchanged and Manual Open remains the explicit headed window.
-- Direct Monitoring Strategy is configuration/UI/provenance only in Prompt 1. Its
-  strategy dispatch currently uses the existing browser monitor as fallback for every
-  check. No Queue-it status request is discovered, constructed, or called.
+- Direct Monitoring Strategy still uses the existing browser monitor for every check.
+  Prompt 2 adds an opt-in, bounded observer around that legitimate browser activity;
+  it does not construct, call, or replay a Queue-it status URL.
 - Setup selects and persists the strategy. Startup uses
   `run_config.monitoring_strategy`, never a changed environment default. Legacy runs
   migrate to `headed_window`; changing strategy requires Stop & Reset Run.
 - Queue IDs and session rows are not migrated or reacquired. Browser backend and
   monitoring strategy remain independent run dimensions. See
   `docs/phase8_monitoring_strategy.md`.
-- Staging is **NOT RUN / UNKNOWN**. Next: **Phase 8 Prompt 2 — Browser-Observed Visitor
-  Status Discovery**.
+- Raw discovery artifacts are mode-0600 files beneath a mode-0700, git-ignored local
+  directory and may contain credentials. Normal logs expose only sanitized
+  classification counts. Discovery data never enters SQLite, metrics, dashboard HTML,
+  or aggregate reports. See `docs/phase8_status_discovery.md`.
+- Queue-it staging is **NOT RUN / UNKNOWN**. Next: **Phase 8 Prompt 3 — Direct Request
+  Replay and State Sufficiency Experiment**.
 
 ### Browser backend policy (authoritative, Phase 7 accepted 2026-09-28)
 
@@ -618,6 +622,8 @@ close the context, release the lease, and park them again.
 - Adaptive per-session monitoring and bounded due-session scheduling with backlog,
   queue-depth, active-worker, claim, and lease-conflict telemetry:
   `src/queue_load_test/scheduler/monitoring.py`.
+- Opt-in, bounded browser-network discovery and protected raw evidence:
+  `src/queue_load_test/status_discovery/`.
 - Signal-aware shutdown coordination:
   `src/queue_load_test/runtime.py`.
 - Structured logging, Prometheus metrics, and text/HTTP status:
@@ -811,9 +817,12 @@ mismatch without replacing the expected ID.
 
 `RunConfig.monitoring_strategy` selects one immutable run-level automatic-monitoring
 strategy. `headed_window` is the existing browser restore/live-DOM path. `direct` is a
-Phase 8 boundary only and currently selects that same browser monitor as its fallback;
-no visitor-status request exists in the implementation yet. The scheduler, leases,
-pause gate, manual/operator paths, and browser-backend provenance are unchanged.
+Phase 8 boundary and currently selects that same browser monitor as its fallback. When
+explicitly enabled for a Direct run, a bounded page-level observer records protected
+diagnostic evidence from requests the visitor page actually makes and correlates JSON
+values with the final DOM extraction. It never supplies a monitoring result or replay.
+The scheduler, leases, pause gate, manual/operator paths, and backend provenance are
+unchanged.
 
 `ParkedSessionScheduler` selects only due, unleased, non-terminal sessions through the
 repository, claims at most the free space in a bounded `asyncio.Queue`, and feeds a
@@ -1147,6 +1156,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   persistence/distribution gates, and remaining unknowns.
 - `docs/phase8_monitoring_strategy.md` — Phase 8 strategy values, persistence/migration
   rules, setup/dashboard behavior, browser fallback boundary, and Prompt 2 handoff.
+- `docs/phase8_status_discovery.md` — protected network-observation mechanism,
+  historical-versus-observed boundary, evidence questions, and Prompt 3 gate.
 - `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
   lease-fencing audit, PostgreSQL deferral, and future `SKIP LOCKED` design.
 - `docs/phase4_state_storage_readiness.md` — 10,000-file local state results, state
@@ -1336,9 +1347,10 @@ python -m mypy src
 
 ## Next Task
 
-Phase 8 Prompt 1 is complete. Next: **Phase 8 Prompt 2 — Browser-Observed Visitor
-Status Discovery**. Authorised Queue-it staging validation of the Patchright default
-also remains open; never claim staging PASS without an authorised run.
+Phase 8 Prompt 2 is complete. Next: **Phase 8 Prompt 3 — Direct Request Replay and
+State Sufficiency Experiment**. No replay may begin without genuine browser-observed
+authorised evidence. Authorised Queue-it staging validation of Patchright also remains
+open; never claim staging PASS without an authorised run.
 
 ## Instructions for Future AI Sessions
 

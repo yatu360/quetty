@@ -2,7 +2,7 @@ import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Self, cast
 
 import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -34,9 +34,11 @@ class FakeResponse:
 class FakePage:
     def __init__(self) -> None:
         self.visited_urls: list[str] = []
+        self.url = "about:blank"
 
     async def goto(self, url: str, **_: object) -> FakeResponse:
         self.visited_urls.append(url)
+        self.url = url
         return FakeResponse()
 
 
@@ -141,6 +143,34 @@ class ScriptedTransferExtractor:
         return self.results.popleft()
 
 
+class FakeDiscoveryObservation:
+    def __init__(self, snapshot_provider: Any) -> None:
+        self.snapshot_provider = snapshot_provider
+        self.entered = False
+        self.exited = False
+        self.snapshot = None
+
+    async def __aenter__(self) -> Self:
+        self.entered = True
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.snapshot = await self.snapshot_provider()
+        self.exited = True
+
+
+class FakeDiscoveryFactory:
+    def __init__(self) -> None:
+        self.observations: list[FakeDiscoveryObservation] = []
+        self.sessions: list[tuple[str, str | None]] = []
+
+    def create(self, **kwargs: Any) -> FakeDiscoveryObservation:
+        self.sessions.append((kwargs["session_id"], kwargs["expected_queue_id"]))
+        observation = FakeDiscoveryObservation(kwargs["dom_snapshot_provider"])
+        self.observations.append(observation)
+        return observation
+
+
 def session(mode: SessionMode) -> QueueSession:
     return QueueSession(
         session_id="session-1",
@@ -158,6 +188,7 @@ async def setup_restorer(
     results: list[TransferExtractionResult],
     *,
     storage_navigation_url: str | None = None,
+    status_discovery_factory: Any | None = None,
 ) -> tuple[
     QueueSessionRestorer,
     QueueSession,
@@ -182,6 +213,7 @@ async def setup_restorer(
         terminal_state_detector=cast(Any, NoTerminalStateDetector()),
         transfer_extractor_factory=lambda _: transfer_extractor,
         observation_timeout_seconds=0,
+        status_discovery_factory=status_discovery_factory,
     )
     return (
         restorer,
@@ -273,6 +305,31 @@ async def test_transfer_only_restores_same_identity_and_progress(tmp_path: Path)
     assert persisted is not None
     assert persisted.queue_id == "queue-expected"
     assert persisted.last_error is None
+    await repository.close()
+
+
+async def test_opt_in_discovery_surrounds_existing_restore_and_correlates_dom(
+    tmp_path: Path,
+) -> None:
+    discovery = FakeDiscoveryFactory()
+    restorer, expected, repository, _, _, _ = await setup_restorer(
+        tmp_path,
+        SessionMode.TRANSFER_ONLY,
+        [matching_result()],
+        status_discovery_factory=discovery,
+    )
+
+    result = await restorer.restore(expected)
+
+    assert result.success
+    assert discovery.sessions == [("session-1", "queue-expected")]
+    assert len(discovery.observations) == 1
+    observation = discovery.observations[0]
+    assert observation.entered
+    assert observation.exited
+    assert observation.snapshot.lifecycle_status == "ACTIVE_QUEUE"
+    assert observation.snapshot.queue_number == "123"
+    assert expected.queue_id == "queue-expected"
     await repository.close()
 
 

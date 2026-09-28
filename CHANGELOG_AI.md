@@ -4761,3 +4761,89 @@ Queue-it visitor-status behavior.
 ### Next Task
 
 Phase 8 Prompt 2 — Browser-Observed Visitor Status Discovery.
+
+## 2026-09-29 — Phase 8 Prompt 2 — Browser-Observed Visitor Status Discovery
+
+### Goal
+
+Add a safe evidence mechanism that observes current visitor-side requests produced by
+a legitimate Queue-it browser page, without constructing an endpoint from historical
+knowledge or beginning production direct monitoring.
+
+### Changes
+
+- Added `status_discovery/`, a backend-neutral page/context observer above
+  `BrowserManager`. It captures bounded document/XHR/fetch request and response
+  evidence from the existing browser restore path.
+- Captured protected fields include exact/decomposed URL, method/resource type,
+  available request/response headers, bounded body and parsed JSON, status/content
+  type, redirects, Set-Cookie, context cookies, timing/cadence, named identifiers only
+  when observed, and value correlation with the same page's final DOM extraction.
+- Added fixed exchange/body/header/cookie/event limits, one fixed response worker,
+  listener detachment, deadline-bounded drain/cancellation, and an opt-in bounded dwell
+  so periodic page requests can occur before the context is parked.
+- Raw evidence is written atomically to mode-0600 files beneath a mode-0700 directory.
+  The default `.status-discovery/` is root-ignored and every evidence directory gets an
+  ignore-all marker, including a custom location.
+- Normal logging exposes only fixed event names, sanitized classification counts, and
+  totals. Raw URLs, headers, bodies, cookies, identifiers, session IDs, and evidence
+  paths do not enter logs, metrics, SQLite, dashboard HTML, or aggregate reports.
+- Discovery is disabled by default and is assembled only for a persisted Direct
+  Monitoring Strategy run with `STATUS_DISCOVERY_ENABLED=true`. Headed runs and normal
+  creation never receive the observer. Direct monitoring still uses the existing
+  browser monitor.
+- Added an explicit `authorized_queue_it_staging` scope gate requiring
+  `STATUS_DISCOVERY_CONFIRM_AUTHORIZED_STAGING=true`; no such run was performed.
+- Added `docs/phase8_status_discovery.md` and updated configuration examples, README,
+  PROJECT_CONTEXT, and PHASE_PLAN.
+
+### Tests
+
+- Focused discovery, configuration, restoration, UI, and backend suite:
+  **115 passed**.
+- Full non-staging suite: **566 passed, 4 staging deselected** in 228.24 seconds.
+- `python -m ruff check src tests`: **PASS**.
+- `python -m mypy src`: **PASS** (strict, 79 source files).
+- `git diff --check`: **PASS**.
+
+Coverage includes request/response and parsed JSON capture; redirect chains; query and
+body values; changing cookies; DOM/response correlation; fixed capture/event bounds;
+oversize/unknown-length response suppression; cancellation and cleanup; protected file
+permissions and ignore markers; sensitive-value suppression from normal structured
+logs; discovery opt-in/direct-only selection; existing restore identity behavior; and
+real installed Chrome/Patchright observation seams against a local non-Queue-it page.
+
+### Staging
+
+**NOT RUN.** No authorised Queue-it target or credentials were supplied and no Queue-it
+traffic was sent. All requested visitor-protocol findings are **UNKNOWN**. The local
+fixture result is mechanism evidence only.
+
+### Decisions
+
+- Browser traffic actually emitted by the visitor page is the only prospective source
+  of truth. No path—including `/queue` or `/spa-api`—method, body, or identifier
+  position is assumed.
+- The saved 2025 Glastonbury JavaScript is documented separately as a historical clue;
+  it did not influence URL construction or classification.
+- Discovery remains diagnostic and opt-in. It cannot supply a monitoring outcome or
+  change persisted identity/progress.
+- Response bodies without a safe declared size are not loaded because Playwright's
+  body API buffers the complete body before truncation.
+- A 30-second diagnostic dwell is the default only after opt-in, because normal
+  identity verification can otherwise park the page before a periodic request occurs.
+  It remains within normal browser capacity and is bounded to 300 seconds.
+- Queue ID remains authoritative and identifiers such as customer ID, event ID, Queue
+  ID, and token identifier are recorded distinctly only when genuinely observed.
+
+### Known Issues
+
+- No genuine Queue-it request was observed; all endpoint, identifier, cadence, cookie,
+  rotation, progress, redirect, admission, and replay-safety questions remain UNKNOWN.
+- Single-artifact analysis cannot establish event-stable versus session-specific values
+  across sessions; that requires authorised comparative evidence.
+- The existing Starlette `httpx` TestClient deprecation warning remains.
+
+### Next Task
+
+Phase 8 Prompt 3 — Direct Request Replay and State Sufficiency Experiment.

@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .browser-state/
+.status-discovery/
 .phase4-browser-state/
 *.sqlite3
 *.sqlite3-shm

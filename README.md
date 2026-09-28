@@ -124,6 +124,16 @@ restart with `run_config.monitoring_strategy`; changing the environment cannot m
 them. Legacy runs use `headed_window`, and switching requires Stop & Reset Run. See
 `docs/phase8_monitoring_strategy.md`.
 
+Direct runs can opt into Prompt 2 browser-network evidence with
+`STATUS_DISCOVERY_ENABLED=true`. This does not enable direct monitoring: it surrounds
+the existing browser restore with a bounded observer and writes raw, potentially
+sensitive evidence to `.status-discovery/`. The directory and every artifact are
+permission-restricted and the directory contains its own ignore-all `.gitignore`.
+Never copy these artifacts into reports or commits. An authorised staging scope also
+requires `STATUS_DISCOVERY_CONFIRM_AUTHORIZED_STAGING=true`. See
+`docs/phase8_status_discovery.md` for limits and the current all-UNKNOWN Queue-it
+findings.
+
 Camoufox 0.5.6 runs one live context per managed process. This means:
 - automatic concurrency is bounded by `CHROME_PROCESS_COUNT` (at most 4; the name is
   historical and applies to every backend);

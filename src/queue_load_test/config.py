@@ -31,6 +31,53 @@ class Settings(BaseSettings):
         default=MonitoringStrategy.HEADED_WINDOW,
         alias="MONITORING_STRATEGY",
     )
+    # Sensitive browser-network discovery is opt-in and writes only to a dedicated,
+    # git-ignored local evidence directory. It never changes the monitoring path.
+    status_discovery_enabled: bool = Field(
+        default=False,
+        alias="STATUS_DISCOVERY_ENABLED",
+    )
+    status_discovery_directory: Path = Field(
+        default=Path(".status-discovery"),
+        alias="STATUS_DISCOVERY_DIRECTORY",
+    )
+    status_discovery_scope: str = Field(
+        default="diagnostic_unverified_target",
+        alias="STATUS_DISCOVERY_SCOPE",
+    )
+    status_discovery_confirm_authorized_staging: bool = Field(
+        default=False,
+        alias="STATUS_DISCOVERY_CONFIRM_AUTHORIZED_STAGING",
+    )
+    status_discovery_max_exchanges: int = Field(
+        default=100,
+        alias="STATUS_DISCOVERY_MAX_EXCHANGES",
+        ge=1,
+        le=1_000,
+    )
+    status_discovery_max_body_bytes: int = Field(
+        default=65_536,
+        alias="STATUS_DISCOVERY_MAX_BODY_BYTES",
+        ge=1,
+        le=1_048_576,
+    )
+    status_discovery_event_queue_capacity: int = Field(
+        default=100,
+        alias="STATUS_DISCOVERY_EVENT_QUEUE_CAPACITY",
+        ge=1,
+        le=1_000,
+    )
+    status_discovery_cleanup_timeout_seconds: float = Field(
+        default=5.0,
+        alias="STATUS_DISCOVERY_CLEANUP_TIMEOUT_SECONDS",
+        gt=0,
+    )
+    status_discovery_observe_seconds: float = Field(
+        default=30.0,
+        alias="STATUS_DISCOVERY_OBSERVE_SECONDS",
+        ge=0,
+        le=300,
+    )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
         default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25
@@ -234,6 +281,26 @@ class Settings(BaseSettings):
         for minimum_name, minimum, maximum_name, maximum in interval_pairs:
             if minimum > maximum:
                 raise ValueError(f"{minimum_name} cannot exceed {maximum_name}")
+
+        allowed_discovery_scopes = {
+            "diagnostic_unverified_target",
+            "local_simulator",
+            "authorized_queue_it_staging",
+        }
+        if self.status_discovery_scope not in allowed_discovery_scopes:
+            raise ValueError(
+                "STATUS_DISCOVERY_SCOPE must be one of: "
+                + ", ".join(sorted(allowed_discovery_scopes))
+            )
+        if (
+            self.status_discovery_enabled
+            and self.status_discovery_scope == "authorized_queue_it_staging"
+            and not self.status_discovery_confirm_authorized_staging
+        ):
+            raise ValueError(
+                "STATUS_DISCOVERY_CONFIRM_AUTHORIZED_STAGING=true is required for "
+                "authorized_queue_it_staging discovery"
+            )
 
         return self
 
