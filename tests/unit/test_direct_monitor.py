@@ -333,6 +333,7 @@ async def test_direct_success_persists_without_opening_a_browser(tmp_path: Path)
     assert persisted.queue_id == session.queue_id
     assert persisted.next_check_at is not None and persisted.next_check_at > NOW
     assert progress.progress_percentage == 55 and progress.users_ahead == 7
+    assert persisted.last_checked_at == NOW  # a direct check is a real observation
     assert await capability(harness) is DirectCapability.DIRECT_CAPABLE
     assert harness.handler.metrics.direct_successes == 1
     assert harness.handler.metrics.browser_fallbacks == 0

@@ -52,7 +52,23 @@ class DirectMonitoringMetrics:
     disagreements: int = 0
     metadata_failures: int = 0
     artifacts_pruned: int = 0
+    fallback_successes: int = 0
+    # Response-provided polling guidance is measured, never used to poll faster.
+    poll_hints_observed: int = 0
+    poll_hint_min_seconds: float | None = None
+    poll_hint_max_seconds: float | None = None
     fallback_reasons: Counter[str] = field(default_factory=Counter)
+
+    def record_poll_hint(self, seconds: float | None) -> None:
+        if seconds is None:
+            return
+        self.poll_hints_observed += 1
+        self.poll_hint_min_seconds = (
+            seconds if self.poll_hint_min_seconds is None else min(self.poll_hint_min_seconds, seconds)
+        )
+        self.poll_hint_max_seconds = (
+            seconds if self.poll_hint_max_seconds is None else max(self.poll_hint_max_seconds, seconds)
+        )
 
 
 class DirectMonitoringHandler:
@@ -104,6 +120,9 @@ class DirectMonitoringHandler:
                 self._observability.record_direct_attempt(
                     attempt.request_seconds or 0.0, success=attempt.observation is not None
                 )
+        observed = attempt.observation or attempt.rejected_observation
+        if observed is not None:
+            self.metrics.record_poll_hint(observed.poll_after_seconds)
         if attempt.observation is not None:
             self.metrics.direct_successes += 1
             outcome = await self._browser_monitor.apply_direct_observation(
@@ -143,6 +162,8 @@ class DirectMonitoringHandler:
             error_type=reason.value,
             duration=fallback_seconds,
         )
+        if outcome.success:
+            self.metrics.fallback_successes += 1
         self._count_disagreement(session, attempt, outcome)
         await self._refresh_recipe(session, outcome, observed_since)
         await self._publish(

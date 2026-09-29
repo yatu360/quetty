@@ -387,6 +387,9 @@ class QueueSessionMonitor:
         previous_status = session.status
         previous_progress = await self._repository.get_progress(session.session_id)
         observed_at = self._clock()
+        # The browser restorer stamps this for browser checks; a direct check is an
+        # equally real observation of the visitor.
+        session.last_checked_at = observed_at
         observed_status = evaluate_monitoring_observation(observation)
         session.status = observed_status
         progress_changed = _record_progress(

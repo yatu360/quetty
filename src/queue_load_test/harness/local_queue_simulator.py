@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlsplit
@@ -63,6 +64,11 @@ class LocalQueueSimulator:
     # Recognizable fake secret seeded into the visitor cookie, the page-built status
     # URL, the status response body, and a status Set-Cookie (secret-leak tests).
     secret_token: str | None = None
+    # Stage presented to newly created identities (lifecycle only moves forward).
+    initial_stage: str = STAGE_ACTIVE
+    # Optional response-provided polling guidance (``pollAfterSeconds``).
+    poll_after_seconds: float | None = None
+    direct_request_times: dict[str, list[float]] = field(default_factory=dict)
     page_requests: Counter[str] = field(default_factory=Counter)
     browser_status_requests: Counter[str] = field(default_factory=Counter)
     direct_status_requests: Counter[str] = field(default_factory=Counter)
@@ -152,7 +158,7 @@ class LocalQueueSimulator:
                     if self.forced_new_ids
                     else f"{self.new_identity_prefix}-{self.new_identities:05d}"
                 )
-                self.stages.setdefault(queue_id, STAGE_ACTIVE)
+                self.stages.setdefault(queue_id, self.initial_stage)
             if queue_id in self.empty_response_ids:
                 return  # close without a response: a genuine navigation failure
             if queue_id in self.slow_ids:
@@ -189,6 +195,8 @@ class LocalQueueSimulator:
         (self.browser_status_requests if browser else self.direct_status_requests)[
             queue_id
         ] += 1
+        if not browser:
+            self.direct_request_times.setdefault(queue_id, []).append(time.monotonic())
         if _cookie(headers.get("cookie", ""), "queue_id") != queue_id:
             await self._respond(writer, 403, "rejected", content_type="text/plain")
             return
@@ -237,6 +245,8 @@ class LocalQueueSimulator:
             "progress": self.progress.get(queue_id, 40) if stage != STAGE_PRE else None,
             "usersAhead": 10 if stage != STAGE_PRE else None,
         }
+        if self.poll_after_seconds is not None:
+            document["pollAfterSeconds"] = self.poll_after_seconds
         if fault == "missing_id":
             document.pop("queueId")
         elif fault == "contradictory":
@@ -268,6 +278,7 @@ class LocalQueueSimulator:
                 "progress_percentage": ["progress"],
                 "users_ahead": ["usersAhead"],
                 "redirect_url": ["redirectUrl"],
+                "poll_after_seconds": ["pollAfterSeconds"],
             },
         }
 

@@ -10,6 +10,28 @@ live monitoring.
 
 ## Current Status
 
+### Direct vs Headed monitoring benchmark (Phase 8 Prompt 7, 2026-09-29)
+
+- `queue-load-test-phase8-monitoring-benchmark` runs Headed Window then Direct
+  sequentially, on fresh equivalent populations with an identical backend, limits,
+  polling policy, and window. It measures throughput, durations, backlog, contexts,
+  CPU/RSS, direct/fallback behavior, cadence, lifecycle, and recovery, and derives
+  reported (not predetermined) gates. Staging mode is triple-gated, uses the production
+  cadence, and is passive.
+- Local Patchright result (simulator, not Queue-it):
+  - check p95 0.299 s → 0.0023 s;
+  - BrowserContexts mean 0.83 → 0;
+  - browser CPU 84% → 0.24%;
+  - equal visitor-status traffic per session (21 vs 22 per minute);
+  - every safety gate PASS.
+
+  Browser RSS was unchanged, app RSS was +37 MiB, and Direct's due-backlog bursts were
+  larger. See `docs/phase8_monitoring_benchmark.md` and
+  `docs/results/phase8_monitoring_benchmark_result.json`.
+- A Prompt 5 gap was fixed: direct observations now update `last_checked_at`.
+- The default strategy is unchanged (Headed Window). Queue-it staging benchmark
+  **NOT RUN**, and every Queue-it result is **UNKNOWN**.
+
 ### Direct Monitoring security, observability, and hardening (Phase 8 Prompt 6, 2026-09-29)
 
 - Sensitive material stays in the protected stores only: recipes, URLs, headers,
@@ -1244,6 +1266,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   minimisation method, UNKNOWN findings, and Prompt 4 evidence gate.
 - `docs/phase8_observation_equivalence.md` — common observation model, schema and
   comparison rules, shadow harness, UNKNOWN evidence, and Prompt 5 gate.
+- `docs/phase8_monitoring_benchmark.md` — Prompt 7 benchmark design, polling safety,
+  local results, recovery and lifecycle evidence, gates, and staging NOT RUN status.
 - `docs/phase8_security_observability.md` — Prompt 6 sensitive-data policy, SQLite
   metadata, metrics/events, HTTP-client log fix, failure matrix, and secret-leak tests.
 - `docs/phase8_direct_runtime_integration.md` — Prompt 5 routing, capability states,
@@ -1440,11 +1464,11 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 8 Prompt 7 — Direct vs Headed Monitoring Benchmark and Authorised Staging
-Validation.** Prompts 5–6 are complete, running local simulator evidence only. A real
-event still needs the authorised Prompt 2–4 evidence sequence and a reviewed
-`authorized_queue_it_staging` schema before any session can become direct-capable.
-Never claim staging PASS without an authorised run.
+**Phase 8 Prompt 8 — Phase 8 Acceptance and Operational Decision.** Prompts 5–7 are
+complete, running local simulator evidence only. The authorised Queue-it staging
+benchmark (`--mode staging`) and the Prompt 2–4 evidence sequence remain NOT RUN, so the
+acceptance decision must treat every Queue-it direct result as UNKNOWN. Never claim
+staging PASS without an authorised run.
 
 ## Instructions for Future AI Sessions
 

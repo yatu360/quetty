@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "scope": "local_simulator_only",
+  "queue_it_contacted": false,
+  "generated_at": "2026-09-29T14:41:39+00:00",
+  "browser_backend": "patchright",
+  "profile": {
+    "sessions_per_strategy": 12,
+    "window_seconds": 30.0,
+    "monitor_workers": 2,
+    "monitor_queue_capacity": 4,
+    "monitor_claim_batch_size": 4,
+    "poll_interval_seconds": [
+      2.0,
+      3.0
+    ],
+    "response_poll_hint_seconds": 2.5,
+    "strategies_run": "sequential, separate equivalent populations"
+  },
+  "headed_window": {
+    "strategy": "headed_window",
+    "acquisition_seconds": 3.01,
+    "direct_warmup_seconds": null,
+    "window": {
+      "seconds": 30.01,
+      "monitoring_attempts": 126,
+      "successful_observations": 126,
+      "checks_per_second": 4.1992,
+      "check_duration_seconds": {
+        "count": 126,
+        "p50": 0.2417,
+        "p95": 0.2989,
+        "max": 0.4199,
+        "mean": 0.2314
+      },
+      "direct_check_duration_seconds": {
+        "count": 0,
+        "p50": null,
+        "p95": null,
+        "max": null,
+        "mean": null
+      },
+      "browser_check_duration_seconds": {
+        "count": 126,
+        "p50": 0.2417,
+        "p95": 0.2989,
+        "max": 0.4199,
+        "mean": 0.2314
+      },
+      "first_full_sweep_seconds": 3.04,
+      "due_backlog": {
+        "max": 2,
+        "mean": 0.47
+      },
+      "oldest_overdue_seconds": {
+        "max": 0.18,
+        "p95": 0.17
+      },
+      "browser_context_peak": 2,
+      "browser_context_mean": 0.831,
+      "app_cpu_percent": {
+        "count": 59,
+        "p50": 7.0,
+        "p95": 10.7,
+        "max": 13.4,
+        "mean": 7.2508
+      },
+      "app_rss_mib_peak": 135.7,
+      "browser_cpu_percent": {
+        "count": 59,
+        "p50": 88.9,
+        "p95": 126.4,
+        "max": 131.3,
+        "mean": 84.1068
+      },
+      "browser_rss_mib_peak": 999.8,
+      "direct": null,
+      "visitor_status_requests_per_session_per_minute": {
+        "direct": 0.0,
+        "browser_page": 20.996,
+        "page_navigations": 20.996
+      },
+      "direct_request_gap_seconds": {
+        "count": 0,
+        "min": null,
+        "p50": null
+      }
+    },
+    "lifecycle": {
+      "PRE_QUEUE": "PASS",
+      "ACTIVE_QUEUE": "PASS",
+      "PAUSED": "UNKNOWN",
+      "SERVICED_SOON": "PASS",
+      "TURN_STARTED": "UNKNOWN",
+      "ADMITTED": "UNKNOWN"
+    },
+    "state_refresh_failures": 0.0,
+    "recovery": {
+      "pause_resume": {
+        "no_checks_while_paused": true,
+        "resume_to_first_check_seconds": 0.32,
+        "resume_measured_seconds": 0.32
+      },
+      "manual_open": {
+        "opened": true,
+        "open_session_not_polled_directly": true,
+        "other_sessions_checked": 11
+      },
+      "browser_failure": {
+        "killed_processes": 2,
+        "recovered_seconds": 10.81,
+        "measured_seconds": 10.82,
+        "identity_preserved": true
+      },
+      "restart": {
+        "restart_to_first_check_seconds": 0.63,
+        "restart_to_first_direct_request_seconds": null,
+        "measured_seconds": 1.75,
+        "strategy_kept": true,
+        "identities_preserved": true,
+        "page_navigations_after_restart": 4
+      }
+    },
+    "identity": {
+      "queue_ids_changed": 0,
+      "new_identities_during_monitoring": 0
+    },
+    "secret_in_surfaces": false,
+    "secret_in_logs": false
+  },
+  "direct": {
+    "strategy": "direct",
+    "acquisition_seconds": 2.01,
+    "direct_warmup_seconds": 7.03,
+    "window": {
+      "seconds": 30.01,
+      "monitoring_attempts": 132,
+      "successful_observations": 132,
+      "checks_per_second": 4.3991,
+      "check_duration_seconds": {
+        "count": 132,
+        "p50": 0.0014,
+        "p95": 0.0023,
+        "max": 0.0025,
+        "mean": 0.0015
+      },
+      "direct_check_duration_seconds": {
+        "count": 132,
+        "p50": 0.0014,
+        "p95": 0.0023,
+        "max": 0.0025,
+        "mean": 0.0015
+      },
+      "browser_check_duration_seconds": {
+        "count": 0,
+        "p50": null,
+        "p95": null,
+        "max": null,
+        "mean": null
+      },
+      "first_full_sweep_seconds": 2.77,
+      "due_backlog": {
+        "max": 6,
+        "mean": 0.95
+      },
+      "oldest_overdue_seconds": {
+        "max": 0.35,
+        "p95": 0.13
+      },
+      "browser_context_peak": 0,
+      "browser_context_mean": 0.0,
+      "app_cpu_percent": {
+        "count": 58,
+        "p50": 5.0,
+        "p95": 18.3,
+        "max": 21.5,
+        "mean": 6.8276
+      },
+      "app_rss_mib_peak": 172.5,
+      "browser_cpu_percent": {
+        "count": 58,
+        "p50": 0.0,
+        "p95": 1.8,
+        "max": 5.2,
+        "mean": 0.2431
+      },
+      "browser_rss_mib_peak": 996.0,
+      "direct": {
+        "checks": 132,
+        "direct_requests": 132,
+        "direct_successes": 132,
+        "browser_fallbacks": 0,
+        "fallback_successes": 0,
+        "disagreements": 0,
+        "recipes_adopted": 0,
+        "poll_hints_observed": 132,
+        "fallback_reasons": {},
+        "direct_errors": 0,
+        "schema_failures": 0,
+        "identity_mismatches": 0,
+        "direct_success_rate": 1.0,
+        "browser_fallback_rate": 0.0,
+        "browser_restores_avoided": 132,
+        "poll_hint_seconds": {
+          "min": 2.5,
+          "max": 2.5
+        }
+      },
+      "visitor_status_requests_per_session_per_minute": {
+        "direct": 21.996,
+        "browser_page": 0.0,
+        "page_navigations": 0.0
+      },
+      "direct_request_gap_seconds": {
+        "count": 120,
+        "min": 2.6347,
+        "p50": 2.6487
+      }
+    },
+    "lifecycle": {
+      "PRE_QUEUE": "PASS",
+      "ACTIVE_QUEUE": "PASS",
+      "PAUSED": "UNKNOWN",
+      "SERVICED_SOON": "PASS",
+      "TURN_STARTED": "UNKNOWN",
+      "ADMITTED": "UNKNOWN"
+    },
+    "state_refresh_failures": 0.0,
+    "recovery": {
+      "pause_resume": {
+        "no_checks_while_paused": true,
+        "resume_to_first_check_seconds": 0.1,
+        "resume_measured_seconds": 0.13
+      },
+      "manual_open": {
+        "opened": true,
+        "open_session_not_polled_directly": true,
+        "other_sessions_checked": 11
+      },
+      "browser_failure": {
+        "killed_processes": 2,
+        "recovered_seconds": 11.83,
+        "measured_seconds": 11.83,
+        "identity_preserved": true
+      },
+      "direct_state_expiry": {
+        "detected": true,
+        "recipe_refreshed_seconds": 5.28,
+        "measured_seconds": 7.71,
+        "direct_resumed": true,
+        "readopt_cooldown_seconds": 2.0
+      },
+      "restart": {
+        "restart_to_first_check_seconds": 0.32,
+        "restart_to_first_direct_request_seconds": 0.32,
+        "measured_seconds": 1.44,
+        "strategy_kept": true,
+        "identities_preserved": true,
+        "page_navigations_after_restart": 0
+      }
+    },
+    "identity": {
+      "queue_ids_changed": 0,
+      "new_identities_during_monitoring": 0
+    },
+    "secret_in_surfaces": false,
+    "secret_in_logs": false
+  },
+  "gates": {
+    "direct_identity_safety": {
+      "result": "PASS",
+      "basis": "no Queue ID changed or was reacquired during monitoring, recovery, or restart",
+      "queue_ids_changed": [
+        0,
+        0
+      ],
+      "new_identities": [
+        0,
+        0
+      ]
+    },
+    "observation_equivalence": {
+      "result": "PASS",
+      "basis": "final persisted lifecycle matches the presented stage for every observable stage; unobservable stages stay UNKNOWN",
+      "stages": {
+        "PRE_QUEUE": {
+          "headed": "PASS",
+          "direct": "PASS"
+        },
+        "ACTIVE_QUEUE": {
+          "headed": "PASS",
+          "direct": "PASS"
+        },
+        "PAUSED": {
+          "headed": "UNKNOWN",
+          "direct": "UNKNOWN"
+        },
+        "SERVICED_SOON": {
+          "headed": "PASS",
+          "direct": "PASS"
+        },
+        "TURN_STARTED": {
+          "headed": "UNKNOWN",
+          "direct": "UNKNOWN"
+        },
+        "ADMITTED": {
+          "headed": "UNKNOWN",
+          "direct": "UNKNOWN"
+        }
+      },
+      "direct_browser_disagreements": 0
+    },
+    "fallback_reliability": {
+      "result": "PASS",
+      "basis": "every window fallback produced a browser observation; expiry and browser failure recovered",
+      "window_fallbacks": 0,
+      "window_fallback_successes": 0
+    },
+    "direct_request_stability": {
+      "result": "PASS",
+      "basis": "steady-state window without injected faults: success rate >= 0.95 and no errors",
+      "direct_success_rate": 1.0,
+      "errors": 0
+    },
+    "restart_continuity": {
+      "result": "PASS",
+      "basis": "both strategies resume from persisted state; Direct resumes direct without rediscovery",
+      "headed_first_check_seconds": 0.63,
+      "direct_first_direct_request_seconds": 0.32
+    },
+    "throughput_improvement": {
+      "result": "IMPROVED",
+      "basis": "p95 check duration (s): lower is better",
+      "headed": 0.2989,
+      "direct": 0.0023,
+      "direct_to_headed_ratio": 0.0077
+    },
+    "browser_context_reduction": {
+      "result": "IMPROVED",
+      "basis": "mean contexts: lower is better",
+      "headed": 0.831,
+      "direct": 0.0,
+      "direct_to_headed_ratio": 0.0
+    },
+    "cpu_ram_effect": {
+      "result": "REDUCED",
+      "basis": "mean browser CPU during the window; RSS and app values reported alongside",
+      "browser_cpu_percent_mean": {
+        "headed": 84.1068,
+        "direct": 0.2431
+      },
+      "browser_rss_mib_peak": {
+        "headed": 999.8,
+        "direct": 996.0
+      },
+      "app_cpu_percent_mean": {
+        "headed": 7.2508,
+        "direct": 6.8276
+      },
+      "app_rss_mib_peak": {
+        "headed": 135.7,
+        "direct": 172.5
+      }
+    },
+    "request_cadence_safety": {
+      "result": "PASS",
+      "basis": "minimum per-session direct request gap versus the shared polling floor; response polling guidance is reported, never used to poll faster",
+      "min_gap_seconds": 2.6347,
+      "p50_gap_seconds": 2.6487,
+      "policy_floor_seconds": 2.0,
+      "response_poll_hint_min_seconds": 2.5,
+      "direct_faster_than_response_hint": false
+    },
+    "sensitive_data_safety": {
+      "result": "PASS",
+      "basis": "a seeded fake secret never reached logs, metrics, dashboard, or SQLite"
+    }
+  },
+  "queue_it_staging": {
+    "status": "NOT RUN",
+    "reason": "no authorised Queue-it staging environment configured",
+    "lifecycle": {
+      "PRE_QUEUE": "UNKNOWN",
+      "ACTIVE_QUEUE": "UNKNOWN",
+      "PAUSED": "UNKNOWN",
+      "SERVICED_SOON": "UNKNOWN",
+      "TURN_STARTED": "UNKNOWN",
+      "ADMITTED": "UNKNOWN"
+    },
+    "gates": {
+      "direct_identity_safety": "UNKNOWN",
+      "observation_equivalence": "UNKNOWN",
+      "fallback_reliability": "UNKNOWN",
+      "direct_request_stability": "UNKNOWN",
+      "restart_continuity": "UNKNOWN",
+      "throughput_improvement": "UNKNOWN",
+      "browser_context_reduction": "UNKNOWN",
+      "cpu_ram_effect": "UNKNOWN",
+      "request_cadence_safety": "UNKNOWN",
+      "sensitive_data_safety": "UNKNOWN"
+    }
+  },
+  "default_strategy_changed": false,
+  "report_contains_secret": false
+}

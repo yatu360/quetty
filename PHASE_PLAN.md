@@ -891,7 +891,18 @@ browser-observed behavior; undocumented URL construction is out of scope.
      Queue-it staging is **NOT RUN / UNKNOWN**.
 
 7. **Direct vs Headed Monitoring Benchmark and Authorised Staging Validation** —
-   **NEXT**.
+   **completed on 2026-09-29 (local only; staging NOT RUN)**
+   (`docs/phase8_monitoring_benchmark.md`).
+   - Sequential, equivalent Headed/Direct benchmark with deterministic report and gate
+     logic. The staging mode is triple-gated, runs at the production cadence, and is
+     passive.
+   - Local Patchright: every safety gate PASS. Per-check cost, BrowserContexts, and
+     browser CPU dropped sharply. Throughput is equal by schedule design, and
+     visitor-status traffic is equal. Browser RSS is unchanged.
+   - Paused, TURN_STARTED, and admission are UNKNOWN locally. All Queue-it results are
+     UNKNOWN. The default stays Headed Window.
+
+8. **Phase 8 Acceptance and Operational Decision** — **NEXT**.
 
 ## Scaling Gates
 

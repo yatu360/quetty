@@ -5297,3 +5297,106 @@ Validation.**
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Phase 8 Prompt 7 — Direct vs Headed Monitoring Benchmark and Authorised Staging Validation
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Measure Direct Monitoring Strategy against Headed Window Strategy on equivalent
+populations and configuration, without changing the default and without increasing
+request cadence.
+
+### Changes Made
+
+- Added `queue-load-test-phase8-monitoring-benchmark`
+  (`harness/phase8_monitoring_benchmark.py`).
+  - The strategies run sequentially on fresh equivalent populations (same count,
+    legal-transition stage layout, backend, workers/queue/claims, polling policy, and
+    window).
+  - Measures: attempts; observations; checks/s; p50/p95/max durations; sweep;
+    backlog; oldest overdue; context peak and mean; app and browser CPU/RSS;
+    direct/fallback rates; restores avoided; reason classes; disagreements;
+    state-refresh failures; visitor-status requests per session per minute;
+    per-session direct gaps; response poll hints.
+  - Recovery segment: pause/resume, Manual Open coexistence, browser SIGKILL during a
+    (fallback) check, direct-state expiry and refresh, and restart continuity.
+  - Deterministic `build_report` gates (PASS/FAIL/UNKNOWN, or
+    IMPROVED/NOT_IMPROVED/REDUCED) with explicit bases.
+  - `staging_readiness`/`staging_not_run`: triple gate, authorised discovery, and an
+    authorised schema. Staging uses the configured cadence, stays passive, and injects
+    no faults.
+- `DirectMonitoringMetrics` gained `fallback_successes` and poll-hint statistics
+  (measured, never used to poll faster).
+- `LocalQueueSimulator` gained `initial_stage`, `pollAfterSeconds` guidance, and
+  per-session direct request timestamps. The simulator schema maps
+  `poll_after_seconds`.
+- Fix: `QueueSessionMonitor.apply_direct_observation` now updates `last_checked_at`.
+  Direct checks were previously invisible to dashboard freshness and recovery timing
+  (a Prompt 5 gap).
+- Results: `docs/results/phase8_monitoring_benchmark_result.json` (aggregate; no IDs,
+  URLs, or secrets).
+
+### Files Added
+
+- `src/queue_load_test/harness/phase8_monitoring_benchmark.py`
+- `tests/unit/test_phase8_monitoring_benchmark.py`
+- `tests/integration/test_phase8_benchmark_workflow.py`
+- `docs/phase8_monitoring_benchmark.md`
+- `docs/results/phase8_monitoring_benchmark_result.json`
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/monitoring.py`
+- `src/queue_load_test/direct_monitor/handler.py`
+- `src/queue_load_test/harness/local_queue_simulator.py`
+- `tests/unit/test_direct_monitor.py`, `pyproject.toml`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_phase8_monitoring_benchmark.py` — 23 passed.
+- `python -m pytest tests/unit/test_direct_monitor.py` — 58 passed.
+- Quick local benchmark (Chrome) via `tests/integration/test_phase8_benchmark_workflow.py`
+  — safety gates PASS.
+- `queue-load-test-phase8-monitoring-benchmark --backend patchright` (12 sessions,
+  30 s) — all ten gates PASS, IMPROVED, or REDUCED; no secret in the report.
+- `python -m pytest` — 718 passed, 1 failed, 4 staging deselected (363.65 s). The failure
+  was the previously documented intermittent
+  `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`
+  (Manual Open fake timing, unchanged code). Isolated reruns: 1 failed, then passed
+  twice.
+- `python -m ruff check src tests` — PASS. `python -m mypy src` — PASS (102 files).
+
+### Staging Tests
+
+- `--mode staging` — NOT RUN. No authorised Queue-it environment, discovery evidence,
+  or reviewed authorised schema is configured. Every Queue-it result is UNKNOWN.
+
+### Important Decisions
+
+- Throughput is compared at equal schedules. Direct's benefit is reported as per-check
+  cost, context, and CPU headroom, not as more polling.
+- Stages the simulator cannot present (paused, TURN_STARTED, admission) are UNKNOWN,
+  not PASS.
+- The default monitoring strategy is unchanged.
+
+### Known Issues
+
+- Direct showed larger due-backlog bursts (max 6 vs 2) with zero jitter. Re-measure
+  with production jitter.
+- Browser RSS is not reduced while the fallback and headed browsers stay running. App
+  RSS was +37 MiB in one run.
+- The local page is far lighter than Queue-it, so absolute browser costs understate
+  real restores.
+
+### Follow-Up
+
+**Phase 8 Prompt 8 — Phase 8 Acceptance and Operational Decision.**
+
+### Git State
+
+- Branch: main
