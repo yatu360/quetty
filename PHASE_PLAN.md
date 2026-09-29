@@ -875,13 +875,23 @@ browser-observed behavior; undocumented URL construction is out of scope.
    - Local Direct application workflow: Chrome 35/35 and Patchright 35/35 (simulator,
      not Queue-it). Queue-it staging is **NOT RUN / UNKNOWN**.
 
-6. **Direct Monitoring Security, Observability, and Failure Hardening** — **NEXT**.
-   - Inputs from Prompt 5:
-     - re-adoption backoff for direct-only faults;
-     - Prometheus/dashboard direct metrics;
-     - discovery-artifact retention;
-     - replay-cookie versus browser-state freshness;
-     - a schema review workflow.
+6. **Direct Monitoring Security, Observability, and Failure Hardening** — **completed on
+   2026-09-29** (`docs/phase8_security_observability.md`).
+   - Sensitive material is confined to the protected stores. Logs, metrics, dashboard,
+     SQLite, reports, and operator messages carry only IDs, enums, counts, durations,
+     and one-way recipe references.
+   - Added the non-secret SQLite `direct_monitor_status` table (schema change), and
+     low-cardinality Prometheus direct metrics on `GET /metrics`. The dashboard shows
+     aggregate capability counts.
+   - Fixed a real leak of `httpcore` header traces: HTTP-client loggers are floored at
+     WARNING and their messages are always replaced.
+   - Records are report-only on corruption, with a consistency audit that performs no
+     repair. Added the re-adoption cooldown and discovery-evidence retention.
+   - Failure matrix, seeded secret-leak tests, and the Direct workflow pass locally.
+     Queue-it staging is **NOT RUN / UNKNOWN**.
+
+7. **Direct vs Headed Monitoring Benchmark and Authorised Staging Validation** —
+   **NEXT**.
 
 ## Scaling Gates
 

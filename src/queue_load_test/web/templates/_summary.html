@@ -29,6 +29,12 @@
     <div><dt>Active BrowserContexts</dt><dd>{{ summary.active_contexts }}</dd></div>
     <div><dt>BrowserContext limit</dt><dd>{{ summary.maximum_active_contexts }}</dd></div>
     <div><dt>Managed browser processes</dt><dd>{{ summary.chrome_processes }}</dd></div>
+    {%- if summary.direct_capability is not none %}
+    {%- for capability, count in summary.direct_capability %}
+    <div><dt>Direct {{ capability }}</dt><dd>{{ count }}</dd></div>
+    {%- endfor %}
+    <div><dt>Direct checks</dt><dd>{{ summary.direct_checks or "-" }}</dd></div>
+    {%- endif %}
   </dl>
 </section>
 {%- if partial %}

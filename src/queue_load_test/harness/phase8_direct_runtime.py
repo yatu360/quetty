@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import secrets
 import tempfile
 import time
 from pathlib import Path
@@ -38,6 +40,7 @@ from queue_load_test.harness.phase5_workflow import (
     until,
     workflow_settings,
 )
+from queue_load_test.metrics.logging import JsonLogFormatter
 from queue_load_test.models import BrowserBackendName, MonitoringStrategy
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.utils.instance_lock import InstanceLock
@@ -45,6 +48,7 @@ from queue_load_test.web.app import create_app
 from queue_load_test.web.service import ApplicationRunRuntime
 
 REQUESTED = 3
+DISCOVERY_RETENTION = 3
 HX = {"HX-Request": "true"}
 
 # Fault -> the fallback reason the Direct handler must classify it as.
@@ -85,6 +89,10 @@ def direct_settings(
             "direct_monitor_schema_path": schema_path,
             "direct_monitor_timeout_seconds": 1.0,
             "direct_monitor_failure_threshold": 2,
+            # The fault matrix below re-adopts right after each hard failure; the
+            # cooldown itself is covered by unit tests.
+            "direct_monitor_readopt_cooldown_seconds": 0.0,
+            "direct_monitor_discovery_retention": DISCOVERY_RETENTION,
         }
     )
 
@@ -95,9 +103,18 @@ async def run_direct_workflow(
     backend: BrowserBackendName = BrowserBackendName.CHROME,
 ) -> dict[str, Any]:
     record = Recorder()
+    secret = f"SIMSECRET{secrets.token_hex(8)}"
     simulator = LocalQueueSimulator(
-        new_identity_prefix="sim-direct", status_enabled=True, slow_seconds=2.5
+        new_identity_prefix="sim-direct",
+        status_enabled=True,
+        slow_seconds=2.5,
+        secret_token=secret,
     )
+    captured_logs = _LogCapture()
+    root_logger = logging.getLogger()
+    previous_level = root_logger.level
+    root_logger.addHandler(captured_logs)
+    root_logger.setLevel(logging.DEBUG)
     await simulator.start()
     database_path = directory / "direct.sqlite3"
     db = Database(database_path)
@@ -398,6 +415,71 @@ async def run_direct_workflow(
                 )
                 evidence["direct_metrics"] = _metrics(runtime)
                 survivors = db.identities()
+
+                # -------------------------------- observability and secrecy
+                exposition = (await ui.get("/metrics")).text
+                evidence["metrics_conditions"] = {
+                    "strategy": 'monitoring_strategy_info{strategy="direct"} 1.0' in exposition,
+                    "attempts": _sample(exposition, "direct_monitoring_attempts_total"),
+                    "successes": _sample(exposition, "direct_monitoring_successes_total"),
+                    "timeout": 'direct_monitoring_fallbacks_total{reason="timeout"}'
+                    in exposition,
+                    "capable": 'direct_monitoring_sessions{capability="DIRECT_CAPABLE"}'
+                    in exposition,
+                    "session_label": 'session_id="' in exposition,
+                    "queue_label": 'queue_id="' in exposition,
+                }
+                record.check(
+                    "metrics_expose_low_cardinality_direct_series",
+                    'monitoring_strategy_info{strategy="direct"} 1.0' in exposition
+                    and _sample(exposition, "direct_monitoring_attempts_total") > 0
+                    and _sample(exposition, "direct_monitoring_successes_total") > 0
+                    and 'direct_monitoring_fallbacks_total{reason="timeout"}' in exposition
+                    and "direct_monitoring_request_duration_seconds_count" in exposition
+                    and "direct_monitoring_fallback_duration_seconds_count" in exposition
+                    and 'direct_monitoring_sessions{capability="DIRECT_CAPABLE"}' in exposition
+                    and 'session_id="' not in exposition
+                    and 'queue_id="' not in exposition
+                    and not any(
+                        queue_value in exposition
+                        for queue_value in survivors.values()
+                        if queue_value
+                    ),
+                )
+                summary = (await ui.get("/partials/summary")).text
+                record.check(
+                    "dashboard_shows_aggregate_direct_capability_only",
+                    _dd(summary, "Direct DIRECT_CAPABLE") is not None
+                    and _dd(summary, "Direct checks") is not None,
+                )
+                surfaces = {
+                    "dashboard": (await ui.get("/dashboard")).text,
+                    "summary": summary,
+                    "sessions": (await ui.get("/partials/sessions")).text,
+                    "metrics": exposition,
+                    "sqlite": database_path.read_bytes().decode("latin-1"),
+                }
+                leaked = sorted(name for name, text in surfaces.items() if secret in text)
+                record.check("fake_secret_absent_from_ui_metrics_and_sqlite", leaked == [],
+                             leaked=leaked)
+                retained = [
+                    len(list(settings.status_discovery_directory.glob(f"*-{item}.json")))
+                    for item in (first,)
+                ]
+                record.check(
+                    "discovery_evidence_retention_is_bounded",
+                    all(count <= DISCOVERY_RETENTION for count in retained)
+                    and metrics_pruned(runtime) > 0,
+                    retained=retained,
+                )
+                protected_holds_secret = any(
+                    secret in path.read_text(encoding="utf-8")
+                    for path in (settings.direct_monitor_directory / "records").glob("*.json")
+                )
+                record.check(
+                    "secret_bearing_recipe_lives_only_in_protected_store",
+                    protected_holds_secret,
+                )
         record.check(
             "shutdown_releases_all_ownership_and_browsers",
             db.owners() == 0 and _browser_processes(backend) == 0,
@@ -454,6 +536,21 @@ async def run_direct_workflow(
                 )
     finally:
         await simulator.close()
+        root_logger.removeHandler(captured_logs)
+        root_logger.setLevel(previous_level)
+    leaking = sorted(
+        {
+            json.loads(line).get("logger", "?") + ":" + json.loads(line).get("message", "")[:40]
+            for line in captured_logs.lines
+            if secret in line
+        }
+    )
+    record.check(
+        "fake_secret_absent_from_structured_logs",
+        not leaking and len(captured_logs.lines) > 0,
+        lines=len(captured_logs.lines),
+        leaking_loggers=[item.replace(secret, "<secret>") for item in leaking],
+    )
     evidence["simulator"] = {
         "new_identities": simulator.new_identities,
         "page_requests": sum(simulator.page_requests.values()),
@@ -461,7 +558,7 @@ async def run_direct_workflow(
         "direct_status_requests": sum(simulator.direct_status_requests.values()),
     }
     passed = sum(check.passed for check in record.checks)
-    return {
+    result: dict[str, Any] = {
         "scope": "local_simulator_only",
         "queue_it_contacted": False,
         "passed": passed,
@@ -471,6 +568,38 @@ async def run_direct_workflow(
         ],
         "evidence": evidence,
     }
+    report_leak = secret in json.dumps(result, default=str)
+    record.check("fake_secret_absent_from_aggregate_report", not report_leak)
+    result["checks"].append(
+        {"name": "fake_secret_absent_from_aggregate_report", "passed": not report_leak}
+    )
+    result["passed"] += int(not report_leak)
+    result["failed"] += int(report_leak)
+    return result
+
+
+class _LogCapture(logging.Handler):
+    """Collect every record exactly as the application's JSON formatter emits it."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.setFormatter(JsonLogFormatter())
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(self.format(record))
+
+
+def _sample(exposition: str, name: str) -> float:
+    for line in exposition.splitlines():
+        if line.startswith(f"{name} "):
+            return float(line.split()[1])
+    return 0.0
+
+
+def metrics_pruned(runtime: ApplicationRunRuntime) -> int:
+    metrics = runtime.direct_monitoring_metrics
+    return metrics.artifacts_pruned if metrics is not None else 0
 
 
 def _capable_sync(store: DirectMonitorStateStore, session_id: str) -> bool:

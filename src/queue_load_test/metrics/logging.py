@@ -38,6 +38,25 @@ _CONTEXT_FIELDS = (
 )
 
 REDACTED_URL = "<redacted-url>"
+REDACTED_TRANSPORT_DETAIL = "<redacted-http-client-detail>"
+# HTTP client libraries format request lines, headers (Cookie, Set-Cookie,
+# Authorization), and connection traces into their messages. Direct Monitoring
+# replays visitor credentials through them, so their free text never reaches the
+# structured log; the logger name, level, and exception type remain.
+HTTP_CLIENT_LOGGERS = ("httpx", "httpcore", "hpack", "h11", "h2")
+
+
+def is_http_client_logger(name: str) -> bool:
+    return any(name == prefix or name.startswith(f"{prefix}.") for prefix in HTTP_CLIENT_LOGGERS)
+
+
+def quiet_http_client_loggers() -> None:
+    """Floor HTTP client loggers at WARNING; child loggers inherit the level."""
+
+    for name in HTTP_CLIENT_LOGGERS:
+        logger = logging.getLogger(name)
+        if logger.level == logging.NOTSET or logger.level < logging.WARNING:
+            logger.setLevel(logging.WARNING)
 # Transfer URLs carry the Queue-it identity token, so any absolute URL is removed
 # from free text. This also covers third-party messages (for example a Playwright
 # navigation error) that reach the root logger.
@@ -70,7 +89,11 @@ class JsonLogFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": redact_urls(record.getMessage()),
+            "message": (
+                REDACTED_TRANSPORT_DETAIL
+                if is_http_client_logger(record.name)
+                else redact_urls(record.getMessage())
+            ),
         }
         if self._run_id is not None:
             payload["run_id"] = self._run_id
@@ -100,6 +123,7 @@ def configure_structured_logging(
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
+    quiet_http_client_loggers()
 
 
 def log_event(

@@ -5170,3 +5170,130 @@ Hardening.**
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Phase 8 Prompt 6 — Direct Monitoring Security, Observability, and Failure Hardening
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Make sure visitor credentials, browser state, and direct recipes cannot leak through
+logs, metrics, dashboard, reports, exceptions, or reprs. Add low-cardinality direct
+observability, and harden Direct Monitoring failure handling without changing Headed
+Window semantics.
+
+### Changes Made
+
+- Moved `DirectCapability` and `DirectFallbackReason` into `queue_load_test.models`
+  (re-exported from `direct_monitor`) so metrics can pre-register closed label values.
+- SQLite: new `direct_monitor_status` table (capability, sanitized reason, one-way
+  `recipe_reference`, counters, timestamps). It is cascade-deleted with the session and
+  cleared by `reset_all`. Added `record_direct_monitor_status`,
+  `get_direct_monitor_status`, and `direct_capability_counts`, plus the
+  `DirectMonitorStatus` and `DirectMonitorMetadataRepository` types.
+- Prometheus metrics:
+  - `monitoring_strategy_info{strategy}`;
+  - `direct_monitoring_{attempts,successes,disagreements,identity_mismatches,recipes_refreshed}_total`;
+  - `direct_monitoring_fallbacks_total{reason}`;
+  - request and fallback duration histograms;
+  - `direct_monitoring_sessions{capability}`.
+
+  Added an operator-UI `GET /metrics`, and aggregate Direct capability and check totals
+  on the dashboard summary.
+- `DirectMonitoringHandler`:
+  - records metrics and publishes SQLite metadata (best effort);
+  - emits `direct_monitor_success`, `direct_monitor_failure`, `direct_monitor_fallback`,
+    `direct_recipe_refreshed`, `direct_identity_mismatch`, and
+    `direct_browser_disagreement`;
+  - counts disagreement between refused direct observations and the browser result;
+  - enforces a re-adoption cooldown (`DIRECT_MONITOR_READOPT_COOLDOWN_SECONDS`,
+    default 300);
+  - prunes discovery evidence to the newest `DIRECT_MONITOR_DISCOVERY_RETENTION`
+    per session (default 5).
+- `DirectStatusChecker`:
+  - corrupt or foreign records are no longer overwritten (report-only);
+  - success and failure bookkeeping saves are best effort;
+  - replay exceptions log only their type;
+  - each request is timed, and refused observations are returned for the
+    disagreement count.
+- Store format version 2 (`unavailable_since`); version 1 is still readable. Added
+  `recipe_reference()` and removed the destructive `mark_unavailable`.
+- `DirectMonitorConsistencyChecker` is a report-only audit (corrupt, orphan,
+  identity-mismatch, orphan-cookie, metadata-mismatch, and unsafe-permission findings,
+  with `repairs_performed: 0`). It is exposed via `queue-load-test-state-check
+  --direct-monitor-directory`.
+- Logging fix for a leak the new workflow check found: `httpcore` DEBUG header traces
+  logged a seeded `Set-Cookie` value. `quiet_http_client_loggers()` floors HTTP-client
+  loggers at WARNING (applied on replay-client import and in
+  `configure_structured_logging`). `JsonLogFormatter` replaces every HTTP-client
+  message with `<redacted-http-client-detail>`.
+- `LocalQueueSimulator.secret_token` seeds a fake secret into the visitor cookie, the
+  page-built status URL, the status JSON, and a status `Set-Cookie`. The Direct
+  workflow now also asserts metrics series, aggregate dashboard fields, secret absence
+  from UI/metrics/SQLite/logs/report, bounded retention, and protected containment.
+
+### Files Added
+
+- `src/queue_load_test/models/direct_monitoring.py`
+- `src/queue_load_test/direct_monitor/consistency.py`
+- `tests/unit/test_direct_security.py`
+- `docs/phase8_security_observability.md`
+
+### Files Modified
+
+- `src/queue_load_test/direct_monitor/{__init__,models,store,checker,harvest,handler}.py`
+- `src/queue_load_test/repository/{__init__,base,sqlite}.py`
+- `src/queue_load_test/metrics/{prometheus,logging}.py`
+- `src/queue_load_test/direct_replay/client.py`
+- `src/queue_load_test/web/{app,service}.py`
+- `src/queue_load_test/web/templates/_summary.html`
+- `src/queue_load_test/harness/{local_queue_simulator,phase8_direct_runtime,state_consistency}.py`
+- `src/queue_load_test/config.py`, `src/queue_load_test/models/__init__.py`
+- `tests/unit/{test_direct_monitor,test_observability}.py`
+- `docs/results/phase8_direct_runtime_result.json`, `.env.example`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_direct_security.py tests/unit/test_direct_monitor.py`
+  — 91 passed.
+- `python -m pytest tests/integration/test_phase8_direct_runtime.py` (Chrome) — passed.
+- `queue-load-test-phase8-direct-runtime --backend patchright` — 42/42.
+- Headed Window workflow regression (`tests/integration/test_phase5_workflow.py`,
+  Chrome/Camoufox/Patchright extended) — passed within the full suite.
+- `python -m pytest` — 695 passed, 4 staging deselected (294.04 s).
+- `python -m ruff check src tests` — PASS.
+- `python -m mypy src` — PASS (strict, 101 source files).
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it target or reviewed authorised schema exists, so every
+  Queue-it direct question remains UNKNOWN.
+
+### Important Decisions
+
+- Queue IDs keep the existing exposure policy: allowed in structured logs, never a
+  metric label, never in aggregate reports.
+- A database failure after a valid direct observation is a persistence failure (worker
+  repark), not a direct failure. It does not trigger a browser fallback or change
+  capability.
+- Disagreement is counted only when a refused direct observation and the browser
+  fallback evaluate differently. No reconciliation is attempted.
+
+### Known Issues
+
+- Replay-refreshed cookies do not flow back into browser `storage_state`.
+- The schema review workflow is procedural.
+- The existing intermittent operator-fencing fake-timing test and the Starlette `httpx`
+  TestClient deprecation warning remain.
+
+### Follow-Up
+
+**Phase 8 Prompt 7 — Direct vs Headed Monitoring Benchmark and Authorised Staging
+Validation.**
+
+### Git State
+
+- Branch: main

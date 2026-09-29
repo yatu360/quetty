@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from pathlib import Path
@@ -133,31 +134,41 @@ class DirectStatusChecker:
         try:
             record = await self._store.load(session.session_id)
         except DirectMonitorStateError:
-            await self._store.mark_unavailable(
-                session_id=session.session_id,
-                expected_queue_id=queue_id,
-                reason=DirectFallbackReason.RECIPE_UNCERTAIN,
-            )
+            # Report-only: a corrupt record is left in place for the consistency
+            # report and never used. Only a new legitimate browser observation may
+            # replace it.
             return DirectAttempt(fallback_reason=DirectFallbackReason.RECIPE_UNCERTAIN)
         if record is None or record.capability is DirectCapability.DISCOVERY_REQUIRED:
             return DirectAttempt(fallback_reason=DirectFallbackReason.DISCOVERY_REQUIRED)
         if record.expected_queue_id != queue_id:
-            # Never reconciled: a record for another identity is fenced, not reused.
-            await self._store.mark_unavailable(
-                session_id=session.session_id,
-                expected_queue_id=queue_id,
-                reason=DirectFallbackReason.RECIPE_UNCERTAIN,
-            )
+            # Never reconciled and never reused: a record for another identity stays
+            # as evidence until a new observation for this identity replaces it.
             return DirectAttempt(fallback_reason=DirectFallbackReason.RECIPE_UNCERTAIN)
         if record.capability is DirectCapability.DIRECT_UNAVAILABLE:
             return DirectAttempt(fallback_reason=DirectFallbackReason.DIRECT_UNAVAILABLE)
+        started = time.perf_counter()
         reason, observation = await self._replay(session, queue_id, record, parser)
+        elapsed = time.perf_counter() - started
         if reason is not None:
             await self._record_failure(record, reason)
-            return DirectAttempt(fallback_reason=reason)
+            return DirectAttempt(
+                fallback_reason=reason,
+                rejected_observation=observation,
+                request_seconds=elapsed,
+            )
         assert observation is not None
-        await self._store.record_success(record)
-        return DirectAttempt(observation=observation)
+        try:
+            await self._store.record_success(record)
+        except Exception as exc:  # noqa: BLE001 - bookkeeping never discards a valid check
+            log_event(
+                logger,
+                logging.WARNING,
+                "direct_monitor_record_save_failed",
+                session_id=record.session_id,
+                operation="success",
+                error_type=type(exc).__name__,
+            )
+        return DirectAttempt(observation=observation, request_seconds=elapsed)
 
     async def _replay(
         self,
@@ -190,7 +201,16 @@ class DirectStatusChecker:
                 result = await client.replay(HeaderProfile.FULL_DERIVED)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - e.g. protected cookie persistence failed
+        except Exception as exc:  # noqa: BLE001 - e.g. protected cookie persistence failed
+            # Only the exception type is recorded: HTTP-library messages can carry
+            # the request URL or headers.
+            log_event(
+                logger,
+                logging.WARNING,
+                "direct_monitor_request_error",
+                session_id=session.session_id,
+                error_type=type(exc).__name__,
+            )
             return DirectFallbackReason.UNCERTAIN, None
         if not result.succeeded or result.response_json is None:
             return _replay_reason(result), None
@@ -240,9 +260,20 @@ class DirectStatusChecker:
             reason in HARD_FAILURES
             or record.consecutive_failures + 1 >= self._failure_threshold
         )
-        updated = await self._store.record_failure(
-            record, reason=reason, make_unavailable=make_unavailable
-        )
+        try:
+            updated = await self._store.record_failure(
+                record, reason=reason, make_unavailable=make_unavailable
+            )
+        except Exception as exc:  # noqa: BLE001 - the fallback still runs; nothing is lost
+            log_event(
+                logger,
+                logging.WARNING,
+                "direct_monitor_record_save_failed",
+                session_id=record.session_id,
+                operation="failure",
+                error_type=type(exc).__name__,
+            )
+            return
         if updated.capability is DirectCapability.DIRECT_UNAVAILABLE:
             log_event(
                 logger,

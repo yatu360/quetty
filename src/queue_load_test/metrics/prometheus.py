@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus
+from queue_load_test.models import (
+    DirectCapability,
+    DirectFallbackReason,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+)
 from queue_load_test.repository import PROGRESS_BUCKETS, RecoverySummary
 
 _DURATION_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
@@ -379,6 +385,67 @@ class PrometheusMetrics:
             "Claimable due sessions found at startup.",
             registry=self.registry,
         )
+        # Direct Monitoring Strategy (Phase 8). Labels are closed enums only:
+        # never a session, Queue ID, URL, or any recipe material.
+        self.monitoring_strategy_info = Gauge(
+            "monitoring_strategy_info",
+            "Constant 1 labelled with the current run's persisted monitoring strategy.",
+            labelnames=("strategy",),
+            registry=self.registry,
+        )
+        self.direct_monitoring_attempts_total = Counter(
+            "direct_monitoring_attempts_total",
+            "Direct visitor-status requests sent.",
+            registry=self.registry,
+        )
+        self.direct_monitoring_successes_total = Counter(
+            "direct_monitoring_successes_total",
+            "Direct observations validated and persisted without a browser.",
+            registry=self.registry,
+        )
+        self.direct_monitoring_fallbacks_total = Counter(
+            "direct_monitoring_fallbacks_total",
+            "Direct Monitoring checks that used the browser fallback, by sanitized reason.",
+            labelnames=("reason",),
+            registry=self.registry,
+        )
+        self.direct_monitoring_request_duration_seconds = Histogram(
+            "direct_monitoring_request_duration_seconds",
+            "Duration of one direct visitor-status request and validation.",
+            buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+            registry=self.registry,
+        )
+        self.direct_monitoring_fallback_duration_seconds = Histogram(
+            "direct_monitoring_fallback_duration_seconds",
+            "Duration of the browser fallback check after a direct failure.",
+            buckets=(0.5, 1, 2.5, 5, 10, 30, 60, 120),
+            registry=self.registry,
+        )
+        self.direct_monitoring_disagreements_total = Counter(
+            "direct_monitoring_disagreements_total",
+            "Refused direct observations whose lifecycle differed from the browser fallback.",
+            registry=self.registry,
+        )
+        self.direct_monitoring_identity_mismatches_total = Counter(
+            "direct_monitoring_identity_mismatches_total",
+            "Direct responses with an ambiguous or contradicting Queue ID.",
+            registry=self.registry,
+        )
+        self.direct_monitoring_recipes_refreshed_total = Counter(
+            "direct_monitoring_recipes_refreshed_total",
+            "Direct recipes adopted from a newly observed legitimate browser request.",
+            registry=self.registry,
+        )
+        self.direct_monitoring_sessions = Gauge(
+            "direct_monitoring_sessions",
+            "Monitorable identified sessions by internal direct capability.",
+            labelnames=("capability",),
+            registry=self.registry,
+        )
+        for reason in DirectFallbackReason:
+            self.direct_monitoring_fallbacks_total.labels(reason=reason.value)
+        for capability in DirectCapability:
+            self.direct_monitoring_sessions.labels(capability=capability.value).set(0)
         for operation in REPOSITORY_ERROR_OPERATIONS:
             self.repository_errors_total.labels(operation=operation)
         for bucket in PROGRESS_BUCKETS:
@@ -665,6 +732,37 @@ class PrometheusMetrics:
             checks_per_second=count / elapsed,
             average_check_duration_seconds=duration / count if count else 0.0,
         )
+
+    def set_monitoring_strategy(self, strategy: str) -> None:
+        self.monitoring_strategy_info.clear()
+        self.monitoring_strategy_info.labels(strategy=strategy).set(1)
+
+    def record_direct_attempt(self, duration_seconds: float, *, success: bool) -> None:
+        self.direct_monitoring_attempts_total.inc()
+        self.direct_monitoring_request_duration_seconds.observe(max(0.0, duration_seconds))
+        if success:
+            self.direct_monitoring_successes_total.inc()
+
+    def record_direct_fallback(self, reason: DirectFallbackReason, duration_seconds: float) -> None:
+        self.direct_monitoring_fallbacks_total.labels(
+            reason=DirectFallbackReason(reason).value
+        ).inc()
+        self.direct_monitoring_fallback_duration_seconds.observe(max(0.0, duration_seconds))
+
+    def record_direct_disagreement(self) -> None:
+        self.direct_monitoring_disagreements_total.inc()
+
+    def record_direct_identity_mismatch(self) -> None:
+        self.direct_monitoring_identity_mismatches_total.inc()
+
+    def record_direct_recipe_refreshed(self) -> None:
+        self.direct_monitoring_recipes_refreshed_total.inc()
+
+    def set_direct_capability_counts(self, counts: dict[str, int]) -> None:
+        for capability in DirectCapability:
+            self.direct_monitoring_sessions.labels(capability=capability.value).set(
+                counts.get(capability.value, 0)
+            )
 
     def render(self) -> bytes:
         return generate_latest(self.registry)

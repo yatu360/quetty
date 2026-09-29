@@ -7,7 +7,7 @@ import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import HttpUrl, TypeAdapter
 
@@ -30,7 +30,12 @@ from queue_load_test.direct_monitor import (
 )
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import log_event
-from queue_load_test.models import BrowserBackendName, MonitoringStrategy, RunConfig
+from queue_load_test.models import (
+    BrowserBackendName,
+    DirectCapability,
+    MonitoringStrategy,
+    RunConfig,
+)
 from queue_load_test.observation_equivalence import (
     DirectResponseParser,
     DirectResponseSchema,
@@ -38,7 +43,7 @@ from queue_load_test.observation_equivalence import (
     load_direct_response_schema,
 )
 from queue_load_test.queue_monitor import AdmissionDetector
-from queue_load_test.repository import SessionRepository
+from queue_load_test.repository import DirectMonitorMetadataRepository, SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
 from queue_load_test.scheduler import (
     MonitoringHandler,
@@ -121,6 +126,8 @@ def _direct_handler_for_run(
     browser_monitor: QueueSessionMonitor,
     state_store: FileSystemStateStore,
     target_url: str,
+    metadata: DirectMonitorMetadataRepository | None = None,
+    observability: PrometheusMetrics | None = None,
 ) -> DirectMonitoringHandler | None:
     if run.monitoring_strategy is not MonitoringStrategy.DIRECT:
         return None
@@ -156,7 +163,19 @@ def _direct_handler_for_run(
         ),
         store=store,
         harvester=harvester,
+        metadata=metadata,
+        observability=observability,
+        readopt_cooldown_seconds=settings.direct_monitor_readopt_cooldown_seconds,
+        discovery_retention=settings.direct_monitor_discovery_retention,
     )
+
+
+def _metadata_repository(repository: SessionRepository) -> DirectMonitorMetadataRepository | None:
+    if hasattr(repository, "record_direct_monitor_status") and hasattr(
+        repository, "direct_capability_counts"
+    ):
+        return cast(DirectMonitorMetadataRepository, repository)
+    return None
 
 
 def _status_discovery_for_run(
@@ -245,6 +264,7 @@ class ApplicationRunRuntime:
         self._headed_browser_manager: BrowserManager | None = None
         self._operator_actions: OperatorActionManager | None = None
         self._direct_handler: DirectMonitoringHandler | None = None
+        self._metrics: PrometheusMetrics | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
@@ -348,7 +368,10 @@ class ApplicationRunRuntime:
                 browser_monitor=monitor,
                 state_store=state_store,
                 target_url=target_url,
+                metadata=_metadata_repository(self._repository),
+                observability=metrics,
             )
+            metrics.set_monitoring_strategy(run.monitoring_strategy.value)
             automatic_monitor = _automatic_monitor_for_strategy(
                 run.monitoring_strategy,
                 browser_monitor=monitor,
@@ -445,6 +468,7 @@ class ApplicationRunRuntime:
             self._headed_browser_manager = headed_manager
             self._operator_actions = operator_actions
             self._direct_handler = direct_handler
+            self._metrics = metrics
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
     async def capacity(self) -> RuntimeCapacity:
@@ -526,6 +550,27 @@ class ApplicationRunRuntime:
         manager = self._operator_actions
         return manager.latest_add() if manager is not None else None
 
+    async def metrics_exposition(self) -> bytes:
+        """Prometheus text for the current run; aggregate, low-cardinality only."""
+
+        metrics = self._metrics
+        if metrics is None:
+            return b""
+        metadata = _metadata_repository(self._repository)
+        if self._direct_handler is not None and metadata is not None:
+            try:
+                metrics.set_direct_capability_counts(await metadata.direct_capability_counts())
+            except Exception as exc:  # noqa: BLE001 - serve last known values
+                metrics.record_repository_error("status")
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "status_snapshot_failed",
+                    operation="direct_capability",
+                    error_type=type(exc).__name__,
+                )
+        return metrics.render()
+
     @property
     def direct_monitoring_metrics(self) -> DirectMonitoringMetrics | None:
         """In-process Direct strategy counters; ``None`` for a Headed Window run."""
@@ -577,6 +622,7 @@ class ApplicationRunRuntime:
             self._headed_browser_manager = None
             self._operator_actions = None
             self._direct_handler = None
+            self._metrics = None
         try:
             await self._repository.reset_all()
         except Exception:
@@ -624,6 +670,9 @@ class DashboardSummary:
     active_contexts: int
     maximum_active_contexts: int
     chrome_processes: int
+    # Direct Monitoring Strategy aggregates only (None for Headed Window runs).
+    direct_capability: tuple[tuple[str, int], ...] | None = None
+    direct_checks: str | None = None
 
 
 class DashboardService:
@@ -641,6 +690,7 @@ class DashboardService:
             await self._repository.get_operator_population_adjustment()
         )
         effective_target = max(0, run.requested_sessions + population_adjustment)
+        direct_capability, direct_checks = await self._direct_summary(run)
         if runtime_error is not None:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= effective_target:
@@ -665,4 +715,24 @@ class DashboardService:
             active_contexts=capacity.active_contexts,
             maximum_active_contexts=capacity.maximum_active_contexts,
             chrome_processes=capacity.chrome_processes,
+            direct_capability=direct_capability,
+            direct_checks=direct_checks,
         )
+
+    async def _direct_summary(
+        self, run: RunConfig
+    ) -> tuple[tuple[tuple[str, int], ...] | None, str | None]:
+        if run.monitoring_strategy is not MonitoringStrategy.DIRECT:
+            return None, None
+        metadata = _metadata_repository(self._repository)
+        counts = await metadata.direct_capability_counts() if metadata is not None else {}
+        capability = tuple(
+            (value.value, counts.get(value.value, 0)) for value in DirectCapability
+        )
+        metrics = getattr(self._runtime, "direct_monitoring_metrics", None)
+        checks = (
+            f"{metrics.direct_successes} direct / {metrics.browser_fallbacks} fallback"
+            if isinstance(metrics, DirectMonitoringMetrics)
+            else None
+        )
+        return capability, checks

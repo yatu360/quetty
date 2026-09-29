@@ -5,6 +5,12 @@ from queue_load_test.direct_monitor.checker import (
     DirectStatusChecker,
     validate_direct_observation,
 )
+from queue_load_test.direct_monitor.consistency import (
+    DirectMonitorConsistencyChecker,
+    DirectMonitorConsistencyReport,
+    DirectMonitorFinding,
+    DirectMonitorFindingKind,
+)
 from queue_load_test.direct_monitor.handler import (
     DirectMonitoringHandler,
     DirectMonitoringMetrics,
@@ -27,6 +33,7 @@ from queue_load_test.direct_monitor.store import (
     DirectMonitorRecord,
     DirectMonitorStateError,
     DirectMonitorStateStore,
+    recipe_reference,
 )
 
 __all__ = [
@@ -38,6 +45,10 @@ __all__ = [
     "DirectAttempt",
     "DirectCapability",
     "DirectFallbackReason",
+    "DirectMonitorConsistencyChecker",
+    "DirectMonitorConsistencyReport",
+    "DirectMonitorFinding",
+    "DirectMonitorFindingKind",
     "DirectMonitorRecord",
     "DirectMonitorStateError",
     "DirectMonitorStateStore",
@@ -47,5 +58,6 @@ __all__ = [
     "DiscoveryRecipeHarvester",
     "accepted_evidence_scopes",
     "is_loopback_url",
+    "recipe_reference",
     "validate_direct_observation",
 ]

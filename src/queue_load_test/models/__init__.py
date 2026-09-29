@@ -1,6 +1,7 @@
 """Domain models."""
 
 from queue_load_test.models.browser import BrowserBackendName
+from queue_load_test.models.direct_monitoring import DirectCapability, DirectFallbackReason
 from queue_load_test.models.lifecycle import (
     InvalidQueueTransition,
     MonitoringObservation,
@@ -26,6 +27,8 @@ from queue_load_test.models.work_item import WorkItem
 __all__ = [
     "BrowserBackendName",
     "BrowserRuntimeState",
+    "DirectCapability",
+    "DirectFallbackReason",
     "InvalidQueueTransition",
     "MonitoringObservation",
     "MonitoringStrategy",

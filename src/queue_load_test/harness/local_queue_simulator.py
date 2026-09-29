@@ -60,6 +60,9 @@ class LocalQueueSimulator:
     status_enabled: bool = False
     status_poll_ms: int = 400
     status_faults: dict[str, str] = field(default_factory=dict)
+    # Recognizable fake secret seeded into the visitor cookie, the page-built status
+    # URL, the status response body, and a status Set-Cookie (secret-leak tests).
+    secret_token: str | None = None
     page_requests: Counter[str] = field(default_factory=Counter)
     browser_status_requests: Counter[str] = field(default_factory=Counter)
     direct_status_requests: Counter[str] = field(default_factory=Counter)
@@ -160,12 +163,12 @@ class LocalQueueSimulator:
             self.page_requests[queue_id] += 1
             shown_id = f"{queue_id}-other" if queue_id in self.mismatch_ids else queue_id
             body = self._html(queue_id, self.transfer_url(shown_id))
-            await self._respond(
-                writer,
-                200,
-                body,
-                extra_headers=f"Set-Cookie: queue_id={queue_id}; Path=/; SameSite=Lax\r\n",
-            )
+            cookies = f"Set-Cookie: queue_id={queue_id}; Path=/; SameSite=Lax\r\n"
+            if self.secret_token is not None:
+                cookies += (
+                    f"Set-Cookie: visitor_secret={self.secret_token}; Path=/; SameSite=Lax\r\n"
+                )
+            await self._respond(writer, 200, body, extra_headers=cookies)
         except (asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
         finally:
@@ -211,11 +214,17 @@ class LocalQueueSimulator:
         if fault == "malformed":
             await self._respond(writer, 200, "{not json", content_type="application/json")
             return
+        document = self.status_document(queue_id, fault)
+        extra = ""
+        if self.secret_token is not None:
+            document["sessionToken"] = self.secret_token
+            extra = f"Set-Cookie: rotation={self.secret_token}-rot; Path=/; SameSite=Lax\r\n"
         await self._respond(
             writer,
             200,
-            json.dumps(self.status_document(queue_id, fault)),
+            json.dumps(document),
             content_type="application/json",
+            extra_headers=extra,
         )
 
     def status_document(self, queue_id: str, fault: str | None = None) -> dict[str, object]:
@@ -265,10 +274,15 @@ class LocalQueueSimulator:
     def _status_script(self, queue_id: str) -> str:
         if not self.status_enabled:
             return ""
+        token = (
+            "&token=" + self.secret_token if self.secret_token is not None else ""
+        )
         return (
             "<script>(function(){const q="
             + json.dumps(queue_id)
-            + ";function poll(){fetch('/status?q='+encodeURIComponent(q),"
+            + ";function poll(){fetch('/status?q='+encodeURIComponent(q)+"
+            + json.dumps(token)
+            + ","
             "{headers:{'Accept':'application/json'}}).catch(function(){});}"
             f"poll();setInterval(poll,{self.status_poll_ms});}})();</script>"
         )

@@ -7,11 +7,19 @@ import asyncio
 import json
 from pathlib import Path
 
+from queue_load_test.direct_monitor import (
+    DirectMonitorConsistencyChecker,
+    DirectMonitorStateStore,
+)
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.state import FileSystemStateStore, StateConsistencyChecker
 
 
-async def run_consistency_check(database: Path, state_directory: Path) -> dict[str, object]:
+async def run_consistency_check(
+    database: Path,
+    state_directory: Path,
+    direct_monitor_directory: Path | None = None,
+) -> dict[str, object]:
     if not database.is_file():
         raise FileNotFoundError(f"SQLite database does not exist: {database}")
     repository = SQLiteSessionRepository(database)
@@ -21,7 +29,13 @@ async def run_consistency_check(database: Path, state_directory: Path) -> dict[s
             repository,
             FileSystemStateStore(state_directory),
         ).check()
-        return report.to_dict()
+        result = report.to_dict()
+        if direct_monitor_directory is not None:
+            direct = await DirectMonitorConsistencyChecker(
+                repository, DirectMonitorStateStore(direct_monitor_directory)
+            ).check()
+            result["direct_monitor"] = direct.to_dict()
+        return result
     finally:
         await repository.close()
 
@@ -32,13 +46,22 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument("--state-directory", type=Path, required=True)
+    parser.add_argument(
+        "--direct-monitor-directory",
+        type=Path,
+        help="also audit the protected Direct Monitoring store (report-only)",
+    )
     parser.add_argument("--report", type=Path)
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
-    report = asyncio.run(run_consistency_check(args.database, args.state_directory))
+    report = asyncio.run(
+        run_consistency_check(
+            args.database, args.state_directory, args.direct_monitor_directory
+        )
+    )
     output = json.dumps(report, indent=2) + "\n"
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)

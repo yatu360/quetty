@@ -621,25 +621,28 @@ async def test_record_for_another_identity_is_fenced_not_reused(tmp_path: Path) 
         recipe=recipe_for(other),
     )
 
+    before = harness.store.path_for(session.session_id).read_bytes()
     await harness.handler.check(session)
 
     assert harness.requests == []
-    record = await harness.store.load(session.session_id)
-    assert record is not None
-    assert record.capability is DirectCapability.DIRECT_UNAVAILABLE
-    assert record.expected_queue_id == session.queue_id
+    assert harness.handler.metrics.fallback_reasons == {
+        DirectFallbackReason.RECIPE_UNCERTAIN.value: 1
+    }
+    # Report-only: the other identity's record is neither reused nor rewritten.
+    assert harness.store.path_for(session.session_id).read_bytes() == before
     persisted = await harness.repository.get(session.session_id)
     assert persisted is not None and persisted.queue_id == session.queue_id
     await harness.repository.close()
 
 
-async def test_corrupt_record_falls_back_and_is_replaced_by_an_unavailable_fence(
+async def test_corrupt_record_falls_back_and_is_kept_for_the_report(
     tmp_path: Path,
 ) -> None:
     harness = await build(tmp_path, harvest=False)
     session = await add_session(harness)
     path = harness.store.path_for(session.session_id)
     path.write_text(path.read_text().replace("DIRECT_CAPABLE", "DIRECT_UNAVAILABLE"))
+    tampered = path.read_bytes()
 
     with pytest.raises(DirectMonitorStateError):
         await harness.store.load(session.session_id)
@@ -649,7 +652,7 @@ async def test_corrupt_record_falls_back_and_is_replaced_by_an_unavailable_fence
     assert harness.handler.metrics.fallback_reasons == {
         DirectFallbackReason.RECIPE_UNCERTAIN.value: 1
     }
-    assert await capability(harness) is DirectCapability.DIRECT_UNAVAILABLE
+    assert path.read_bytes() == tampered  # no automatic destructive repair
     await harness.repository.close()
 
 
@@ -1172,7 +1175,7 @@ async def test_replayable_values_never_reach_sqlite_or_logs(
     text = "\n".join(formatter.format(record) for record in caplog.records)
     assert SECRET_COOKIE not in text and SECRET_HEADER not in text
     assert "status?q=" not in text
-    assert "direct_check_fallback" in text
+    assert "direct_monitor_fallback" in text
 
 
 def test_record_rejects_inconsistent_metadata(tmp_path: Path) -> None:

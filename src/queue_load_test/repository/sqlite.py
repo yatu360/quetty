@@ -27,6 +27,7 @@ from queue_load_test.repository.base import (
     PROGRESS_BUCKETS,
     ActiveRunExistsError,
     ClaimedSessions,
+    DirectMonitorStatus,
     DueSessionSummary,
     LeaseOwnershipError,
     ManualSessionBusyError,
@@ -129,6 +130,16 @@ CREATE TABLE IF NOT EXISTS queue_progress (
     active_queue INTEGER,
     manual_update_warning TEXT
 );
+CREATE TABLE IF NOT EXISTS direct_monitor_status (
+    session_id TEXT PRIMARY KEY REFERENCES queue_sessions(session_id) ON DELETE CASCADE,
+    capability TEXT NOT NULL,
+    last_reason TEXT,
+    recipe_reference TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+    last_success_at TEXT,
+    last_failure_at TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -174,6 +185,10 @@ def _to_storage(value: datetime | None) -> str | None:
 
 def _from_storage(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value is not None else None
+
+
+def _required_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value)
 
 
 def _session_values(session: QueueSession) -> tuple[object, ...]:
@@ -436,6 +451,7 @@ class SQLiteSessionRepository:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 connection.execute("DELETE FROM queue_progress")
+                connection.execute("DELETE FROM direct_monitor_status")
                 connection.execute("DELETE FROM queue_sessions")
                 connection.execute("DELETE FROM run_config")
                 connection.execute(
@@ -560,6 +576,105 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 raise
             return _row_to_session(claimed)
+
+        return await self._run(operation)
+
+    async def record_direct_monitor_status(self, status: DirectMonitorStatus) -> bool:
+        """Upsert non-secret Direct Monitoring metadata; ignored once a session is gone.
+
+        Only a capability value, a sanitized reason enum value, a one-way recipe
+        reference, counters, and timestamps are stored. Recipes, URLs, headers,
+        bodies, and cookies stay in the protected direct-monitor store.
+        """
+
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                """
+                INSERT INTO direct_monitor_status (
+                    session_id, capability, last_reason, recipe_reference,
+                    consecutive_failures, last_success_at, last_failure_at, updated_at
+                )
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?
+                WHERE EXISTS (SELECT 1 FROM queue_sessions WHERE session_id = ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    capability = excluded.capability,
+                    last_reason = excluded.last_reason,
+                    recipe_reference = excluded.recipe_reference,
+                    consecutive_failures = excluded.consecutive_failures,
+                    last_success_at = COALESCE(
+                        excluded.last_success_at, direct_monitor_status.last_success_at
+                    ),
+                    last_failure_at = COALESCE(
+                        excluded.last_failure_at, direct_monitor_status.last_failure_at
+                    ),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    status.session_id,
+                    status.capability,
+                    status.last_reason,
+                    status.recipe_reference,
+                    status.consecutive_failures,
+                    _to_storage(status.last_success_at),
+                    _to_storage(status.last_failure_at),
+                    _to_storage(status.updated_at),
+                    status.session_id,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
+
+        return await self._run(operation)
+
+    async def get_direct_monitor_status(self, session_id: str) -> DirectMonitorStatus | None:
+        def operation() -> DirectMonitorStatus | None:
+            row = (
+                self._connect()
+                .execute(
+                    "SELECT * FROM direct_monitor_status WHERE session_id = ?", (session_id,)
+                )
+                .fetchone()
+            )
+            if row is None:
+                return None
+            return DirectMonitorStatus(
+                session_id=str(row["session_id"]),
+                capability=str(row["capability"]),
+                last_reason=row["last_reason"],
+                recipe_reference=row["recipe_reference"],
+                consecutive_failures=int(row["consecutive_failures"]),
+                last_success_at=_from_storage(row["last_success_at"]),
+                last_failure_at=_from_storage(row["last_failure_at"]),
+                updated_at=_required_datetime(row["updated_at"]),
+            )
+
+        return await self._run(operation)
+
+    async def direct_capability_counts(self) -> dict[str, int]:
+        """Aggregate capability for monitorable identified sessions (no per-session data).
+
+        A session without a metadata row has not been observed yet and counts as
+        ``DISCOVERY_REQUIRED``.
+        """
+
+        def operation() -> dict[str, int]:
+            rows = (
+                self._connect()
+                .execute(
+                    f"""
+                    SELECT COALESCE(d.capability, 'DISCOVERY_REQUIRED') AS capability,
+                           COUNT(*) AS sessions
+                    FROM queue_sessions AS s
+                    LEFT JOIN direct_monitor_status AS d ON d.session_id = s.session_id
+                    WHERE s.queue_id IS NOT NULL
+                      AND s.status NOT IN ({_NON_MONITORABLE_STATUSES_SQL})
+                    GROUP BY 1
+                    """
+                )
+                .fetchall()
+            )
+            return {str(row["capability"]): int(row["sessions"]) for row in rows}
 
         return await self._run(operation)
 

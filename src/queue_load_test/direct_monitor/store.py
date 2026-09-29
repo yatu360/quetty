@@ -26,7 +26,17 @@ from queue_load_test.direct_replay import (
 from queue_load_test.direct_replay.store import read_protected_json, write_protected_json
 
 _FORMAT = "queue-load-test.phase8-direct-monitor-record"
-_VERSION = 1
+_VERSION = 2
+_READABLE_VERSIONS = frozenset({1, 2})
+
+
+def recipe_reference(recipe: ReplayRecipe | None) -> str | None:
+    """A short one-way version reference safe for SQLite, never the recipe itself."""
+
+    if recipe is None or not recipe.fingerprint:
+        return None
+    digest = hashlib.sha256(f"direct-recipe-reference:{recipe.fingerprint}".encode())
+    return f"r1-{digest.hexdigest()[:16]}"
 
 
 class DirectMonitorStateError(RuntimeError):
@@ -44,6 +54,8 @@ class DirectMonitorRecord:
     recipe: ReplayRecipe | None = field(default=None, repr=False)
     last_reason: DirectFallbackReason | None = None
     consecutive_failures: int = 0
+    # When the session last became DIRECT_UNAVAILABLE; bounds re-adoption churn.
+    unavailable_since: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.capability is DirectCapability.DIRECT_CAPABLE and self.recipe is None:
@@ -136,6 +148,10 @@ class DirectMonitorStateStore:
         reason: DirectFallbackReason,
         make_unavailable: bool,
     ) -> DirectMonitorRecord:
+        now = datetime.now(UTC)
+        becomes_unavailable = (
+            make_unavailable and record.capability is not DirectCapability.DIRECT_UNAVAILABLE
+        )
         updated = replace(
             record,
             capability=(
@@ -143,31 +159,11 @@ class DirectMonitorStateStore:
             ),
             last_reason=reason,
             consecutive_failures=record.consecutive_failures + 1,
-            updated_at=datetime.now(UTC),
+            updated_at=now,
+            unavailable_since=now if becomes_unavailable else record.unavailable_since,
         )
         await self.save(updated)
         return updated
-
-    async def mark_unavailable(
-        self,
-        *,
-        session_id: str,
-        expected_queue_id: str,
-        reason: DirectFallbackReason,
-    ) -> DirectMonitorRecord:
-        """Fence an unusable record (for example one for another identity)."""
-
-        record = DirectMonitorRecord(
-            session_id=session_id,
-            expected_queue_id=expected_queue_id,
-            capability=DirectCapability.DIRECT_UNAVAILABLE,
-            updated_at=datetime.now(UTC),
-            last_reason=reason,
-            consecutive_failures=1,
-        )
-        await self.cookies.delete(session_id)
-        await self.save(record)
-        return record
 
     async def delete(self, session_id: str) -> bool:
         record_removed = await asyncio.to_thread(_unlink, self.path_for(session_id))
@@ -192,6 +188,9 @@ def _encode(record: DirectMonitorRecord) -> dict[str, object]:
         "updated_at": record.updated_at.isoformat(),
         "last_reason": record.last_reason.value if record.last_reason is not None else None,
         "consecutive_failures": record.consecutive_failures,
+        "unavailable_since": (
+            record.unavailable_since.isoformat() if record.unavailable_since is not None else None
+        ),
         "recipe": (
             None
             if recipe is None
@@ -218,7 +217,7 @@ def _decode(document: dict[str, object], session_id: str) -> DirectMonitorRecord
         raise DirectMonitorStateError("direct-monitor record failed its integrity check")
     if (
         document.get("format") != _FORMAT
-        or document.get("version") != _VERSION
+        or document.get("version") not in _READABLE_VERSIONS
         or document.get("session_id") != session_id
     ):
         raise DirectMonitorStateError("direct-monitor record does not belong to this session")
@@ -240,6 +239,7 @@ def _decode(document: dict[str, object], session_id: str) -> DirectMonitorRecord
                 DirectFallbackReason(str(raw_reason)) if raw_reason is not None else None
             ),
             consecutive_failures=failures,
+            unavailable_since=_optional_datetime(document.get("unavailable_since")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise DirectMonitorStateError("direct-monitor record contains invalid values") from exc
@@ -286,6 +286,14 @@ def _decode_recipe(value: object, session_id: str, queue_id: str) -> ReplayRecip
         },
         fingerprint=cast(str, value["fingerprint"]),
     )
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError
+    return datetime.fromisoformat(value)
 
 
 def _unlink(path: Path) -> bool:

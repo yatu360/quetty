@@ -10,6 +10,30 @@ live monitoring.
 
 ## Current Status
 
+### Direct Monitoring security, observability, and hardening (Phase 8 Prompt 6, 2026-09-29)
+
+- Sensitive material stays in the protected stores only: recipes, URLs, headers,
+  bodies, cookies, `storage_state`, and discovery evidence. Logs, metrics, dashboard,
+  SQLite, reports, reprs, and operator messages carry only session IDs, closed enum
+  values, counts, durations, and one-way recipe references.
+- A new SQLite table, `direct_monitor_status` (schema change: `CREATE TABLE IF NOT
+  EXISTS`, cascade-deleted with the session), holds only capability, sanitized last
+  reason, recipe reference, counters, and timestamps.
+- Prometheus now has low-cardinality direct metrics: attempts, successes,
+  fallbacks by reason, request and fallback durations, disagreements, identity
+  mismatches, recipe refreshes, capability gauges, and the strategy info series. The
+  operator UI exposes them on `GET /metrics`. The dashboard shows aggregate capability
+  counts for Direct runs.
+- A real leak was found and fixed: `httpcore` DEBUG header traces could log a
+  `Set-Cookie` value. HTTP-client loggers are now floored at WARNING, and their messages
+  are always replaced by the JSON formatter.
+- Corrupt or foreign direct records are never overwritten automatically (report-only).
+  `queue-load-test-state-check --direct-monitor-directory` audits the store without
+  repairing it.
+- Churn and evidence are bounded: a re-adoption cooldown (default 300 s) and per-session
+  discovery retention (default 5).
+- Queue-it staging is **NOT RUN / UNKNOWN**. See `docs/phase8_security_observability.md`.
+
 ### Production Direct Monitoring with browser fallback (Phase 8 Prompt 5, 2026-09-29)
 
 - Direct Monitoring Strategy runs now use `DirectMonitoringHandler`: claim, then a
@@ -1220,6 +1244,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   minimisation method, UNKNOWN findings, and Prompt 4 evidence gate.
 - `docs/phase8_observation_equivalence.md` — common observation model, schema and
   comparison rules, shadow harness, UNKNOWN evidence, and Prompt 5 gate.
+- `docs/phase8_security_observability.md` — Prompt 6 sensitive-data policy, SQLite
+  metadata, metrics/events, HTTP-client log fix, failure matrix, and secret-leak tests.
 - `docs/phase8_direct_runtime_integration.md` — Prompt 5 routing, capability states,
   fallback classification, recipe refresh, protected persistence, operator semantics,
   local validation, and Prompt 6 inputs.
@@ -1414,13 +1440,11 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 8 Prompt 6 — Direct Monitoring Security, Observability, and Failure
-Hardening.** Prompt 5 is complete, running local simulator evidence only. The
-authorised Queue-it staging evidence sequence (Prompt 2 discovery, Prompt 3 replay,
-Prompt 4 shadow comparison, and a reviewed `authorized_queue_it_staging` schema) is
-still required before any real event can make a session direct-capable. Authorised
-Patchright staging validation also remains open. Never claim staging PASS without an
-authorised run.
+**Phase 8 Prompt 7 — Direct vs Headed Monitoring Benchmark and Authorised Staging
+Validation.** Prompts 5–6 are complete, running local simulator evidence only. A real
+event still needs the authorised Prompt 2–4 evidence sequence and a reviewed
+`authorized_queue_it_staging` schema before any session can become direct-capable.
+Never claim staging PASS without an authorised run.
 
 ## Instructions for Future AI Sessions
 

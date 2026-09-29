@@ -20,9 +20,12 @@ from queue_load_test.direct_replay.models import (
     ReplayResult,
 )
 from queue_load_test.direct_replay.store import ProtectedReplayStateStore
-from queue_load_test.metrics.logging import log_event
+from queue_load_test.metrics.logging import log_event, quiet_http_client_loggers
 
 logger = logging.getLogger(__name__)
+# Replayed requests carry visitor cookies and headers; keep the HTTP client's own
+# INFO/DEBUG request and header traces out of every log handler.
+quiet_http_client_loggers()
 
 _BLOCKED_HEADERS = frozenset(
     {

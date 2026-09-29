@@ -11,16 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from queue_load_test.direct_replay import ReplayEvidenceError, ReplayRecipe, load_replay_recipe
-from queue_load_test.metrics.logging import log_event
 from queue_load_test.observation_equivalence import DirectObservationError, DirectResponseParser
-
-logger = logging.getLogger(__name__)
 
 AUTHORIZED_STAGING_SCOPE = "authorized_queue_it_staging"
 LOCAL_SIMULATOR_SCOPE = "local_simulator"
@@ -82,6 +78,23 @@ class DiscoveryRecipeHarvester:
             if recipe is not None:
                 return recipe
         return None
+
+    async def prune(self, *, session_id: str, keep: int) -> int:
+        """Bound sensitive evidence per session, keeping the newest ``keep`` artifacts."""
+
+        if keep < 1:
+            return 0
+        return await asyncio.to_thread(self._prune, session_id, keep)
+
+    def _prune(self, session_id: str, keep: int) -> int:
+        removed = 0
+        for path in self._artifacts(session_id, 0.0)[keep:]:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            removed += 1
+        return removed
 
     def _artifacts(self, session_id: str, observed_since: float) -> list[Path]:
         if not self._directory.is_dir():
@@ -153,13 +166,5 @@ class DiscoveryRecipeHarvester:
                 )
             except DirectObservationError:
                 continue
-            log_event(
-                logger,
-                logging.INFO,
-                "direct_recipe_observed",
-                session_id=session_id,
-                operation=recipe.source_scope,
-                count=1,
-            )
             return recipe
         return None

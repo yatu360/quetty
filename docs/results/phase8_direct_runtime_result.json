@@ -1,200 +1,240 @@
 {
   "scope": "local_simulator_only",
   "queue_it_contacted": false,
-  "passed": 35,
+  "passed": 42,
   "failed": 0,
   "checks": [
     {
       "name": "direct_run_persists_strategy",
       "passed": true,
-      "t_seconds": 0.68
+      "t_seconds": 0.56
     },
     {
       "name": "creation_is_browser_based_and_unchanged",
       "passed": true,
-      "seconds": 1.01,
-      "t_seconds": 1.69
+      "seconds": 1.0,
+      "t_seconds": 1.56
     },
     {
       "name": "browser_fallback_discovers_legitimate_recipe_per_session",
       "passed": true,
       "seconds": 2.52,
-      "t_seconds": 4.21
+      "t_seconds": 4.08
     },
     {
       "name": "replayable_recipe_is_protected_not_in_sqlite",
       "passed": true,
-      "t_seconds": 4.21
+      "t_seconds": 4.08
     },
     {
       "name": "direct_checks_persist_progress_and_lifecycle_without_browser",
       "passed": true,
-      "seconds": 0.51,
-      "t_seconds": 4.72
+      "seconds": 0.53,
+      "t_seconds": 4.61
     },
     {
       "name": "direct_checks_hold_no_browser_ownership_or_contexts",
       "passed": true,
-      "t_seconds": 4.72
+      "t_seconds": 4.61
     },
     {
       "name": "fallback_http_500_uses_browser_monitor",
       "passed": true,
       "reason": "unexpected_http_status",
-      "t_seconds": 5.93
+      "t_seconds": 5.83
     },
     {
       "name": "fallback_slow_uses_browser_monitor",
       "passed": true,
       "reason": "timeout",
-      "t_seconds": 10.27
+      "t_seconds": 10.07
     },
     {
       "name": "fallback_redirect_uses_browser_monitor",
       "passed": true,
       "reason": "unexpected_redirect",
-      "t_seconds": 13.51
+      "t_seconds": 13.4
     },
     {
       "name": "fallback_html_uses_browser_monitor",
       "passed": true,
       "reason": "unexpected_content_type",
-      "t_seconds": 16.64
+      "t_seconds": 16.63
     },
     {
       "name": "fallback_malformed_uses_browser_monitor",
       "passed": true,
       "reason": "malformed_response",
-      "t_seconds": 19.97
+      "t_seconds": 19.87
     },
     {
       "name": "fallback_wrong_type_uses_browser_monitor",
       "passed": true,
       "reason": "schema_incompatible",
-      "t_seconds": 23.3
+      "t_seconds": 23.11
     },
     {
       "name": "fallback_missing_id_uses_browser_monitor",
       "passed": true,
       "reason": "identity_ambiguity",
-      "t_seconds": 26.43
+      "t_seconds": 26.37
     },
     {
       "name": "fallback_mismatch_uses_browser_monitor",
       "passed": true,
       "reason": "identity_mismatch",
-      "t_seconds": 29.66
+      "t_seconds": 29.63
     },
     {
       "name": "fallback_rejected_uses_browser_monitor",
       "passed": true,
       "reason": "rejected_session_state",
-      "t_seconds": 32.9
+      "t_seconds": 32.89
     },
     {
       "name": "fallback_unknown_lifecycle_uses_browser_monitor",
       "passed": true,
       "reason": "unknown_lifecycle",
-      "t_seconds": 36.13
+      "t_seconds": 36.15
     },
     {
       "name": "fallback_contradictory_uses_browser_monitor",
       "passed": true,
       "reason": "contradictory_lifecycle",
-      "t_seconds": 39.37
+      "t_seconds": 39.41
     },
     {
       "name": "fallback_admitted_uses_browser_monitor",
       "passed": true,
       "reason": "unsupported_admission",
-      "t_seconds": 42.6
+      "t_seconds": 42.67
     },
     {
       "name": "direct_failures_never_reacquire_or_replace_identity",
       "passed": true,
-      "t_seconds": 42.6
+      "t_seconds": 42.67
     },
     {
       "name": "legitimate_browser_fallback_refreshes_recipe_and_direct_resumes",
       "passed": true,
-      "t_seconds": 47.66
+      "t_seconds": 47.67
     },
     {
       "name": "run_stays_direct_while_sessions_fall_back",
       "passed": true,
-      "t_seconds": 47.67
+      "t_seconds": 47.68
     },
     {
       "name": "pause_stops_direct_and_browser_automatic_checks",
       "passed": true,
-      "t_seconds": 50.68
+      "t_seconds": 50.69
     },
     {
       "name": "refresh_now_uses_direct_strategy_while_paused",
       "passed": true,
-      "t_seconds": 50.81
+      "t_seconds": 50.82
     },
     {
       "name": "refresh_now_falls_back_to_browser_on_direct_failure",
       "passed": true,
-      "t_seconds": 52.24
+      "t_seconds": 52.26
     },
     {
       "name": "resume_continues_direct_monitoring",
       "passed": true,
-      "t_seconds": 52.35
+      "t_seconds": 52.37
     },
     {
       "name": "manual_open_is_browser_based_and_fences_direct_polling",
       "passed": true,
-      "t_seconds": 56.96
+      "t_seconds": 56.97
     },
     {
       "name": "close_releases_ownership_and_direct_resumes",
       "passed": true,
-      "t_seconds": 58.94
+      "t_seconds": 59.05
     },
     {
       "name": "add_is_browser_based_and_new_session_becomes_direct_capable",
       "passed": true,
-      "t_seconds": 60.56
+      "t_seconds": 60.77
     },
     {
       "name": "replace_removes_old_direct_record_and_keeps_others",
       "passed": true,
-      "t_seconds": 60.77
+      "t_seconds": 60.98
     },
     {
       "name": "delete_removes_direct_record_and_cookies",
       "passed": true,
-      "t_seconds": 60.88
+      "t_seconds": 61.09
+    },
+    {
+      "name": "metrics_expose_low_cardinality_direct_series",
+      "passed": true,
+      "t_seconds": 61.09
+    },
+    {
+      "name": "dashboard_shows_aggregate_direct_capability_only",
+      "passed": true,
+      "t_seconds": 61.09
+    },
+    {
+      "name": "fake_secret_absent_from_ui_metrics_and_sqlite",
+      "passed": true,
+      "leaked": [],
+      "t_seconds": 61.1
+    },
+    {
+      "name": "discovery_evidence_retention_is_bounded",
+      "passed": true,
+      "retained": [
+        2
+      ],
+      "t_seconds": 61.1
+    },
+    {
+      "name": "secret_bearing_recipe_lives_only_in_protected_store",
+      "passed": true,
+      "t_seconds": 61.1
     },
     {
       "name": "shutdown_releases_all_ownership_and_browsers",
       "passed": true,
       "browser_processes": 0,
-      "t_seconds": 62.21
+      "t_seconds": 62.44
     },
     {
       "name": "restart_keeps_persisted_direct_strategy_despite_new_default",
       "passed": true,
-      "t_seconds": 62.53
+      "t_seconds": 62.82
     },
     {
       "name": "restart_recovers_direct_capability_without_rediscovery",
       "passed": true,
-      "t_seconds": 62.55
+      "t_seconds": 62.84
     },
     {
       "name": "restart_never_reacquires_identity",
       "passed": true,
-      "t_seconds": 62.55
+      "t_seconds": 62.84
     },
     {
       "name": "stop_and_reset_clears_direct_records_and_run",
       "passed": true,
-      "seconds": 0.07,
-      "t_seconds": 62.61
+      "seconds": 0.09,
+      "t_seconds": 62.93
+    },
+    {
+      "name": "fake_secret_absent_from_structured_logs",
+      "passed": true,
+      "lines": 377,
+      "leaking_loggers": [],
+      "t_seconds": 62.93
+    },
+    {
+      "name": "fake_secret_absent_from_aggregate_report",
+      "passed": true
     }
   ],
   "evidence": {
@@ -222,11 +262,27 @@
         "unsupported_admission": 1
       }
     },
-    "restart_direct_metrics": {},
+    "metrics_conditions": {
+      "strategy": true,
+      "attempts": 76.0,
+      "successes": 63.0,
+      "timeout": true,
+      "capable": true,
+      "session_label": false,
+      "queue_label": false
+    },
+    "restart_direct_metrics": {
+      "checks": 2,
+      "direct_requests": 0,
+      "direct_successes": 0,
+      "browser_fallbacks": 0,
+      "recipes_adopted": 0,
+      "fallback_reasons": {}
+    },
     "simulator": {
       "new_identities": 5,
       "page_requests": 24,
-      "browser_status_requests": 87,
+      "browser_status_requests": 88,
       "direct_status_requests": 78
     }
   }

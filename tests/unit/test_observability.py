@@ -14,7 +14,15 @@ from queue_load_test.metrics import (
 )
 from queue_load_test.metrics.prometheus import REPOSITORY_ERROR_OPERATIONS
 from queue_load_test.metrics.status import ObservabilityHttpServer, StatusSummaryProvider
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    DirectCapability,
+    DirectFallbackReason,
+    MonitoringStrategy,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    SessionMode,
+)
 from queue_load_test.repository import PROGRESS_BUCKETS, SQLiteSessionRepository
 
 
@@ -176,6 +184,10 @@ def test_prometheus_counters_gauges_and_histograms_have_bounded_labels() -> None
     allowed_values = {
         "bucket": set(PROGRESS_BUCKETS),
         "operation": set(REPOSITORY_ERROR_OPERATIONS),
+        # Phase 8 Direct Monitoring labels are closed enums, never session data.
+        "reason": {reason.value for reason in DirectFallbackReason},
+        "capability": {capability.value for capability in DirectCapability},
+        "strategy": {strategy.value for strategy in MonitoringStrategy},
     }
     for family in metrics.registry.collect():
         for sample in family.samples:

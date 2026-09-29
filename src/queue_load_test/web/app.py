@@ -16,6 +16,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from queue_load_test.browser import CAMOUFOX_BROWSER_VERSION
@@ -387,6 +388,14 @@ def create_app(
             "_summary.html",
             {"summary": await dashboard.summary(run), "partial": True},
         )
+
+    @app.get("/metrics")
+    async def metrics_endpoint() -> Response:
+        """Aggregate Prometheus exposition for the current run (no per-session labels)."""
+
+        exposition = getattr(run_runtime, "metrics_exposition", None)
+        body = await exposition() if exposition is not None else b""
+        return Response(content=body, media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/partials/summary", response_class=HTMLResponse)
     async def summary_partial(request: Request) -> Response:

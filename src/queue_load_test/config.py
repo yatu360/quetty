@@ -109,6 +109,22 @@ class Settings(BaseSettings):
         ge=1,
         le=100,
     )
+    # After a session becomes DIRECT_UNAVAILABLE, wait this long before adopting a
+    # newly observed recipe again; it bounds direct-then-fallback churn when a fault
+    # affects only direct requests. 0 re-adopts on the next legitimate observation.
+    direct_monitor_readopt_cooldown_seconds: float = Field(
+        default=300.0,
+        alias="DIRECT_MONITOR_READOPT_COOLDOWN_SECONDS",
+        ge=0,
+    )
+    # Newest discovery artifacts kept per session in Direct runs (they can contain
+    # visitor credentials). 0 keeps every artifact.
+    direct_monitor_discovery_retention: int = Field(
+        default=5,
+        alias="DIRECT_MONITOR_DISCOVERY_RETENTION",
+        ge=0,
+        le=1_000,
+    )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
         default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25

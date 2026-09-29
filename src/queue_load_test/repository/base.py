@@ -32,6 +32,30 @@ class LeaseOwnershipError(RepositoryError):
     """Raised when stale leased work attempts to overwrite a newer owner."""
 
 
+@dataclass(frozen=True, slots=True)
+class DirectMonitorStatus:
+    """Non-secret Direct Monitoring operational metadata for one session.
+
+    ``capability`` and ``last_reason`` hold enum values only; ``recipe_reference``
+    is a one-way short digest that identifies a recipe version without revealing it.
+    """
+
+    session_id: str
+    capability: str
+    updated_at: datetime
+    last_reason: str | None = None
+    recipe_reference: str | None = None
+    consecutive_failures: int = 0
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+
+
+class DirectMonitorMetadataRepository(Protocol):
+    async def record_direct_monitor_status(self, status: DirectMonitorStatus) -> bool: ...
+
+    async def direct_capability_counts(self) -> dict[str, int]: ...
+
+
 class ActiveRunExistsError(RepositoryError):
     """Raised when setup attempts to replace the immutable current run."""
 
