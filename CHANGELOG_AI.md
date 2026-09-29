@@ -5431,7 +5431,7 @@ not production-ready. No strategy is disabled, and no run is migrated.
 
 ### Acceptance Matrix (40 items; `docs/phase8_acceptance.md`)
 
-- **PASS** (27 items):
+- **PASS** (29 items, several local-only with Queue-it UNKNOWN):
   - selection of both strategies;
   - immutable persistence, legacy behavior, restart, and Stop & Reset;
   - Headed unchanged;
@@ -5449,14 +5449,13 @@ not production-ready. No strategy is disabled, and no run is migrated.
   - restore and context reduction (local);
   - Chrome and Patchright;
   - no migration.
-- **UNKNOWN** (11 items):
+- **UNKNOWN** (9 items):
   - request-value semantics;
   - state sufficiency (Queue-it);
   - direct/DOM agreement (Queue-it);
   - PRE_QUEUE, ACTIVE_QUEUE, SERVICED_SOON (Queue-it);
   - paused and TURN_STARTED (even locally);
-  - Queue-it cadence;
-  - plus the Queue-it columns of the local PASS items.
+  - Queue-it cadence.
 - **NOT DEMONSTRATED**: throughput at an equal schedule (checks/s bounded by the shared
   policy; only per-check headroom improved).
 - **FAIL**: none.
