@@ -10,6 +10,28 @@ live monitoring.
 
 ## Current Status
 
+### Monitoring-strategy policy (authoritative, Phase 8 acceptance 2026-09-29)
+
+- **Phase 8 result: PARTIAL.** The run-level interchangeable monitoring-strategy
+  architecture is accepted (`docs/phase8_acceptance.md`,
+  `docs/results/phase8_acceptance_result.json`).
+- **Headed Window Strategy** (`headed_window`) is accepted, unchanged from Phase 7, and
+  is the **default for new runs** (`MONITORING_STRATEGY` default).
+- **Direct Monitoring Strategy** (`direct`) is **experimental and selectable**, not
+  production-ready.
+  - It is safe to select: without an accepted `authorized_queue_it_staging` response
+    schema and authorised discovery evidence, it makes no direct request to a real
+    event and monitors entirely through the Headed browser path.
+  - Every Queue-it direct question (request values, state sufficiency, equivalence,
+    all lifecycle stages, cadence) is **UNKNOWN**. There is no FAIL.
+- Both strategies stay implemented. Neither is disabled, and Headed is never removed.
+  A run's persisted strategy and browser backend are never migrated; changing either
+  requires Stop & Reset Run.
+- Browser backend policy is unchanged (Patchright default, Chrome fallback, Camoufox
+  dormant). Phase 7 acceptance is not modified.
+- The Queue-it customer API (Swagger, API key) is not the visitor-status mechanism and
+  is not used.
+
 ### Direct vs Headed monitoring benchmark (Phase 8 Prompt 7, 2026-09-29)
 
 - `queue-load-test-phase8-monitoring-benchmark` runs Headed Window then Direct
@@ -1266,6 +1288,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   minimisation method, UNKNOWN findings, and Prompt 4 evidence gate.
 - `docs/phase8_observation_equivalence.md` — common observation model, schema and
   comparison rules, shadow harness, UNKNOWN evidence, and Prompt 5 gate.
+- `docs/phase8_acceptance.md` — Phase 8 acceptance matrix (40 items), evidence classes,
+  final strategy/default decision, and final validation.
 - `docs/phase8_monitoring_benchmark.md` — Prompt 7 benchmark design, polling safety,
   local results, recovery and lifecycle evidence, gates, and staging NOT RUN status.
 - `docs/phase8_security_observability.md` — Prompt 6 sensitive-data policy, SQLite
@@ -1464,11 +1488,18 @@ python -m mypy src
 
 ## Next Task
 
-**Phase 8 Prompt 8 — Phase 8 Acceptance and Operational Decision.** Prompts 5–7 are
-complete, running local simulator evidence only. The authorised Queue-it staging
-benchmark (`--mode staging`) and the Prompt 2–4 evidence sequence remain NOT RUN, so the
-acceptance decision must treat every Queue-it direct result as UNKNOWN. Never claim
-staging PASS without an authorised run.
+Phase 8 is closed as **PARTIAL**. The next justified task is authorised Queue-it staging
+validation of Direct Monitoring Strategy, with deliberate confirmation:
+
+- Prompt 2 discovery;
+- Prompt 3 replay;
+- Prompt 4 shadow comparison;
+- review of an `authorized_queue_it_staging` response schema;
+- `queue-load-test-phase8-monitoring-benchmark --mode staging`.
+
+Then revisit the Direct decision. Authorised Patchright staging validation also remains
+open. Do not begin Phase 9 without an explicit prompt. Never claim staging PASS without
+an authorised run.
 
 ## Instructions for Future AI Sessions
 

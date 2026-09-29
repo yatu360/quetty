@@ -788,7 +788,7 @@ switching continues to require Stop & Reset Run.
    - Queue-it staging is **NOT RUN / UNKNOWN**. An authorised staging validation of the
      Patchright default is the open follow-up.
 
-## Phase 8 — Monitoring Strategy and Direct Status Research — **IN PROGRESS**
+## Phase 8 — Monitoring Strategy and Direct Status Research — **PARTIAL (accepted 2026-09-29; Direct experimental)**
 
 Phase 8 introduces an explicit run-level monitoring strategy without weakening Queue ID
 identity, parked-session ownership, browser-backend provenance, or bounded scheduling.
@@ -902,7 +902,31 @@ browser-observed behavior; undocumented URL construction is out of scope.
    - Paused, TURN_STARTED, and admission are UNKNOWN locally. All Queue-it results are
      UNKNOWN. The default stays Headed Window.
 
-8. **Phase 8 Acceptance and Operational Decision** — **NEXT**.
+8. **Phase 8 Acceptance and Operational Decision** — **completed on 2026-09-29: PARTIAL**
+   (`docs/phase8_acceptance.md`, `docs/results/phase8_acceptance_result.json`).
+   - 40-item matrix: no FAIL.
+     - PASS: strategy selection, persistence, immutability, legacy, restart, reset;
+       Headed unchanged; Queue ID authority; fallback, identity, schema, and state
+       safety; recipe provenance; pause/resume; Manual Open; Add/Replace/Delete;
+       bounded recovery; secrecy; restore and context reduction; Chrome and
+       Patchright.
+     - UNKNOWN: request-value semantics, state sufficiency, and equivalence on
+       Queue-it; every Queue-it lifecycle stage (paused and TURN_STARTED even
+       locally); Queue-it cadence.
+     - NOT DEMONSTRATED: throughput at equal schedule.
+   - Decision: the architecture and Headed Window are accepted, and Headed Window
+     stays the default. Direct is experimental and selectable (safe; no direct
+     requests to a real event without authorised evidence). No run is migrated.
+   - Evidence boundary: local deterministic and local simulator/browser only.
+     Authorised Queue-it staging is NOT RUN for all of Phase 8. Historical Glastonbury
+     JavaScript is a clue only; the Queue-it customer API Swagger is not the
+     visitor-status mechanism.
+   - Next justified task: authorised Queue-it staging validation of Direct (Prompts
+     2–4 evidence plus the staging benchmark).
+
+Evidence boundary for every Phase 8 prompt: Prompts 1–8 are local deterministic and/or
+local simulator/browser evidence. Prompts 2–4 and 7 each have a gated authorised
+staging path that was **NOT RUN**.
 
 ## Scaling Gates
 

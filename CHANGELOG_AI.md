@@ -5400,3 +5400,122 @@ request cadence.
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Phase 8 Prompt 8 — Phase 8 Acceptance and Operational Decision
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Result
+
+**PHASE 8: PARTIAL.** The interchangeable run-level monitoring-strategy architecture is
+accepted. Headed Window Strategy is accepted, unchanged, and remains the default for
+new runs. Direct Monitoring Strategy remains **experimental and selectable**: safe, but
+not production-ready. No strategy is disabled, and no run is migrated.
+
+### Evidence
+
+- Local deterministic: unit and integration tests with fakes, MockTransport, SQLite,
+  and filesystem stores.
+- Local simulator/browser: Chrome and Patchright against `LocalQueueSimulator`.
+  - Headed workflows: 74/74 (Patchright, Phase 7 recovery) and 67/67 (Chrome).
+  - Direct workflow: 42/42 (Patchright).
+  - Prompt 7 benchmark: every safety gate PASS; restores and contexts reduced; browser
+    CPU reduced; equal cadence.
+- Authorised Queue-it staging: **none** for any Phase 8 prompt.
+- Historical Glastonbury 2025 JavaScript: a clue only, never used.
+- Queue-it Swagger (`que-it-swagger.json`, local to the operator): an API-key customer
+  management API (queueitem, customdata, cancel). It is not the visitor-status
+  mechanism and is not used.
+
+### Acceptance Matrix (40 items; `docs/phase8_acceptance.md`)
+
+- **PASS** (27 items):
+  - selection of both strategies;
+  - immutable persistence, legacy behavior, restart, and Stop & Reset;
+  - Headed unchanged;
+  - Direct creation path;
+  - Queue ID authority (local);
+  - discovery-not-construction (mechanism);
+  - admission safety by design;
+  - fallback, identity, schema, and expired/corrupt-state safety;
+  - recipe provenance;
+  - pause/resume;
+  - Manual Open fencing;
+  - Add/Replace/Delete;
+  - bounded recovery, workers, and leases;
+  - logs, dashboard, metrics, and report secrecy;
+  - restore and context reduction (local);
+  - Chrome and Patchright;
+  - no migration.
+- **UNKNOWN** (11 items):
+  - request-value semantics;
+  - state sufficiency (Queue-it);
+  - direct/DOM agreement (Queue-it);
+  - PRE_QUEUE, ACTIVE_QUEUE, SERVICED_SOON (Queue-it);
+  - paused and TURN_STARTED (even locally);
+  - Queue-it cadence;
+  - plus the Queue-it columns of the local PASS items.
+- **NOT DEMONSTRATED**: throughput at an equal schedule (checks/s bounded by the shared
+  policy; only per-check headroom improved).
+- **FAIL**: none.
+- Item 40 (reasons Direct stays experimental): YES.
+
+### Tests
+
+- `queue-load-test-phase5-workflow --backend patchright --phase7-recovery` — 74 passed,
+  0 failed.
+- `queue-load-test-phase5-workflow --backend chrome` — 67 passed, 0 failed.
+- `queue-load-test-phase8-direct-runtime --backend patchright` — 42 passed, 0 failed.
+- Security, redaction, recovery, and fencing suites (`test_direct_security`,
+  `test_direct_monitor`, `test_phase8_monitoring_benchmark`, `test_observability`,
+  `test_operator_fencing`, `test_phase4_recovery`, `test_phase3_recovery`) — 144 passed.
+- `python -m pytest` — 719 passed, 4 staging deselected (366.69 s).
+- `python -m ruff check src tests` — PASS.
+- `python -m mypy src` — PASS (strict, 102 source files).
+
+### Staging Status
+
+NOT RUN. No authorised Queue-it target, discovery evidence, replay, shadow comparison,
+reviewed authorised schema, or staging benchmark exists.
+
+### Unresolved Risks
+
+- Every Queue-it direct-status question is UNKNOWN: request values, state lifetime and
+  rotation, response semantics, lifecycle stages, admission, and cadence guidance.
+- Replay-refreshed cookies do not flow back into browser `storage_state`.
+- Paused and TURN_STARTED were never observed, even locally.
+- Direct due-backlog bursts with zero jitter have not been re-measured with production
+  jitter. Browser RSS is unchanged, and app RSS was slightly higher.
+- Schema review is procedural.
+- The intermittent `test_chrome_loss_while_open_is_detected_without_relaunch`
+  fake-timing test is still flaky. It passed in this final run.
+
+### Final Strategy / Default Policy
+
+- New runs default to `headed_window`.
+- `direct` is selectable and experimental.
+- Both are retained.
+- Persisted run strategy and backend are never migrated.
+- Backend policy is unchanged from Phase 7.
+
+### Files Added
+
+- `docs/phase8_acceptance.md`
+- `docs/results/phase8_acceptance_result.json`
+
+### Files Modified
+
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Next Justified Task
+
+Authorised Queue-it staging validation of Direct Monitoring Strategy (Prompt 2
+discovery, Prompt 3 replay, Prompt 4 shadow comparison, authorised schema review, and
+`queue-load-test-phase8-monitoring-benchmark --mode staging`). Then revisit the Direct
+decision. Phase 9 has not begun.
+
+### Git State
+
+- Branch: main

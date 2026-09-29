@@ -1,0 +1,452 @@
+{
+  "schema_version": 1,
+  "phase": "8",
+  "date": "2026-09-29",
+  "result": "PARTIAL",
+  "decision": {
+    "architecture": "ACCEPTED: run-level interchangeable monitoring strategy",
+    "headed_window_strategy": "ACCEPTED; default for new runs",
+    "direct_monitoring_strategy": "EXPERIMENTAL; selectable; not production-ready (Queue-it evidence UNKNOWN)",
+    "default_for_new_runs": "headed_window",
+    "existing_runs_migrated": false,
+    "strategies_disabled": []
+  },
+  "evidence_classes": {
+    "local_deterministic": "deterministic unit/integration tests with fakes",
+    "local_simulator_browser": "real Chrome/Patchright against LocalQueueSimulator on 127.0.0.1",
+    "authorized_queue_it_staging": "NOT RUN: no authorised target, discovery evidence, or reviewed schema",
+    "historical_glastonbury": "2025 saved-page JavaScript clue only; never used",
+    "queue_it_customer_api_swagger": "API-key customer API (queueitem/customdata/cancel); not the visitor-status mechanism; never used"
+  },
+  "fail_count": 0,
+  "matrix": [
+    {
+      "id": 1,
+      "question": "Setup UI selects Headed Window Strategy",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 2,
+      "question": "Setup UI selects Direct Monitoring Strategy",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 3,
+      "question": "Strategy persisted immutably per run",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 4,
+      "question": "Legacy runs retain historical Headed behavior",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic"
+      ]
+    },
+    {
+      "id": 5,
+      "question": "Restart preserves strategy",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 6,
+      "question": "Stop & Reset permits a new strategy",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic"
+      ]
+    },
+    {
+      "id": 7,
+      "question": "Headed Window behavior unchanged from Phase 7",
+      "result": "PASS (local)",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 8,
+      "question": "Direct creation uses the normal browser acquisition path",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 9,
+      "question": "Queue ID authoritative under both strategies",
+      "result": "PASS (local)",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 10,
+      "question": "Direct request discovered from genuine browser traffic, not constructed",
+      "result": "PASS (mechanism); Queue-it UNKNOWN",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 11,
+      "question": "Event/session/transient request values understood",
+      "result": "UNKNOWN",
+      "local": "UNKNOWN",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": []
+    },
+    {
+      "id": 12,
+      "question": "Persisted browser/direct state sufficient across restart",
+      "result": "UNKNOWN (Queue-it); local PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 13,
+      "question": "Direct observations agree with browser/DOM observations",
+      "result": "UNKNOWN (Queue-it); local PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 14,
+      "question": "PRE_QUEUE evidence sufficient",
+      "result": "UNKNOWN",
+      "local": "PASS (simulator)",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 15,
+      "question": "ACTIVE_QUEUE evidence sufficient",
+      "result": "UNKNOWN",
+      "local": "PASS (simulator)",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 16,
+      "question": "Paused-queue evidence sufficient",
+      "result": "UNKNOWN",
+      "local": "UNKNOWN (not simulated)",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": []
+    },
+    {
+      "id": 17,
+      "question": "SERVICED_SOON evidence sufficient",
+      "result": "UNKNOWN",
+      "local": "PASS (simulator)",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 18,
+      "question": "TURN_STARTED evidence sufficient",
+      "result": "UNKNOWN",
+      "local": "UNKNOWN (not simulated)",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": []
+    },
+    {
+      "id": 19,
+      "question": "Admission/redirect behavior safe",
+      "result": "PASS (by design); Queue-it admission UNKNOWN",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 20,
+      "question": "Unexpected direct behavior falls back to browser",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 21,
+      "question": "Identity mismatch preserves expected Queue ID",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 22,
+      "question": "Schema changes fall back safely",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 23,
+      "question": "Expired/corrupt direct state falls back safely",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 24,
+      "question": "Recipe refresh only from legitimate browser observation",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 25,
+      "question": "Pause stops automatic direct and browser monitoring",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 26,
+      "question": "Resume continues safely",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 27,
+      "question": "Manual Open browser-based and correctly fenced",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 28,
+      "question": "Add/Replace/Delete remain correct",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 29,
+      "question": "Restart/recovery remains bounded",
+      "result": "PASS (local)",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 30,
+      "question": "Workers/queues/leases bounded",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 31,
+      "question": "Tokens/cookies/raw state absent from normal logs",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 32,
+      "question": "Sensitive values absent from dashboard and metrics",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 33,
+      "question": "Aggregate reports safe",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 34,
+      "question": "Direct reduces browser restores/context demand",
+      "result": "PASS (local); Queue-it UNKNOWN",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 35,
+      "question": "Direct improves useful monitoring throughput/cadence",
+      "result": "NOT DEMONSTRATED at equal schedule (per-check headroom improved); Queue-it UNKNOWN",
+      "local": "PARTIAL",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 36,
+      "question": "Direct preserves safe Queue-it polling cadence",
+      "result": "UNKNOWN (Queue-it); local PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 37,
+      "question": "Chrome fallback continues to work",
+      "result": "PASS (local)",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 38,
+      "question": "Patchright continues to work as the Phase 7 default backend",
+      "result": "PASS (local)",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 39,
+      "question": "Existing runs never silently migrated",
+      "result": "PASS",
+      "local": "PASS",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    },
+    {
+      "id": 40,
+      "question": "Unresolved reasons Direct should remain experimental",
+      "result": "YES",
+      "local": "YES",
+      "queue_it_staging": "NOT RUN / UNKNOWN",
+      "evidence": [
+        "local_deterministic",
+        "local_simulator_browser"
+      ]
+    }
+  ],
+  "final_validation": {
+    "headed_workflow_patchright_phase7_recovery": "74 passed, 0 failed",
+    "headed_workflow_chrome": "67 passed, 0 failed",
+    "direct_workflow_patchright": "42 passed, 0 failed",
+    "security_recovery_suites": "144 passed",
+    "full_non_staging_pytest": "719 passed, 4 staging deselected",
+    "ruff": "PASS",
+    "mypy_strict": "PASS (102 source files)",
+    "authorized_queue_it_staging": "NOT RUN"
+  }
+}
