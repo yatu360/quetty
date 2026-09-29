@@ -24,10 +24,16 @@ class TransferFailure(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TransferSelector:
-    """One configurable transfer control and its supported value sources."""
+    """One configurable transfer control and its supported value sources.
+
+    ``require_visible=False`` is for controls Queue-it renders inside a closed
+    dialog: the value is already in the page, and opening the dialog is not needed
+    to read it. The value is still validated exactly like a visible control's.
+    """
 
     selector: str
     value_sources: tuple[str, ...] = ("href", "value", "data-transfer-url", "data-url")
+    require_visible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +50,14 @@ class QueueItTransferSelectors:
             'a:has-text("Continue my journey on another browser or device")',
             ("href",),
         ),
+        # Current Queue-it layout (Glastonbury 2025 and the Queue-it demo): the
+        # "Continue my journey on another browser or device" dialog shows the
+        # transfer link as the text of this element, next to "Copy my link".
+        TransferSelector("#queueIdLinkURL", ("text",), require_visible=False),
     )
+    # Elements whose text is the page's own Queue ID. When present they must agree
+    # with the transfer link's ``q``; they are never used as an identity source.
+    identity_crosschecks: tuple[str, ...] = ("#hlLinkToQueueTicket2",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +179,15 @@ class QueueItTransferExtractor:
                 diagnostics=diagnostics,
             )
         observed_queue_id = next(iter(observed_ids), None)
+        if observed_queue_id is not None and not await self._crosschecks_agree(
+            page, observed_queue_id, selector_errors
+        ):
+            return TransferExtractionResult(
+                transfer_url=absolute_url,
+                expected_queue_id=normalized_expected,
+                failure=TransferFailure.AMBIGUOUS_QUEUE_ID,
+                diagnostics=diagnostics,
+            )
         identity_mismatch = (
             normalized_expected is not None
             and observed_queue_id is not None
@@ -203,7 +225,9 @@ class QueueItTransferExtractor:
             error_key = f"strategy_{index}"
             try:
                 locator = page.locator(strategy.selector).first
-                if await locator.count() == 0 or not await locator.is_visible():
+                if await locator.count() == 0:
+                    continue
+                if strategy.require_visible and not await locator.is_visible():
                     continue
                 ui_found = True
                 for source in strategy.value_sources:
@@ -221,12 +245,34 @@ class QueueItTransferExtractor:
                 selector_errors[error_key] = type(exc).__name__
         return None, ui_found
 
+    async def _crosschecks_agree(
+        self,
+        page: Page,
+        observed_queue_id: str,
+        selector_errors: dict[str, str],
+    ) -> bool:
+        for index, selector in enumerate(self.selectors.identity_crosschecks):
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() == 0:
+                    continue
+                shown = "".join((await locator.text_content() or "").split())
+            except BROWSER_ERROR_TYPES as exc:
+                selector_errors[f"crosscheck_{index}"] = type(exc).__name__
+                continue
+            if shown and shown != observed_queue_id:
+                return False
+        return True
+
     @staticmethod
     async def _read_value(locator: Locator, source: str) -> str | None:
         if source == "value":
             return await locator.input_value()
         if source == "text":
-            return await locator.inner_text()
+            # textContent works for a closed dialog. A URL contains no whitespace,
+            # so line wrapping in the rendered text is removed, never interpreted.
+            text = await locator.text_content()
+            return "".join(text.split()) if text is not None else None
         return await locator.get_attribute(source)
 
     @staticmethod

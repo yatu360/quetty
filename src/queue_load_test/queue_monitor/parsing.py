@@ -124,9 +124,11 @@ def _parse_datetime(
             parsed = None
 
     if parsed is None and reference_date is not None:
-        for pattern in ("%H:%M:%S", "%H:%M"):
+        # 24-hour and 12-hour clock forms ("14:45", "2:45 PM", "2:45PM").
+        compact = re.sub(r"\s+(?=[AaPp][Mm]$)", "", text_value)
+        for pattern in ("%H:%M:%S", "%H:%M", "%I:%M:%S%p", "%I:%M%p"):
             try:
-                parsed_time = datetime.strptime(text_value, pattern).replace(tzinfo=UTC).time()
+                parsed_time = datetime.strptime(compact, pattern).replace(tzinfo=UTC).time()
                 parsed = datetime.combine(reference_date, parsed_time, tzinfo=UTC)
                 break
             except ValueError:

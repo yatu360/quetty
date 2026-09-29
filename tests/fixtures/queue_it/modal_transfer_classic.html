@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- Synthetic fixture modelled on the Glastonbury 2025 Queue-it layout: classic live
+     elements plus the closed "Continue my journey" dialog. All identities are fake. -->
+<html>
+  <body>
+    <div id="MainPart_divProgressbar" role="progressbar" aria-valuenow="30" style="width: 30%; height: 10px"></div>
+    <span id="MainPart_lbQueueNumber">Your queue number: 4321</span>
+    <span id="MainPart_lbUsersInLineAheadOfYou">1,234</span>
+    <span id="MainPart_lbExpectedServiceTime">2999-09-26 14:30</span>
+    <span id="MainPart_lbWhichIsIn">About 12 minutes</span>
+    <span id="MainPart_lbLastUpdateTimeText">2999-09-26 14:18</span>
+    <div id="footer-direct-link" style="display: none">
+      <span>Queue ID: </span><span id="hlLinkToQueueTicket2">00000000-fake-4000-8000-000000000001</span>
+    </div>
+    <div id="queueIdLinkModal" role="dialog" class="modal" style="display: none">
+      <h2 id="queueIdLinkModalLabel">Continue my journey on another browser or device</h2>
+      <p id="queueIdLinkModalDescription">To transfer your spot in line to another browser or device, copy your unique link below.</p>
+      <p>
+        <span id="queueIdLinkURL">https://
+queue.staging.example.test/queue/view?
+c=example&amp;e=fakeevent&amp;ver=javascript-4.3.0&amp;t=https%3A%2F%2Fqueue.staging.example.test%2F&amp;q=00000000-
+fake-4000-8000-000000000001</span>
+        <button id="copyToClipboardButton" type="button">Copy my link</button>
+      </p>
+    </div>
+  </body>
+</html>

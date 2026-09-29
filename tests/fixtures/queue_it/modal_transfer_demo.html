@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- Synthetic fixture modelled on the Queue-it demo waiting room layout: queue number
+     and users ahead hidden, expected arrival in #expectedServiceTime, closed transfer
+     dialog. All identities are fake. -->
+<html>
+  <body>
+    <h1>You are now in line</h1>
+    <div id="MainPart_divProgressbar" role="progressbar" aria-valuenow="55" style="width: 55%; height: 10px"></div>
+    <span id="MainPart_lbQueueNumber" style="display: none"></span>
+    <span id="MainPart_lbUsersInLineAheadOfYou" style="display: none">NaN</span>
+    <span id="MainPart_lbExpectedServiceTime" style="display: none">2:45 PM</span>
+    <span id="expectedServiceTime">2:45 PM</span>
+    <span id="MainPart_lbWhichIsIn">less than a minute</span>
+    <div id="footer-direct-link" style="display: none">
+      <span>Queue ID: </span><span id="hlLinkToQueueTicket2">00000000-fake-4000-8000-000000000002</span>
+    </div>
+    <div id="queueIdLinkModal" role="dialog" class="modal" style="display: none">
+      <h2 id="queueIdLinkModalLabel">Continue my journey on another browser or device</h2>
+      <p><span id="queueIdLinkURL">https://queue.staging.example.test/?c=example&amp;e=fakedemo&amp;cid=en-US&amp;q=00000000-fake-4000-8000-000000000002</span>
+        <button id="copyToClipboardButton" type="button">Copy my link</button></p>
+    </div>
+  </body>
+</html>

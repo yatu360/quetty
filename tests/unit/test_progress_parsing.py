@@ -122,3 +122,25 @@ def test_boolean_signal_parsers(
 
 def test_disconnected_is_not_misread_as_connected() -> None:
     assert parse_connection_lost("Browser disconnected") is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "hour", "minute"),
+    [("2:45 PM", 14, 45), ("2:45PM", 14, 45), ("12:05 am", 0, 5), ("11:59:30 PM", 23, 59)],
+)
+def test_twelve_hour_clock_times_use_the_reference_date(raw: str, hour: int, minute: int) -> None:
+    from datetime import date
+
+    from queue_load_test.queue_monitor.parsing import parse_expected_service_time
+
+    parsed = parse_expected_service_time(raw, reference_date=date(2026, 9, 29))
+    assert parsed is not None
+    assert (parsed.date(), parsed.hour, parsed.minute) == (date(2026, 9, 29), hour, minute)
+
+
+def test_invalid_twelve_hour_clock_time_is_not_invented() -> None:
+    from datetime import date
+
+    from queue_load_test.queue_monitor.parsing import parse_expected_service_time
+
+    assert parse_expected_service_time("13:45 PM", reference_date=date(2026, 9, 29)) is None

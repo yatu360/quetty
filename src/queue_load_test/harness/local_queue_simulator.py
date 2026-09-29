@@ -66,6 +66,12 @@ class LocalQueueSimulator:
     secret_token: str | None = None
     # Stage presented to newly created identities (lifecycle only moves forward).
     initial_stage: str = STAGE_ACTIVE
+    # "classic": a visible transfer link. "modal": the current Queue-it layout seen on
+    # Glastonbury 2025 and the Queue-it demo (closed transfer dialog whose link is
+    # element text, a hidden footer Queue ID, and ``#expectedServiceTime``).
+    layout: str = "classic"
+    # Identities whose footer Queue ID contradicts the dialog link (fail-closed tests).
+    crosscheck_conflict_ids: set[str] = field(default_factory=set)
     # Optional response-provided polling guidance (``pollAfterSeconds``).
     poll_after_seconds: float | None = None
     direct_request_times: dict[str, list[float]] = field(default_factory=dict)
@@ -298,11 +304,33 @@ class LocalQueueSimulator:
             f"poll();setInterval(poll,{self.status_poll_ms});}})();</script>"
         )
 
+    def _modal_transfer(self, queue_id: str, transfer_url: str) -> str:
+        shown = parse_qs(urlsplit(transfer_url).query).get("q", [queue_id])[0]
+        footer = f"{shown}-conflict" if queue_id in self.crosscheck_conflict_ids else shown
+        # The real page wraps the long link across lines inside the element text.
+        wrapped = transfer_url.replace("?", "?\n  ").replace("&", "&amp;\n  ")
+        return (
+            '<div id="footer-direct-link" style="display: none">'
+            f'<span>Queue ID: </span><span id="hlLinkToQueueTicket2">{footer}</span></div>'
+            '<div id="queueIdLinkModal" role="dialog" class="modal" style="display: none">'
+            '<h2 id="queueIdLinkModalLabel">'
+            "Continue my journey on another browser or device</h2>"
+            '<p id="queueIdLinkModalDescription">To transfer your spot in line to another '
+            "browser or device, copy your unique link below.</p>"
+            f'<p><span id="queueIdLinkURL">{wrapped}</span>'
+            '<button id="copyToClipboardButton" type="button">Copy my link</button></p>'
+            "</div>"
+        )
+
     def _html(self, queue_id: str, transfer_url: str) -> str:
-        transfer = (
-            f'<a data-testid="queue-transfer-link" href="{transfer_url}">'
-            "Continue my journey on another browser or device</a>"
-        ) + self._status_script(queue_id)
+        if self.layout == "modal":
+            transfer = self._modal_transfer(queue_id, transfer_url)
+        else:
+            transfer = (
+                f'<a data-testid="queue-transfer-link" href="{transfer_url}">'
+                "Continue my journey on another browser or device</a>"
+            )
+        transfer += self._status_script(queue_id)
         stage = self.stages.get(queue_id, STAGE_ACTIVE)
         if stage == STAGE_PRE:
             return (
@@ -310,13 +338,27 @@ class LocalQueueSimulator:
                 f'<main data-testid="pre-queue">Waiting to start</main>{transfer}</body>'
             )
         percentage = self.progress.get(queue_id, 40)
-        active = (
-            f'<div id="MainPart_divProgressbar" aria-valuenow="{percentage}" '
-            f'style="width: {percentage}px; height: 10px"></div>'
-            '<span id="MainPart_lbQueueNumber">local</span>'
-            '<span id="MainPart_lbUsersInLineAheadOfYou">10 users ahead</span>'
-            '<span id="MainPart_lbWhichIsIn">About 2 minutes</span>'
-        )
+        if self.layout == "modal":
+            # Demo-style: queue number and users ahead hidden, expected arrival shown
+            # in ``#expectedServiceTime`` while the classic element stays hidden.
+            active = (
+                f'<div id="MainPart_divProgressbar" aria-valuenow="{percentage}" '
+                f'style="width: {percentage}px; height: 10px"></div>'
+                '<span id="MainPart_lbQueueNumber" style="display: none"></span>'
+                '<span id="MainPart_lbUsersInLineAheadOfYou" style="display: none">NaN</span>'
+                '<span id="MainPart_lbExpectedServiceTime" style="display: none">'
+                "2:45 PM</span>"
+                '<span id="expectedServiceTime">2:45 PM</span>'
+                '<span id="MainPart_lbWhichIsIn">less than a minute</span>'
+            )
+        else:
+            active = (
+                f'<div id="MainPart_divProgressbar" aria-valuenow="{percentage}" '
+                f'style="width: {percentage}px; height: 10px"></div>'
+                '<span id="MainPart_lbQueueNumber">local</span>'
+                '<span id="MainPart_lbUsersInLineAheadOfYou">10 users ahead</span>'
+                '<span id="MainPart_lbWhichIsIn">About 2 minutes</span>'
+            )
         indicator = (
             '<div id="serviced-soon">You will be serviced soon</div>'
             if stage == STAGE_SERVICED

@@ -917,7 +917,14 @@ do not abort the whole observation; diagnostics retain selector/error names, not
 
 Transfer extraction checks multiple official-control selectors, including known
 Queue-it IDs, configured staging test IDs, and the visible “Continue my journey on
-another browser or device” link. It reads the exact `href`, `value`, or supported data
+another browser or device” link. It also reads the current Queue-it layout, seen on
+Glastonbury 2025 and the Queue-it demo, where that control is a closed dialog whose
+transfer link is the text of `#queueIdLinkURL`. That link is read without opening the
+dialog, whitespace from line wrapping is removed, and it gets the same validation as any
+other transfer value. The footer `#hlLinkToQueueTicket2` Queue ID is only a
+cross-check: if it contradicts the link the result is `AMBIGUOUS_QUEUE_ID`, and it is
+never an identity source. The live extractor also accepts the demo's
+`#expectedServiceTime` and 12-hour clock times. It reads the exact `href`, `value`, or supported data
 attribute, validates scheme/origin/path against the expected journey, extracts the `q`
 identity when present, detects ambiguous IDs, and reports expected/observed identity
 mismatch without replacing the expected ID.

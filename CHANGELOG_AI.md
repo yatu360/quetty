@@ -5518,3 +5518,91 @@ decision. Phase 9 has not begun.
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Queue ID capture for the current Queue-it transfer-dialog layout
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+The operator reported that the app loaded the Queue-it demo waiting room
+(`queueitcom/wrdemoproduct`) with headed Patchright but captured no Queue ID. They asked
+for full support of both that demo page and the Glastonbury 2025 page layout.
+
+### Diagnosis (read-only probes, no Queue ID printed or stored)
+
+- Headless plain Playwright was sent to Queue-it's softblock challenge. Headed Patchright
+  (the app's configuration) reached the real queue page.
+- The demo page showed only one of the four live-queue evidence fields the extractor
+  recognised: expected arrival sits in `#expectedServiceTime` as a 12-hour time, while
+  the classic `#MainPart_lbExpectedServiceTime` is hidden. The page was therefore never
+  treated as an active queue.
+- On both the demo and the saved Glastonbury 2025 page (classic live elements), the
+  "Continue my journey on another browser or device" control is a closed dialog. Its
+  link is the **text** of `#queueIdLinkURL`, and the footer `#hlLinkToQueueTicket2`
+  shows the Queue ID. The extractor only read visible links, inputs, and attributes, so
+  it found no transfer UI.
+
+### Changes Made
+
+- `QueueItTransferSelectors`:
+  - new `#queueIdLinkURL` strategy (text value, `require_visible=False`);
+  - `TransferSelector.require_visible` (default `True`);
+  - the text source uses `textContent` with whitespace removed;
+  - `identity_crosschecks=("#hlLinkToQueueTicket2",)`, so a contradicting footer ID
+    gives `AMBIGUOUS_QUEUE_ID` and the footer is never an identity source.
+  - Classic visible controls keep priority. Host, path, single-`q`, and
+    expected-identity validation are unchanged.
+- `QueueItSelectors.expected_service_time` adds `#expectedServiceTime` (first visible
+  match wins).
+- `_parse_datetime` accepts 12-hour clock times (`2:45 PM`, `2:45PM`, `11:59:30 PM`)
+  with the existing reference-date and UTC treatment, and rejects invalid ones.
+- `LocalQueueSimulator(layout="modal")` renders the dialog layout (wrapped link,
+  hidden footer ID, demo live fields), plus `crosscheck_conflict_ids`.
+- Sanitised synthetic fixtures `modal_transfer_classic.html` (Glastonbury-style) and
+  `modal_transfer_demo.html` (demo-style). No real identity is copied.
+
+### Tests Run
+
+- Extractor, parsing, and live-extractor tests (`test_transfer_extractor`,
+  `test_live_queue_extractor`, `test_progress_parsing`) — 57 passed. They cover both
+  fixtures, closed-dialog validation (footer agree, contradict, and empty; missing `q`;
+  footer-only; other host or journey; two IDs; expected mismatch; empty dialog), and
+  classic priority.
+- `tests/integration/test_modal_transfer_layout.py` — 5 passed: creation followed by 3
+  restores, on Chrome and Patchright, HYBRID and TRANSFER_ONLY; restore identity
+  mismatch preserved; a contradicting footer fails creation closed with
+  `invalid_transfer_identity`.
+- Real pages, using the app's own extractors:
+  - Queue-it demo (live, headed Patchright, one load): `ACTIVE_QUEUE`, Queue ID
+    captured via `#queueIdLinkURL`.
+  - Saved Glastonbury 2025 page (offline, scripts stripped, network blocked): Queue ID
+    captured via `#queueIdLinkURL`. Live state reads CHECKING because the static
+    snapshot's progress fields are empty or "NaN". The layout is covered by the
+    synthetic fixture.
+- `python -m pytest` — 732 passed, 4 staging deselected (375.79 s).
+- Ruff and strict mypy — PASS.
+
+### Staging Tests
+
+- No authorised staging run. The Queue-it demo is a public demo waiting room, and one
+  visitor joined per diagnostic load, five loads in total. Current Glastonbury pages
+  are unverified; the 2025 page is a historical snapshot.
+
+### Known Issues
+
+- Queue-it bot protection (softblock or proof-of-work challenge) appears on both the
+  demo and the Glastonbury page. The app does not attempt to bypass it; headed
+  Patchright passed the demo's challenge in these probes.
+- Time-only expected arrival is interpreted in UTC on the reference date, as the
+  24-hour form already was.
+
+### Follow-Up
+
+Validate against an authorised live event before relying on it for a real sale.
+
+### Git State
+
+- Branch: main

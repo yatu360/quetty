@@ -42,7 +42,12 @@ class QueueItSelectors:
         "#MainPart_lbUsersInLineAheadOfYou",
         '[data-testid="queue-users-ahead"]',
     )
-    expected_service_time: tuple[str, ...] = ("#MainPart_lbExpectedServiceTime",)
+    # The Queue-it demo layout shows expected arrival in ``#expectedServiceTime``
+    # while keeping the classic element hidden; the first visible match is used.
+    expected_service_time: tuple[str, ...] = (
+        "#MainPart_lbExpectedServiceTime",
+        "#expectedServiceTime",
+    )
     estimated_wait_text: tuple[str, ...] = ("#MainPart_lbWhichIsIn",)
     last_updated: tuple[str, ...] = ("#MainPart_lbLastUpdateTimeText",)
     queue_paused: tuple[str, ...] = ("#queue-paused", '[data-testid="queue-paused"]')
