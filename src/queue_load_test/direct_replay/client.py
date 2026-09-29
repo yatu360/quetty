@@ -45,6 +45,12 @@ _BLOCKED_HEADERS = frozenset(
 _BLOCKED_PREFIXES = ("sec-ch-", "sec-fetch-")
 _MINIMAL_HEADERS = frozenset({"accept", "content-type"})
 
+# Fixed, non-sensitive failure details. Production monitoring classifies SCHEMA
+# failures by these exact values; they never carry response material.
+DETAIL_CONTENT_TYPE = "unexpected response content type"
+DETAIL_OVERSIZE = "response exceeded bound"
+DETAIL_MALFORMED = "response JSON was malformed"
+
 
 class DirectStatusReplayClient:
     """One-session client with fixed limits and response-cookie retention."""
@@ -146,20 +152,20 @@ class DirectStatusReplayClient:
         content_type = response.headers.get("content-type", "").casefold()
         if "json" not in content_type:
             return await self._finish_failure(
-                profile, ReplayFailure.SCHEMA, status, "unexpected response content type", before
+                profile, ReplayFailure.SCHEMA, status, DETAIL_CONTENT_TYPE, before
             )
         body = bytearray()
         async for chunk in response.aiter_bytes():
             body.extend(chunk)
             if len(body) > self._max_response_bytes:
                 return await self._finish_failure(
-                    profile, ReplayFailure.SCHEMA, status, "response exceeded bound", before
+                    profile, ReplayFailure.SCHEMA, status, DETAIL_OVERSIZE, before
                 )
         try:
             parsed: object = json.loads(body)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return await self._finish_failure(
-                profile, ReplayFailure.SCHEMA, status, "response JSON was malformed", before
+                profile, ReplayFailure.SCHEMA, status, DETAIL_MALFORMED, before
             )
         observed_queue_ids = _named_queue_ids(parsed)
         if observed_queue_ids and observed_queue_ids != {self._recipe.expected_queue_id}:

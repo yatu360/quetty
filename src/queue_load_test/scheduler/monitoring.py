@@ -247,9 +247,44 @@ class QueueSessionMonitor:
         self._observability = observability
 
     async def check(self, session: QueueSession) -> MonitoringOutcome:
+        """Restore through the browser, evaluate, persist, and re-schedule."""
+
+        return await self._timed_check(session, self._check)
+
+    async def apply_direct_observation(
+        self,
+        session: QueueSession,
+        observation: MonitoringObservation,
+    ) -> MonitoringOutcome:
+        """Persist an already-validated Direct Monitoring Strategy observation.
+
+        The caller has verified identity and an in-queue lifecycle. Evaluation,
+        progress-change tracking, polling cadence, and the owner-fenced write are the
+        same ones the browser path uses; no browser context is opened.
+        """
+
+        if observation.session_id != session.session_id:
+            raise ValueError("direct observation belongs to another session")
+
+        async def persist(
+            target: QueueSession,
+        ) -> tuple[MonitoringOutcome, QueueProgress | None]:
+            return await self._persist_verified_observation(target, observation)
+
+        return await self._timed_check(session, persist, operation="direct")
+
+    async def _timed_check(
+        self,
+        session: QueueSession,
+        observe: Callable[
+            [QueueSession], Awaitable[tuple[MonitoringOutcome, QueueProgress | None]]
+        ],
+        *,
+        operation: str | None = None,
+    ) -> MonitoringOutcome:
         started = time.perf_counter()
         try:
-            outcome, progress = await self._check(session)
+            outcome, progress = await observe(session)
         except Exception as exc:
             duration = time.perf_counter() - started
             if self._observability is not None:
@@ -264,6 +299,7 @@ class QueueSessionMonitor:
                 worker_id=session.worker_id,
                 duration=duration,
                 error_type=type(exc).__name__,
+                operation=operation,
             )
             raise
         duration = time.perf_counter() - started
@@ -279,6 +315,7 @@ class QueueSessionMonitor:
             worker_id=session.worker_id,
             duration=duration,
             error_type=session.last_error,
+            operation=operation,
         )
         return outcome
 
@@ -325,30 +362,67 @@ class QueueSessionMonitor:
         elif is_verified_observation(result) and result.progress is not None:
             observed_status = evaluate_monitoring_observation(observation)
             session.status = observed_status
-            progress_changed = _progress_signature(previous_progress) != _progress_signature(
-                result.progress
+            progress_changed = _record_progress(
+                session, previous_progress, result.progress, observed_at
             )
-            if progress_changed or session.last_progress_change_at is None:
-                session.last_progress_change_at = observed_at
-            if result.progress.last_updated_at is not None and (
-                session.last_queue_update is None
-                or result.progress.last_updated_at > session.last_queue_update
-            ):
-                session.last_queue_update = result.progress.last_updated_at
         else:
             observed_status = QueueStatus.CONNECTION_LOST
             session.status = observed_status
 
+        return await self._schedule_and_persist(
+            session,
+            previous_status=previous_status,
+            observed_status=observed_status,
+            progress=result.progress,
+            observed_at=observed_at,
+            success=result.success,
+            progress_changed=progress_changed,
+        )
+
+    async def _persist_verified_observation(
+        self,
+        session: QueueSession,
+        observation: MonitoringObservation,
+    ) -> tuple[MonitoringOutcome, QueueProgress | None]:
+        previous_status = session.status
+        previous_progress = await self._repository.get_progress(session.session_id)
+        observed_at = self._clock()
+        observed_status = evaluate_monitoring_observation(observation)
+        session.status = observed_status
+        progress_changed = _record_progress(
+            session, previous_progress, observation.progress, observed_at
+        )
+        return await self._schedule_and_persist(
+            session,
+            previous_status=previous_status,
+            observed_status=observed_status,
+            progress=observation.progress,
+            observed_at=observed_at,
+            success=True,
+            progress_changed=progress_changed,
+        )
+
+    async def _schedule_and_persist(
+        self,
+        session: QueueSession,
+        *,
+        previous_status: QueueStatus,
+        observed_status: QueueStatus,
+        progress: QueueProgress | None,
+        observed_at: datetime,
+        success: bool,
+        progress_changed: bool,
+    ) -> tuple[MonitoringOutcome, QueueProgress | None]:
         if observed_status in {QueueStatus.ADMITTED, QueueStatus.EXPIRED, QueueStatus.FAILED}:
             session.next_check_at = None
         else:
             interval = self._polling_policy.interval_seconds(
                 observed_status,
-                result.progress,
+                progress,
                 jitter=self._jitter,
             )
             session.next_check_at = observed_at + timedelta(seconds=interval)
-        await self._repository.update(session, result.progress)
+        await self._repository.update(session, progress)
         if self._observability is not None:
             self._observability.record_session_transition(previous_status, observed_status)
         stale = is_queue_update_stale(
@@ -359,13 +433,13 @@ class QueueSessionMonitor:
         return (
             MonitoringOutcome(
                 session_id=session.session_id,
-                success=result.success,
+                success=success,
                 observed_status=observed_status,
                 next_check_at=session.next_check_at,
                 queue_update_stale=stale,
                 progress_changed=progress_changed,
             ),
-            result.progress,
+            progress,
         )
 
     async def _restore_with_retries(self, session: QueueSession) -> SessionRestoreResult:
@@ -380,6 +454,24 @@ class QueueSessionMonitor:
             attempt += 1
             result = await self._restorer.restore(session)
         return result
+
+
+def _record_progress(
+    session: QueueSession,
+    previous_progress: QueueProgress | None,
+    progress: QueueProgress,
+    observed_at: datetime,
+) -> bool:
+    """Track progress change and Queue-it's own last-update time; return changed."""
+
+    changed = _progress_signature(previous_progress) != _progress_signature(progress)
+    if changed or session.last_progress_change_at is None:
+        session.last_progress_change_at = observed_at
+    if progress.last_updated_at is not None and (
+        session.last_queue_update is None or progress.last_updated_at > session.last_queue_update
+    ):
+        session.last_queue_update = progress.last_updated_at
+    return changed
 
 
 def _progress_signature(progress: QueueProgress | None) -> tuple[object, ...] | None:

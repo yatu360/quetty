@@ -63,15 +63,19 @@ class ProtectedReplayStateStore:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         document = {**payload, "sha256": hashlib.sha256(canonical.encode()).hexdigest()}
         path = self.path_for(session_id)
-        await asyncio.to_thread(_write_protected, path, document)
+        await asyncio.to_thread(write_protected_json, path, document)
         return path
+
+    async def delete(self, session_id: str) -> bool:
+        path = self.path_for(session_id)
+        return await asyncio.to_thread(_unlink, path)
 
     async def load(
         self, *, session_id: str, recipe_fingerprint: str
     ) -> tuple[ReplayCookie, ...] | None:
         path = self.path_for(session_id)
         try:
-            document = await asyncio.to_thread(_read_json, path)
+            document = await asyncio.to_thread(read_protected_json, path)
         except FileNotFoundError:
             return None
         if (
@@ -120,17 +124,35 @@ class ProtectedReplayStateStore:
         return tuple(cookies)
 
 
-def _read_json(path: Path) -> dict[str, object]:
+def _unlink(path: Path) -> bool:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def read_protected_json(path: Path) -> dict[str, object]:
+    """Read one protected JSON object; a missing file raises ``FileNotFoundError``."""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ReplayStateError("protected replay state is unreadable") from exc
+    try:
+        value = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReplayStateError("protected replay state is unreadable") from exc
     if not isinstance(value, dict):
         raise ReplayStateError("protected replay state is not an object")
     return cast(dict[str, object], value)
 
 
-def _write_protected(path: Path, document: dict[str, object]) -> None:
+def write_protected_json(path: Path, document: dict[str, object]) -> None:
+    """Atomically write mode-0600 JSON beneath a mode-0700 ignore-all directory."""
+
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with contextlib.suppress(OSError):
         path.parent.chmod(0o700)

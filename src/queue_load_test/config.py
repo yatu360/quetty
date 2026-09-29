@@ -78,6 +78,37 @@ class Settings(BaseSettings):
         ge=0,
         le=300,
     )
+    # Direct Monitoring Strategy (Phase 8 Prompt 5). Replayable request material and
+    # response cookies live only beneath this protected, git-ignored directory. A
+    # session becomes direct-capable only from its own browser-observed request
+    # (status discovery above) validated by a reviewed response schema; without the
+    # schema every Direct run check uses the browser fallback.
+    direct_monitor_directory: Path = Field(
+        default=Path(".direct-monitor"),
+        alias="DIRECT_MONITOR_DIRECTORY",
+    )
+    direct_monitor_schema_path: Path | None = Field(
+        default=None,
+        alias="DIRECT_MONITOR_SCHEMA_PATH",
+    )
+    direct_monitor_timeout_seconds: float = Field(
+        default=10.0,
+        alias="DIRECT_MONITOR_TIMEOUT_SECONDS",
+        gt=0,
+        le=60,
+    )
+    direct_monitor_max_response_bytes: int = Field(
+        default=65_536,
+        alias="DIRECT_MONITOR_MAX_RESPONSE_BYTES",
+        ge=1,
+        le=1_048_576,
+    )
+    direct_monitor_failure_threshold: int = Field(
+        default=3,
+        alias="DIRECT_MONITOR_FAILURE_THRESHOLD",
+        ge=1,
+        le=100,
+    )
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
         default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25
@@ -204,6 +235,13 @@ class Settings(BaseSettings):
             raise ValueError("BROWSER_BACKEND must be a string")  # noqa: TRY004
         return BrowserBackendName.parse(value)
 
+    @field_validator("direct_monitor_schema_path", mode="before")
+    @classmethod
+    def blank_schema_path_is_unset(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("monitoring_strategy", mode="before")
     @classmethod
     def parse_monitoring_strategy(cls, value: object) -> MonitoringStrategy:
@@ -281,6 +319,11 @@ class Settings(BaseSettings):
         for minimum_name, minimum, maximum_name, maximum in interval_pairs:
             if minimum > maximum:
                 raise ValueError(f"{minimum_name} cannot exceed {maximum_name}")
+
+        if self.direct_monitor_timeout_seconds >= self.monitor_lease_seconds:
+            raise ValueError(
+                "DIRECT_MONITOR_TIMEOUT_SECONDS must be less than MONITOR_LEASE_SECONDS"
+            )
 
         allowed_discovery_scopes = {
             "diagnostic_unverified_target",

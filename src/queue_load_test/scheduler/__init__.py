@@ -13,6 +13,7 @@ from queue_load_test.scheduler.creation import (
     TransientCreationError,
 )
 from queue_load_test.scheduler.monitoring import (
+    MonitoringHandler,
     MonitoringMetrics,
     MonitoringOutcome,
     MonitoringRetryPolicy,
@@ -30,6 +31,7 @@ __all__ = [
     "CreationOutcomeKind",
     "CreationRetryPolicy",
     "CreationWorkItem",
+    "MonitoringHandler",
     "MonitoringMetrics",
     "MonitoringOutcome",
     "MonitoringRetryPolicy",

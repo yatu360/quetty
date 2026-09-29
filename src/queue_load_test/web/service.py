@@ -20,13 +20,28 @@ from queue_load_test.browser import (
 )
 from queue_load_test.browser.manager import BrowserManagerError
 from queue_load_test.config import Settings
+from queue_load_test.direct_monitor import (
+    DirectMonitoringHandler,
+    DirectMonitoringMetrics,
+    DirectMonitorStateStore,
+    DirectStatusChecker,
+    DiscoveryRecipeHarvester,
+    accepted_evidence_scopes,
+)
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.models import BrowserBackendName, MonitoringStrategy, RunConfig
+from queue_load_test.observation_equivalence import (
+    DirectResponseParser,
+    DirectResponseSchema,
+    DirectSchemaError,
+    load_direct_response_schema,
+)
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
 from queue_load_test.scheduler import (
+    MonitoringHandler,
     MonitoringRetryPolicy,
     ParkedSessionScheduler,
     PollingPolicy,
@@ -51,17 +66,97 @@ def _automatic_monitor_for_strategy(
     strategy: MonitoringStrategy,
     *,
     browser_monitor: QueueSessionMonitor,
-) -> QueueSessionMonitor:
-    """Select the run's automatic monitor without implementing Phase 8 direct I/O.
+    direct_handler: MonitoringHandler | None = None,
+) -> MonitoringHandler:
+    """Select the run's monitoring handler from its immutable persisted strategy.
 
-    Prompt 1 persists and dispatches the strategy boundary only. The direct strategy
-    therefore uses its specified browser fallback for every check until browser-observed
-    visitor-status discovery provides a supported direct checker in a later prompt.
+    Headed Window Strategy uses the browser monitor exactly as before. Direct
+    Monitoring Strategy uses the direct handler, whose browser fallback is that
+    same browser monitor; a Direct run is never silently reassembled as Headed.
     """
 
-    if strategy in (MonitoringStrategy.HEADED_WINDOW, MonitoringStrategy.DIRECT):
+    if strategy is MonitoringStrategy.HEADED_WINDOW:
         return browser_monitor
+    if strategy is MonitoringStrategy.DIRECT:
+        if direct_handler is None:
+            raise ValueError("Direct Monitoring Strategy requires its direct handler")
+        return direct_handler
     raise ValueError(f"Unsupported monitoring strategy: {strategy!r}")
+
+
+def _direct_response_schema(settings: Settings, target_url: str) -> DirectResponseSchema | None:
+    """Load the reviewed response schema, accepting only evidence valid for this target."""
+
+    path = settings.direct_monitor_schema_path
+    if path is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "direct_monitor_schema_unavailable",
+            operation="not_configured",
+        )
+        return None
+    try:
+        schema = load_direct_response_schema(path, require_authorized_staging=False)
+    except DirectSchemaError:
+        log_event(
+            logger, logging.WARNING, "direct_monitor_schema_unavailable", operation="invalid"
+        )
+        return None
+    if schema.source_scope not in accepted_evidence_scopes(target_url):
+        log_event(
+            logger,
+            logging.WARNING,
+            "direct_monitor_schema_unavailable",
+            operation="scope_not_accepted",
+        )
+        return None
+    return schema
+
+
+def _direct_handler_for_run(
+    run: RunConfig,
+    settings: Settings,
+    *,
+    browser_monitor: QueueSessionMonitor,
+    state_store: FileSystemStateStore,
+    target_url: str,
+) -> DirectMonitoringHandler | None:
+    if run.monitoring_strategy is not MonitoringStrategy.DIRECT:
+        return None
+    scopes = accepted_evidence_scopes(target_url)
+    schema = _direct_response_schema(settings, target_url)
+    parser = (
+        DirectResponseParser(
+            schema, admission_matcher=AdmissionDetector.from_urls(target_url).matches
+        )
+        if schema is not None
+        else None
+    )
+    store = DirectMonitorStateStore(settings.direct_monitor_directory)
+    harvester = (
+        DiscoveryRecipeHarvester(
+            evidence_directory=settings.status_discovery_directory,
+            parser=parser,
+            accepted_scopes=scopes,
+        )
+        if parser is not None and settings.status_discovery_enabled
+        else None
+    )
+    return DirectMonitoringHandler(
+        browser_monitor=browser_monitor,
+        checker=DirectStatusChecker(
+            store=store,
+            browser_state=state_store,
+            parser=parser,
+            accepted_scopes=scopes,
+            timeout_seconds=settings.direct_monitor_timeout_seconds,
+            max_response_bytes=settings.direct_monitor_max_response_bytes,
+            failure_threshold=settings.direct_monitor_failure_threshold,
+        ),
+        store=store,
+        harvester=harvester,
+    )
 
 
 def _status_discovery_for_run(
@@ -149,6 +244,7 @@ class ApplicationRunRuntime:
         self._shared_capacity: BrowserContextCapacity | None = None
         self._headed_browser_manager: BrowserManager | None = None
         self._operator_actions: OperatorActionManager | None = None
+        self._direct_handler: DirectMonitoringHandler | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
@@ -246,9 +342,17 @@ class ApplicationRunRuntime:
                 retry_policy=MonitoringRetryPolicy.from_settings(settings),
                 observability=metrics,
             )
+            direct_handler = _direct_handler_for_run(
+                run,
+                settings,
+                browser_monitor=monitor,
+                state_store=state_store,
+                target_url=target_url,
+            )
             automatic_monitor = _automatic_monitor_for_strategy(
                 run.monitoring_strategy,
                 browser_monitor=monitor,
+                direct_handler=direct_handler,
             )
             manual_processes, manual_contexts_per_process = manual_pool_topology(
                 settings.browser_backend, settings.max_manual_open_sessions
@@ -281,11 +385,16 @@ class ApplicationRunRuntime:
                 lease_seconds=settings.manual_open_lease_seconds,
             )
             await manual_sessions.recover_stale()
+            # Refresh Now uses the run's selected strategy (Direct keeps its browser
+            # fallback); Manual Open above always uses the browser monitor.
             operator_actions = OperatorActionManager(
                 repository=self._repository,
                 creator=creator,
-                monitor=monitor,
+                monitor=automatic_monitor,
                 state_store=state_store,
+                session_cleanup=DirectMonitorStateStore(
+                    settings.direct_monitor_directory
+                ).delete,
                 target_adjustment=creation,
                 worker_count=settings.operator_workers,
                 queue_capacity=settings.operator_queue_capacity,
@@ -335,6 +444,7 @@ class ApplicationRunRuntime:
             self._shared_capacity = shared_capacity
             self._headed_browser_manager = headed_manager
             self._operator_actions = operator_actions
+            self._direct_handler = direct_handler
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
     async def capacity(self) -> RuntimeCapacity:
@@ -416,6 +526,13 @@ class ApplicationRunRuntime:
         manager = self._operator_actions
         return manager.latest_add() if manager is not None else None
 
+    @property
+    def direct_monitoring_metrics(self) -> DirectMonitoringMetrics | None:
+        """In-process Direct strategy counters; ``None`` for a Headed Window run."""
+
+        handler = self._direct_handler
+        return handler.metrics if handler is not None else None
+
     async def close(self) -> None:
         """Shut down in dependency order without deleting or replacing identities.
 
@@ -459,6 +576,7 @@ class ApplicationRunRuntime:
             self._shared_capacity = None
             self._headed_browser_manager = None
             self._operator_actions = None
+            self._direct_handler = None
         try:
             await self._repository.reset_all()
         except Exception:
@@ -467,6 +585,9 @@ class ApplicationRunRuntime:
                 await self.start_run(active)
             raise
         removed = await FileSystemStateStore(self._base_settings.state_directory).clear()
+        removed += await DirectMonitorStateStore(
+            self._base_settings.direct_monitor_directory
+        ).clear()
         log_event(logger, logging.INFO, "run_reset_completed", count=removed)
 
 

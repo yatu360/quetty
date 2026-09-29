@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -23,7 +24,7 @@ from queue_load_test.repository import (
 from queue_load_test.scheduler import (
     CreationOutcomeKind,
     CreationWorkItem,
-    QueueSessionMonitor,
+    MonitoringHandler,
     SessionCreationHandler,
 )
 from queue_load_test.state import StateStore
@@ -88,17 +89,25 @@ class OperatorActionManager:
         *,
         repository: SessionRepository,
         creator: SessionCreationHandler,
-        monitor: QueueSessionMonitor,
+        monitor: MonitoringHandler,
         state_store: StateStore,
         target_adjustment: TargetAdjustment,
         worker_count: int,
         queue_capacity: int,
         lease_seconds: float,
+        session_cleanup: Callable[[str], Awaitable[object]] | None = None,
     ) -> None:
+        """``monitor`` is the run's selected monitoring handler, so Refresh Now uses
+        the same strategy (and, for Direct, the same browser fallback) as automatic
+        monitoring. ``session_cleanup`` removes any further per-session protected
+        files, such as Direct Monitoring records, whenever browser state is deleted.
+        """
+
         self._repository = repository
         self._creator = creator
         self._monitor = monitor
         self._state_store = state_store
+        self._session_cleanup = session_cleanup
         self._target_adjustment = target_adjustment
         self._worker_count = worker_count
         self._queue: asyncio.Queue[_Work] = asyncio.Queue(maxsize=queue_capacity)
@@ -190,6 +199,7 @@ class OperatorActionManager:
                     return self._rejected(kind, session_id, "Session no longer exists")
                 try:
                     await self._state_store.delete(session_id)
+                    await self._cleanup_session_files(session_id)
                 except Exception:  # noqa: BLE001 - sanitized operator failure
                     return self._rejected(
                         kind, session_id, "Delete failed while removing browser state"
@@ -426,6 +436,8 @@ class OperatorActionManager:
             await self._repository.delete_unowned_session(session_id)
         with contextlib.suppress(Exception):
             await self._state_store.delete(session_id)
+        with contextlib.suppress(Exception):
+            await self._cleanup_session_files(session_id)
         return False
 
     async def _revert_reservation(self) -> None:
@@ -441,9 +453,14 @@ class OperatorActionManager:
                 error_type=type(exc).__name__,
             )
 
+    async def _cleanup_session_files(self, session_id: str) -> None:
+        if self._session_cleanup is not None:
+            await self._session_cleanup(session_id)
+
     async def _delete_state(self, session_id: str) -> None:
         try:
             await self._state_store.delete(session_id)
+            await self._cleanup_session_files(session_id)
         except Exception as exc:  # noqa: BLE001 - row is gone; an orphan file is audited
             log_event(
                 logger,

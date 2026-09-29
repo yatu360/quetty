@@ -10,6 +10,36 @@ live monitoring.
 
 ## Current Status
 
+### Production Direct Monitoring with browser fallback (Phase 8 Prompt 5, 2026-09-29)
+
+- Direct Monitoring Strategy runs now use `DirectMonitoringHandler`: claim, then a
+  direct visitor-status request, then validate, normalize, persist (owner-fenced), and
+  release. Any uncertainty or failure is classified (`DirectFallbackReason`) and runs
+  the unchanged browser monitor (restore, live inspect, persist, park). The persisted
+  strategy never changes. Headed Window Strategy runs are unchanged.
+- The operator made the Prompt 4 equivalence gate optional, so direct requests are
+  evidence-gated per session. A session becomes `DIRECT_CAPABLE` only from its own
+  browser-observed status request, and only when the captured response parses with the
+  persisted Queue ID through a reviewed schema. Real targets accept only
+  `authorized_queue_it_staging` evidence. `local_simulator` evidence is accepted only
+  for loopback run targets. With no schema (the current state of this workspace) every
+  Direct check uses the browser.
+- Direct observations can persist only in-queue states (PRE_QUEUE, ACTIVE_QUEUE,
+  PAUSED, SERVICED_SOON, TURN_STARTED, READY) through the single lifecycle evaluator.
+  Admission, expiry, connection loss, unknown or contradictory lifecycle, and identity
+  problems always fall back to the browser. Direct failure never reacquires or replaces
+  a Queue ID.
+- Recipes and response cookies live only in the protected `.direct-monitor/` store
+  (mode 0600/0700, integrity-checked, git-ignored), never in SQLite. Delete, Replace,
+  and Stop & Reset clean it up.
+- Pause, leases, fixed workers, bounded claims, backlog, shutdown, and recovery are the
+  scheduler's own. Manual Open is browser-based for both strategies and fences
+  automatic polling. Refresh Now uses the run's strategy, with the same fallback.
+  Creation is unchanged.
+- Local validation only: the Direct application workflow passes 35/35 on both Chrome
+  and Patchright against the simulator. That is not Queue-it evidence, and Queue-it
+  staging is **NOT RUN / UNKNOWN**. See `docs/phase8_direct_runtime_integration.md`.
+
 ### Monitoring strategy and direct-status research (Phase 8 Prompts 1–4, 2026-09-29)
 
 - Every run now persists one immutable monitoring strategy independently from its
@@ -44,7 +74,7 @@ live monitoring.
   field/lifecycle comparisons. See `docs/phase8_observation_equivalence.md`.
 - Queue-it staging is **NOT RUN / UNKNOWN**. No genuine artifact/schema exists in the
   workspace, so storage sufficiency and semantic equivalence remain unknown. Prompt 5
-  production direct monitoring is blocked.
+  proceeded with the gate made optional by the operator; see above.
 
 ### Browser backend policy (authoritative, Phase 7 accepted 2026-09-28)
 
@@ -827,8 +857,10 @@ mismatch without replacing the expected ID.
 ## Monitoring Model
 
 `RunConfig.monitoring_strategy` selects one immutable run-level automatic-monitoring
-strategy. `headed_window` is the existing browser restore/live-DOM path. `direct` is a
-Phase 8 boundary and currently selects that same browser monitor as its fallback. When
+strategy. `headed_window` is the existing browser restore/live-DOM path. `direct`
+selects `DirectMonitoringHandler` (Phase 8 Prompt 5): a direct visitor-status check for
+`DIRECT_CAPABLE` sessions, with the same browser monitor as its classified fallback;
+see `docs/phase8_direct_runtime_integration.md`. When
 explicitly enabled for a Direct run, a bounded page-level observer records protected
 diagnostic evidence from requests the visitor page actually makes and correlates JSON
 values with the final DOM extraction. It never supplies a monitoring result or replay.
@@ -846,8 +878,11 @@ in separate protected experimental state and never rewrite the browser-state doc
 monitor converts its restore result into this type, then calls the same authoritative
 lifecycle rules as before. The experimental direct parser can produce the same type
 only from a successful, identity-matching replay plus an explicitly reviewed schema.
-Identity ambiguity or lifecycle disagreement is a hard shadow failure. No direct
-observation is persisted by normal runtime code.
+Identity ambiguity or lifecycle disagreement is a hard shadow failure. Since Prompt 5,
+normal runtime code persists a direct observation only through
+`QueueSessionMonitor.apply_direct_observation`, after `validate_direct_observation`
+accepts it. That call shares the browser path's evaluation, cadence, and owner-fenced
+write.
 
 `ParkedSessionScheduler` selects only due, unleased, non-terminal sessions through the
 repository, claims at most the free space in a bounded `asyncio.Queue`, and feeds a
@@ -1185,6 +1220,9 @@ mechanics only; they are not Queue-it staging or performance measurements.
   minimisation method, UNKNOWN findings, and Prompt 4 evidence gate.
 - `docs/phase8_observation_equivalence.md` — common observation model, schema and
   comparison rules, shadow harness, UNKNOWN evidence, and Prompt 5 gate.
+- `docs/phase8_direct_runtime_integration.md` — Prompt 5 routing, capability states,
+  fallback classification, recipe refresh, protected persistence, operator semantics,
+  local validation, and Prompt 6 inputs.
 - `docs/phase8_status_discovery.md` — protected network-observation mechanism,
   historical-versus-observed boundary, evidence questions, and Prompt 3 gate.
 - `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
@@ -1376,11 +1414,12 @@ python -m mypy src
 
 ## Next Task
 
-Phase 8 Prompt 4's shadow implementation is complete with conclusion **UNKNOWN**. Next:
-run the explicitly gated Prompt 2–4 evidence sequence against an authorised Queue-it
-staging event. **Phase 8 Prompt 5 — Production Direct Monitoring with Browser Fallback**
-is blocked and is not the next task unless that evidence is sufficient. Authorised
-Patchright staging validation also remains open; never claim staging PASS without an
+**Phase 8 Prompt 6 — Direct Monitoring Security, Observability, and Failure
+Hardening.** Prompt 5 is complete, running local simulator evidence only. The
+authorised Queue-it staging evidence sequence (Prompt 2 discovery, Prompt 3 replay,
+Prompt 4 shadow comparison, and a reviewed `authorized_queue_it_staging` schema) is
+still required before any real event can make a session direct-capable. Authorised
+Patchright staging validation also remains open. Never claim staging PASS without an
 authorised run.
 
 ## Instructions for Future AI Sessions

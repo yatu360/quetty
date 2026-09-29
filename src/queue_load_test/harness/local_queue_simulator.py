@@ -12,12 +12,33 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+from collections import Counter
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlsplit
 
 STAGE_PRE = "pre"
 STAGE_ACTIVE = "active"
 STAGE_SERVICED = "serviced"
+
+# Deterministic faults for the optional visitor-status endpoint (``status_enabled``).
+STATUS_FAULTS = frozenset(
+    {
+        "http_500",
+        "slow",
+        "redirect",
+        "html",
+        "malformed",
+        "mismatch",
+        "missing_id",
+        "rejected",
+        "contradictory",
+        "unknown_lifecycle",
+        "admitted",
+        "unknown_field",
+        "wrong_type",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -35,6 +56,13 @@ class LocalQueueSimulator:
     new_identity_prefix: str = "sim-new"
     requests: int = 0
     new_identities: int = 0
+    # Optional page-driven JSON visitor-status polling for Direct Monitoring tests.
+    status_enabled: bool = False
+    status_poll_ms: int = 400
+    status_faults: dict[str, str] = field(default_factory=dict)
+    page_requests: Counter[str] = field(default_factory=Counter)
+    browser_status_requests: Counter[str] = field(default_factory=Counter)
+    direct_status_requests: Counter[str] = field(default_factory=Counter)
     _server: asyncio.Server | None = None
     port: int = 0
 
@@ -63,6 +91,10 @@ class LocalQueueSimulator:
 
     def transfer_url(self, queue_id: str) -> str:
         return f"{self.queue_url}?q={queue_id}"
+
+    @property
+    def status_url(self) -> str:
+        return f"{self.base_url}/status"
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
@@ -101,6 +133,9 @@ class LocalQueueSimulator:
             if parsed.path == "/protected":
                 await self._respond(writer, 200, "<h1>Protected local destination</h1>")
                 return
+            if parsed.path == "/status" and self.status_enabled:
+                await self._status(writer, parsed.query, headers)
+                return
             if parsed.path != "/queue":
                 await self._respond(writer, 404, "<h1>Not found</h1>")
                 return
@@ -122,6 +157,7 @@ class LocalQueueSimulator:
             if query_id is not None and queue_id in self.transfer_down_ids:
                 await self._respond(writer, 503, "<h1>Transfer temporarily unavailable</h1>")
                 return
+            self.page_requests[queue_id] += 1
             shown_id = f"{queue_id}-other" if queue_id in self.mismatch_ids else queue_id
             body = self._html(queue_id, self.transfer_url(shown_id))
             await self._respond(
@@ -137,11 +173,111 @@ class LocalQueueSimulator:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
 
+    async def _status(
+        self,
+        writer: asyncio.StreamWriter,
+        query: str,
+        headers: dict[str, str],
+    ) -> None:
+        """JSON status polled by the page itself; replays arrive without Sec-Fetch."""
+
+        queue_id = parse_qs(query).get("q", [""])[0]
+        browser = "sec-fetch-mode" in headers
+        (self.browser_status_requests if browser else self.direct_status_requests)[
+            queue_id
+        ] += 1
+        if _cookie(headers.get("cookie", ""), "queue_id") != queue_id:
+            await self._respond(writer, 403, "rejected", content_type="text/plain")
+            return
+        fault = self.status_faults.get(queue_id) if not browser else None
+        if fault == "slow":
+            await asyncio.sleep(self.slow_seconds)
+        if fault == "http_500":
+            await self._respond(writer, 500, "unavailable", content_type="text/plain")
+            return
+        if fault == "rejected":
+            await self._respond(writer, 403, "rejected", content_type="text/plain")
+            return
+        if fault == "redirect":
+            writer.write(
+                b"HTTP/1.1 302 Found\r\nLocation: /queue\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            await writer.drain()
+            return
+        if fault == "html":
+            await self._respond(writer, 200, "<h1>not json</h1>")
+            return
+        if fault == "malformed":
+            await self._respond(writer, 200, "{not json", content_type="application/json")
+            return
+        await self._respond(
+            writer,
+            200,
+            json.dumps(self.status_document(queue_id, fault)),
+            content_type="application/json",
+        )
+
+    def status_document(self, queue_id: str, fault: str | None = None) -> dict[str, object]:
+        stage = self.stages.get(queue_id, STAGE_ACTIVE)
+        document: dict[str, object] = {
+            "queueId": f"{queue_id}-other" if fault == "mismatch" else queue_id,
+            "preQueue": stage == STAGE_PRE,
+            "activeQueue": stage != STAGE_PRE,
+            "servicedSoon": stage == STAGE_SERVICED,
+            "progress": self.progress.get(queue_id, 40) if stage != STAGE_PRE else None,
+            "usersAhead": 10 if stage != STAGE_PRE else None,
+        }
+        if fault == "missing_id":
+            document.pop("queueId")
+        elif fault == "contradictory":
+            document.update(preQueue=True, activeQueue=True)
+        elif fault == "unknown_lifecycle":
+            document.update(
+                preQueue=False, activeQueue=False, servicedSoon=False, usersAhead=None
+            )
+        elif fault == "admitted":
+            document["redirectUrl"] = self.protected_url
+        elif fault == "unknown_field":
+            document["addedLater"] = {"value": 1}
+        elif fault == "wrong_type":
+            document["usersAhead"] = "ten"
+        return document
+
+    @staticmethod
+    def status_schema(scope: str = "local_simulator") -> dict[str, object]:
+        """The reviewed-schema document describing this simulator's status JSON."""
+
+        return {
+            "schema_version": 1,
+            "source_scope": scope,
+            "fields": {
+                "queue_id": ["queueId"],
+                "pre_queue": ["preQueue"],
+                "active_queue": ["activeQueue"],
+                "serviced_soon": ["servicedSoon"],
+                "progress_percentage": ["progress"],
+                "users_ahead": ["usersAhead"],
+                "redirect_url": ["redirectUrl"],
+            },
+        }
+
+    def _status_script(self, queue_id: str) -> str:
+        if not self.status_enabled:
+            return ""
+        return (
+            "<script>(function(){const q="
+            + json.dumps(queue_id)
+            + ";function poll(){fetch('/status?q='+encodeURIComponent(q),"
+            "{headers:{'Accept':'application/json'}}).catch(function(){});}"
+            f"poll();setInterval(poll,{self.status_poll_ms});}})();</script>"
+        )
+
     def _html(self, queue_id: str, transfer_url: str) -> str:
         transfer = (
             f'<a data-testid="queue-transfer-link" href="{transfer_url}">'
             "Continue my journey on another browser or device</a>"
-        )
+        ) + self._status_script(queue_id)
         stage = self.stages.get(queue_id, STAGE_ACTIVE)
         if stage == STAGE_PRE:
             return (
@@ -170,11 +306,12 @@ class LocalQueueSimulator:
         body: str,
         *,
         extra_headers: str = "",
+        content_type: str = "text/html; charset=utf-8",
     ) -> None:
         encoded = body.encode()
         writer.write(
             (
-                f"HTTP/1.1 {status} X\r\nContent-Type: text/html; charset=utf-8\r\n"
+                f"HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\n"
                 f"Content-Length: {len(encoded)}\r\n{extra_headers}Connection: close\r\n\r\n"
             ).encode()
             + encoded

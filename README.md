@@ -267,8 +267,10 @@ clears all persisted headed ownership (see below); no browser-only state can kee
 session open forever.
 
 The remaining per-row controls reuse those same domain services. **Refresh Now** claims
-the session, restores its expected identity, runs one normal evaluator/monitor pass,
-persists progress and state, and parks it again. It is intentionally available while
+the session and runs one normal pass of the run's monitoring strategy: under Headed
+Window Strategy it restores the expected identity in the browser, evaluates, persists
+progress and state, and parks it again; under Direct Monitoring Strategy it tries the
+session's direct status check and uses that same browser pass as its fallback. It is intentionally available while
 automatic monitoring is globally paused, but reports busy during an automatic check,
 another refresh, or **Open**. **Delete** means “stop managing this visitor”:
 after browser confirmation it removes the session, progress, leases, transfer identity,

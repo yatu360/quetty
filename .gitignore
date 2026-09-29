@@ -154,6 +154,7 @@ activemq-data/
 .status-discovery/
 .direct-replay/
 .observation-equivalence/
+.direct-monitor/
 .phase4-browser-state/
 *.sqlite3
 *.sqlite3-shm

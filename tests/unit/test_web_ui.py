@@ -1170,13 +1170,15 @@ def test_setup_rejects_unknown_monitoring_strategy_without_persisting(tmp_path: 
         assert connection.execute("SELECT COUNT(*) FROM run_config").fetchone()[0] == 0
 
 
-def test_phase8_strategy_boundary_keeps_existing_browser_monitor_path() -> None:
+def test_phase8_strategy_boundary_routes_each_strategy_to_its_handler() -> None:
     browser_monitor = cast(Any, object())
+    direct_handler = cast(Any, object())
 
     assert (
         _automatic_monitor_for_strategy(
             MonitoringStrategy.HEADED_WINDOW,
             browser_monitor=browser_monitor,
+            direct_handler=direct_handler,
         )
         is browser_monitor
     )
@@ -1184,9 +1186,14 @@ def test_phase8_strategy_boundary_keeps_existing_browser_monitor_path() -> None:
         _automatic_monitor_for_strategy(
             MonitoringStrategy.DIRECT,
             browser_monitor=browser_monitor,
+            direct_handler=direct_handler,
         )
-        is browser_monitor
+        is direct_handler
     )
+    with pytest.raises(ValueError, match="requires its direct handler"):
+        _automatic_monitor_for_strategy(
+            MonitoringStrategy.DIRECT, browser_monitor=browser_monitor
+        )
 
 
 def test_status_discovery_is_opt_in_for_direct_runs_and_never_changes_headed_runs(

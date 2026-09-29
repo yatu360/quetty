@@ -5044,3 +5044,129 @@ event with multiple legitimate sessions and every lifecycle stage that event exp
 
 **Do not begin Phase 8 Prompt 5 — Production Direct Monitoring with Browser Fallback
 until that evidence is sufficient.**
+
+## 2026-09-29 — Phase 8 Prompt 5 — Production Direct Monitoring with Browser Fallback
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Wire Direct Monitoring Strategy into the existing scheduler as an interchangeable
+run-level implementation, with the browser monitor as its classified fallback. Headed
+Window Strategy, creation, and Manual Open stay unchanged.
+
+### Gate
+
+Prompt 4 concluded **UNKNOWN / NOT READY**. The operator made that equivalence
+condition optional for this prompt and asked for the work to proceed. Direct requests
+are therefore gated per session on real evidence rather than trusted by default. With
+no reviewed schema (this workspace), every Direct check uses the browser fallback.
+
+### Changes Made
+
+- Added `queue_load_test.direct_monitor`:
+  - `DirectCapability` (DISCOVERY_REQUIRED / DIRECT_CAPABLE / DIRECT_UNAVAILABLE),
+    internal only.
+  - `DirectFallbackReason`, split into hard and soft classes.
+  - `DirectStatusChecker`: a bounded replay of the session's own recipe, strict parse,
+    and `validate_direct_observation`. Only in-queue states whose transition is legal
+    are accepted.
+  - `DiscoveryRecipeHarvester`: adopts only a same-session, post-fallback,
+    accepted-scope, Queue-ID-carrying browser exchange whose captured response already
+    satisfies the reviewed schema.
+  - `DirectMonitorStateStore`: protected mode-0600/0700 integrity-checked records
+    outside SQLite, plus the Prompt 3 cookie store.
+  - `DirectMonitoringHandler`: tries direct, otherwise records the reason and runs the
+    unchanged browser monitor, then attempts a safe recipe refresh.
+- `QueueSessionMonitor.apply_direct_observation` persists a validated direct
+  observation through the browser path's shared progress/cadence/fenced-write helpers.
+  The browser path was refactored onto the same helpers without any behavior change.
+- `_automatic_monitor_for_strategy` now routes Direct runs to the direct handler and
+  refuses to assemble a Direct run without it.
+- Refresh Now uses the run's selected strategy, with the same fallback. README wording
+  was updated to match.
+- Operator Delete, Replace, and discard paths remove direct records and cookies, and
+  Stop & Reset clears the store.
+- Evidence scopes: real targets accept only `authorized_queue_it_staging` schema and
+  discovery evidence. `local_simulator` is accepted only for loopback run targets.
+- Config: `DIRECT_MONITOR_DIRECTORY`, `DIRECT_MONITOR_SCHEMA_PATH` (blank = unset),
+  `DIRECT_MONITOR_TIMEOUT_SECONDS` (< `MONITOR_LEASE_SECONDS`),
+  `DIRECT_MONITOR_MAX_RESPONSE_BYTES`, and `DIRECT_MONITOR_FAILURE_THRESHOLD`.
+  `.direct-monitor/` is git-ignored.
+- `LocalQueueSimulator` gained an opt-in, page-polled JSON status endpoint with
+  deterministic faults and request counters that separate browser traffic from replays.
+- Added `queue-load-test-phase8-direct-runtime`, the complete Direct application
+  workflow.
+- Prompt 3 replay store exposes its protected JSON helpers and `delete`. A missing
+  cookie file now loads as `None`, as the harness intended. The replay client exposes
+  fixed failure-detail constants.
+
+### Files Added
+
+- `src/queue_load_test/direct_monitor/{__init__,models,store,checker,harvest,handler}.py`
+- `src/queue_load_test/harness/phase8_direct_runtime.py`
+- `tests/unit/test_direct_monitor.py`
+- `tests/integration/test_phase8_direct_runtime.py`
+- `docs/phase8_direct_runtime_integration.md`
+- `docs/results/phase8_direct_runtime_result.json`
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/{__init__,monitoring}.py`
+- `src/queue_load_test/web/{service,actions}.py`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/direct_replay/{client,store}.py`
+- `src/queue_load_test/harness/local_queue_simulator.py`
+- `tests/unit/test_web_ui.py`
+- `pyproject.toml`, `.gitignore`, `.env.example`, `README.md`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_direct_monitor.py` — 58 passed.
+- `python -m pytest tests/integration/test_phase8_direct_runtime.py` (Chrome) — passed,
+  35/35 workflow checks.
+- `queue-load-test-phase8-direct-runtime --backend patchright` — 35/35
+  (`docs/results/phase8_direct_runtime_result.json`).
+- Headed Window application workflows: `tests/integration/test_phase5_workflow.py`
+  (Chrome, Camoufox, Patchright extended), run in the full suite.
+- `python -m pytest` — 662 passed, 4 staging deselected (291.68 s).
+- `python -m ruff check src tests` — PASS.
+- `python -m mypy src` — PASS (strict, 99 source files).
+
+### Staging Tests
+
+- NOT RUN. No authorised Queue-it target, genuine discovery artifact, or reviewed
+  `authorized_queue_it_staging` schema exists. Simulator results are not Queue-it
+  success, and every Queue-it direct question remains UNKNOWN.
+
+### Important Decisions
+
+- Direct responses never on their own mark ADMITTED, EXPIRED, or FAILED. Admission and
+  expiry are confirmed by the browser monitor.
+- Hard failures disable direct for the session immediately. Soft failures disable it
+  after a consecutive threshold. Only a new legitimate browser observation re-enables
+  it.
+- No SQLite schema change. Replayable values stay in the protected store.
+- Poll-timing hints are parsed but do not change cadence (no evidence yet).
+
+### Known Issues
+
+- Persistent direct-only faults cause repeated direct-attempt, fallback, and
+  re-adoption cycles, doubling per-check cost.
+- Direct metrics are in-process and log-only (no Prometheus/dashboard yet).
+- Discovery artifacts accumulate on every Direct fallback while discovery is enabled.
+- Replay cookies do not flow back into browser `storage_state`.
+- The existing intermittent operator-fencing fake-timing test and the Starlette `httpx`
+  TestClient deprecation warning remain.
+
+### Follow-Up
+
+**Phase 8 Prompt 6 — Direct Monitoring Security, Observability, and Failure
+Hardening.**
+
+### Git State
+
+- Branch: main

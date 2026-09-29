@@ -1,0 +1,233 @@
+{
+  "scope": "local_simulator_only",
+  "queue_it_contacted": false,
+  "passed": 35,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "direct_run_persists_strategy",
+      "passed": true,
+      "t_seconds": 0.68
+    },
+    {
+      "name": "creation_is_browser_based_and_unchanged",
+      "passed": true,
+      "seconds": 1.01,
+      "t_seconds": 1.69
+    },
+    {
+      "name": "browser_fallback_discovers_legitimate_recipe_per_session",
+      "passed": true,
+      "seconds": 2.52,
+      "t_seconds": 4.21
+    },
+    {
+      "name": "replayable_recipe_is_protected_not_in_sqlite",
+      "passed": true,
+      "t_seconds": 4.21
+    },
+    {
+      "name": "direct_checks_persist_progress_and_lifecycle_without_browser",
+      "passed": true,
+      "seconds": 0.51,
+      "t_seconds": 4.72
+    },
+    {
+      "name": "direct_checks_hold_no_browser_ownership_or_contexts",
+      "passed": true,
+      "t_seconds": 4.72
+    },
+    {
+      "name": "fallback_http_500_uses_browser_monitor",
+      "passed": true,
+      "reason": "unexpected_http_status",
+      "t_seconds": 5.93
+    },
+    {
+      "name": "fallback_slow_uses_browser_monitor",
+      "passed": true,
+      "reason": "timeout",
+      "t_seconds": 10.27
+    },
+    {
+      "name": "fallback_redirect_uses_browser_monitor",
+      "passed": true,
+      "reason": "unexpected_redirect",
+      "t_seconds": 13.51
+    },
+    {
+      "name": "fallback_html_uses_browser_monitor",
+      "passed": true,
+      "reason": "unexpected_content_type",
+      "t_seconds": 16.64
+    },
+    {
+      "name": "fallback_malformed_uses_browser_monitor",
+      "passed": true,
+      "reason": "malformed_response",
+      "t_seconds": 19.97
+    },
+    {
+      "name": "fallback_wrong_type_uses_browser_monitor",
+      "passed": true,
+      "reason": "schema_incompatible",
+      "t_seconds": 23.3
+    },
+    {
+      "name": "fallback_missing_id_uses_browser_monitor",
+      "passed": true,
+      "reason": "identity_ambiguity",
+      "t_seconds": 26.43
+    },
+    {
+      "name": "fallback_mismatch_uses_browser_monitor",
+      "passed": true,
+      "reason": "identity_mismatch",
+      "t_seconds": 29.66
+    },
+    {
+      "name": "fallback_rejected_uses_browser_monitor",
+      "passed": true,
+      "reason": "rejected_session_state",
+      "t_seconds": 32.9
+    },
+    {
+      "name": "fallback_unknown_lifecycle_uses_browser_monitor",
+      "passed": true,
+      "reason": "unknown_lifecycle",
+      "t_seconds": 36.13
+    },
+    {
+      "name": "fallback_contradictory_uses_browser_monitor",
+      "passed": true,
+      "reason": "contradictory_lifecycle",
+      "t_seconds": 39.37
+    },
+    {
+      "name": "fallback_admitted_uses_browser_monitor",
+      "passed": true,
+      "reason": "unsupported_admission",
+      "t_seconds": 42.6
+    },
+    {
+      "name": "direct_failures_never_reacquire_or_replace_identity",
+      "passed": true,
+      "t_seconds": 42.6
+    },
+    {
+      "name": "legitimate_browser_fallback_refreshes_recipe_and_direct_resumes",
+      "passed": true,
+      "t_seconds": 47.66
+    },
+    {
+      "name": "run_stays_direct_while_sessions_fall_back",
+      "passed": true,
+      "t_seconds": 47.67
+    },
+    {
+      "name": "pause_stops_direct_and_browser_automatic_checks",
+      "passed": true,
+      "t_seconds": 50.68
+    },
+    {
+      "name": "refresh_now_uses_direct_strategy_while_paused",
+      "passed": true,
+      "t_seconds": 50.81
+    },
+    {
+      "name": "refresh_now_falls_back_to_browser_on_direct_failure",
+      "passed": true,
+      "t_seconds": 52.24
+    },
+    {
+      "name": "resume_continues_direct_monitoring",
+      "passed": true,
+      "t_seconds": 52.35
+    },
+    {
+      "name": "manual_open_is_browser_based_and_fences_direct_polling",
+      "passed": true,
+      "t_seconds": 56.96
+    },
+    {
+      "name": "close_releases_ownership_and_direct_resumes",
+      "passed": true,
+      "t_seconds": 58.94
+    },
+    {
+      "name": "add_is_browser_based_and_new_session_becomes_direct_capable",
+      "passed": true,
+      "t_seconds": 60.56
+    },
+    {
+      "name": "replace_removes_old_direct_record_and_keeps_others",
+      "passed": true,
+      "t_seconds": 60.77
+    },
+    {
+      "name": "delete_removes_direct_record_and_cookies",
+      "passed": true,
+      "t_seconds": 60.88
+    },
+    {
+      "name": "shutdown_releases_all_ownership_and_browsers",
+      "passed": true,
+      "browser_processes": 0,
+      "t_seconds": 62.21
+    },
+    {
+      "name": "restart_keeps_persisted_direct_strategy_despite_new_default",
+      "passed": true,
+      "t_seconds": 62.53
+    },
+    {
+      "name": "restart_recovers_direct_capability_without_rediscovery",
+      "passed": true,
+      "t_seconds": 62.55
+    },
+    {
+      "name": "restart_never_reacquires_identity",
+      "passed": true,
+      "t_seconds": 62.55
+    },
+    {
+      "name": "stop_and_reset_clears_direct_records_and_run",
+      "passed": true,
+      "seconds": 0.07,
+      "t_seconds": 62.61
+    }
+  ],
+  "evidence": {
+    "browser_backend": "patchright",
+    "requested": 3,
+    "direct_metrics": {
+      "checks": 81,
+      "direct_requests": 76,
+      "direct_successes": 63,
+      "browser_fallbacks": 18,
+      "recipes_adopted": 17,
+      "fallback_reasons": {
+        "contradictory_lifecycle": 1,
+        "discovery_required": 5,
+        "identity_ambiguity": 1,
+        "identity_mismatch": 1,
+        "malformed_response": 1,
+        "rejected_session_state": 1,
+        "schema_incompatible": 1,
+        "timeout": 1,
+        "unexpected_content_type": 1,
+        "unexpected_http_status": 2,
+        "unexpected_redirect": 1,
+        "unknown_lifecycle": 1,
+        "unsupported_admission": 1
+      }
+    },
+    "restart_direct_metrics": {},
+    "simulator": {
+      "new_identities": 5,
+      "page_requests": 24,
+      "browser_status_requests": 87,
+      "direct_status_requests": 78
+    }
+  }
+}

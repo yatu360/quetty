@@ -58,6 +58,7 @@ queue-load-test-phase7-patchright-identity = "queue_load_test.harness.phase7_pat
 queue-load-test-phase7-patchright-runtime = "queue_load_test.harness.phase7_patchright_runtime:main"
 queue-load-test-phase8-direct-replay = "queue_load_test.harness.phase8_direct_replay:main"
 queue-load-test-phase8-equivalence = "queue_load_test.harness.phase8_observation_equivalence:main"
+queue-load-test-phase8-direct-runtime = "queue_load_test.harness.phase8_direct_runtime:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

@@ -857,10 +857,31 @@ browser-observed behavior; undocumented URL construction is out of scope.
    - Queue-it staging was **NOT RUN**. All field/lifecycle equivalence results remain
      **UNKNOWN**, so production direct monitoring is disabled.
 
-5. **Production Direct Monitoring with Browser Fallback** — **BLOCKED / NOT STARTED**.
-   - This becomes the next task only after authorised Prompt 2–4 evidence proves
-     replay state sufficiency and direct/browser semantic equivalence for the lifecycle
-     stages available in the tested event.
+5. **Production Direct Monitoring with Browser Fallback** — **completed on 2026-09-29
+   (local evidence only)** (`docs/phase8_direct_runtime_integration.md`).
+   - The operator made the Prompt 4 equivalence gate optional. Direct requests are
+     instead gated per session: a session is `DIRECT_CAPABLE` only from its own
+     browser-observed request, validated by a reviewed schema. Real targets accept only
+     authorised-staging evidence. With no schema, every Direct check uses the browser.
+   - The run-level Direct strategy routes to `DirectMonitoringHandler`. The scheduler
+     keeps leases, fencing, the fixed pool, bounds, pause, shutdown, and recovery.
+     Classified fallbacks run the unchanged browser monitor. Headed Window Strategy,
+     creation, and Manual Open are unchanged. Refresh Now uses the run's strategy.
+   - Only in-queue states are persisted from direct responses. Admission, expiry, and
+     identity or lifecycle doubt always go to the browser. No Queue ID is ever
+     reacquired or replaced.
+   - Recipes and cookies are kept in a protected store outside SQLite, cleaned up on
+     Delete, Replace, and Stop & Reset.
+   - Local Direct application workflow: Chrome 35/35 and Patchright 35/35 (simulator,
+     not Queue-it). Queue-it staging is **NOT RUN / UNKNOWN**.
+
+6. **Direct Monitoring Security, Observability, and Failure Hardening** — **NEXT**.
+   - Inputs from Prompt 5:
+     - re-adoption backoff for direct-only faults;
+     - Prometheus/dashboard direct metrics;
+     - discovery-artifact retention;
+     - replay-cookie versus browser-state freshness;
+     - a schema review workflow.
 
 ## Scaling Gates
 
