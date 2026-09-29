@@ -5606,3 +5606,60 @@ Validate against an authorised live event before relying on it for a real sale.
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Admission requires leaving the Queue-it waiting room
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+The operator only knows the queue page URL, not the protected destination. With the
+queue page as the run target, every check matched the target, so sessions were marked
+ADMITTED at their first check and never monitored again. The status must be verified
+before a session is called admitted.
+
+### Changes Made
+
+- `AdmissionDetector.detect(page, *, wait_timeout_ms=0, queue_url=None)`: a page counts
+  as admitted only if both of these hold:
+  - it carries **no Queue-it waiting-room marker**: `MainPart_*`, `#queueIdLinkURL`,
+    `#queueIdLinkModal`, `#hlLinkToQueueTicket2`, `#divChallenge`,
+    `#challenge-container`, `#expectedServiceTime`, or the staging-theme test IDs;
+  - it either matches a configured destination or has left the session's own queue
+    page (different origin or path).
+- An unreadable page counts as a waiting room, and non-HTTP pages are never admission.
+  The post-turn wait polls the same rule until the timeout.
+- `QueueSessionRestorer` passes `queue_url=session.transfer_url` at every admission
+  check.
+- `LocalQueueSimulator.admitted_ids` redirects a visitor's queue page to the protected
+  site.
+
+### Tests Run
+
+- `tests/unit/test_lifecycle_completion.py` — 14 passed. It covers:
+  - a queue-page target is not admission while queuing;
+  - destination plus markers is not admission;
+  - leaving to another host or path is admission, while a challenge page and
+    `chrome-error` are not;
+  - the post-turn redirect wait;
+  - an unreadable page is never admission.
+- `tests/integration/test_unknown_destination_admission.py` — 4 passed. With the queue
+  page as target (classic and dialog layouts; HYBRID and TRANSFER_ONLY), the session is
+  monitored as ACTIVE_QUEUE and admitted only after redirecting off the queue.
+- `python -m pytest` — 741 passed, 4 staging deselected (378.14 s). Ruff and strict mypy
+  PASS.
+- The operator tested the change against the Queue-it demo in the running app and
+  confirmed it works.
+
+### Known Issues
+
+- Glastonbury's "Please confirm that you want to proceed … Yes, please" prompt is not
+  clicked automatically. A session whose redirect needs that confirmation stays
+  TURN_STARTED until an operator uses Manual Open.
+- A time-only expected arrival is still interpreted as UTC (the demo shows local time).
+
+### Git State
+
+- Branch: main

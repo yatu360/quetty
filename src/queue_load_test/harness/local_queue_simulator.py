@@ -72,6 +72,8 @@ class LocalQueueSimulator:
     layout: str = "classic"
     # Identities whose footer Queue ID contradicts the dialog link (fail-closed tests).
     crosscheck_conflict_ids: set[str] = field(default_factory=set)
+    # Identities whose turn has come: their queue page redirects to the protected site.
+    admitted_ids: set[str] = field(default_factory=set)
     # Optional response-provided polling guidance (``pollAfterSeconds``).
     poll_after_seconds: float | None = None
     direct_request_times: dict[str, list[float]] = field(default_factory=dict)
@@ -165,6 +167,13 @@ class LocalQueueSimulator:
                     else f"{self.new_identity_prefix}-{self.new_identities:05d}"
                 )
                 self.stages.setdefault(queue_id, self.initial_stage)
+            if queue_id in self.admitted_ids:
+                writer.write(
+                    b"HTTP/1.1 302 Found\r\nLocation: /protected\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                await writer.drain()
+                return
             if queue_id in self.empty_response_ids:
                 return  # close without a response: a genuine navigation failure
             if queue_id in self.slow_ids:

@@ -205,14 +205,41 @@ async def test_chrome_crash_retries_without_replacing_identity(tmp_path: Path) -
     await repository.close()
 
 
-class FakeUrlPage:
-    def __init__(self, url: str, redirected_url: str | None = None) -> None:
-        self.url = url
-        self.redirected_url = redirected_url
+class _MarkerLocator:
+    def __init__(self, page: "FakeUrlPage") -> None:
+        self._page = page
 
-    async def wait_for_url(self, predicate: object, **_: object) -> None:
-        if self.redirected_url is not None:
-            self.url = self.redirected_url
+    async def count(self) -> int:
+        page = self._page
+        # Markers disappear once a redirect has happened.
+        redirected = page.redirected_url is not None and page.reads > 1
+        return int(page.waiting_room and not redirected)
+
+
+class FakeUrlPage:
+    """URL changes to ``redirected_url`` after the first read (a normal redirect)."""
+
+    def __init__(
+        self,
+        url: str,
+        redirected_url: str | None = None,
+        *,
+        waiting_room: bool = False,
+    ) -> None:
+        self._url = url
+        self.redirected_url = redirected_url
+        self.waiting_room = waiting_room
+        self.reads = 0
+
+    @property
+    def url(self) -> str:
+        self.reads += 1
+        if self.reads > 1 and self.redirected_url is not None:
+            return self.redirected_url
+        return self._url
+
+    def locator(self, _: str) -> _MarkerLocator:
+        return _MarkerLocator(self)
 
 
 def test_expected_destination_requires_matching_origin_and_path_boundary() -> None:
@@ -231,7 +258,70 @@ async def test_admission_detector_supports_normal_redirect_wait() -> None:
         "https://staging.example.test/protected/home",
     )
 
-    assert await detector.detect(page, wait_timeout_ms=100)
+    assert await detector.detect(page, wait_timeout_ms=1_000)
+
+
+QUEUE_PAGE = "https://queue.example.test/?c=customer&e=event&q=queue-1"
+
+
+async def test_target_equal_to_queue_page_is_not_admission_while_queuing() -> None:
+    detector = AdmissionDetector.from_urls("https://queue.example.test/?c=customer&e=event")
+
+    assert not await detector.detect(
+        FakeUrlPage(QUEUE_PAGE, waiting_room=True), queue_url=QUEUE_PAGE
+    )
+
+
+async def test_matching_destination_with_waiting_room_markers_is_not_admission() -> None:
+    detector = AdmissionDetector.from_urls("https://staging.example.test/protected")
+
+    assert not await detector.detect(
+        FakeUrlPage("https://staging.example.test/protected", waiting_room=True)
+    )
+    assert await detector.detect(FakeUrlPage("https://staging.example.test/protected"))
+
+
+async def test_leaving_the_queue_page_counts_when_the_destination_is_unknown() -> None:
+    detector = AdmissionDetector.from_urls("https://queue.example.test/?c=customer&e=event")
+
+    other_host = FakeUrlPage("https://shop.example.test/checkout")
+    other_path = FakeUrlPage("https://queue.example.test/tickets/basket")
+    challenge = FakeUrlPage("https://queue.example.test/softblock/?q=queue-1", waiting_room=True)
+    same_page = FakeUrlPage(QUEUE_PAGE)
+
+    assert await detector.detect(other_host, queue_url=QUEUE_PAGE)
+    assert await detector.detect(other_path, queue_url=QUEUE_PAGE)
+    assert not await detector.detect(challenge, queue_url=QUEUE_PAGE)
+    # A marker-free page at the configured target still counts (explicit destination).
+    assert await detector.detect(same_page, queue_url=QUEUE_PAGE)
+    strict = AdmissionDetector.from_urls("https://shop.example.test/")
+    assert not await strict.detect(FakeUrlPage(QUEUE_PAGE), queue_url=QUEUE_PAGE)
+    assert not await strict.detect(FakeUrlPage("chrome-error://chromewebdata/"), queue_url=QUEUE_PAGE)
+
+
+async def test_redirect_away_from_queue_is_awaited_after_turn_started() -> None:
+    detector = AdmissionDetector.from_urls("https://queue.example.test/?c=customer&e=event")
+    page = FakeUrlPage(QUEUE_PAGE, "https://shop.example.test/welcome", waiting_room=True)
+
+    assert not await detector.detect(page, queue_url=QUEUE_PAGE)  # still queuing now
+    assert await detector.detect(page, wait_timeout_ms=1_000, queue_url=QUEUE_PAGE)
+
+
+async def test_unreadable_page_is_never_admission() -> None:
+    from playwright.async_api import Error as PlaywrightError
+
+    class _Broken:
+        url = "https://shop.example.test/checkout"
+
+        def locator(self, _: str) -> object:
+            class _Locator:
+                async def count(self) -> int:
+                    raise PlaywrightError("navigating")
+
+            return _Locator()
+
+    detector = AdmissionDetector.from_urls("https://shop.example.test/")
+    assert not await detector.detect(_Broken())  # type: ignore[arg-type]
 
 
 class FakeLocator:

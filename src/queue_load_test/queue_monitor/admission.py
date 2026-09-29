@@ -1,5 +1,6 @@
 """Detect successful admission and terminal Queue-it pages from normal DOM behavior."""
 
+import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 from urllib.parse import urlsplit
@@ -8,7 +9,6 @@ from playwright.async_api import Page
 
 from queue_load_test.browser.errors import (
     BROWSER_ERROR_TYPES,
-    BROWSER_TIMEOUT_ERROR_TYPES,
 )
 
 
@@ -61,35 +61,125 @@ def _effective_port(scheme: str, port: int | None) -> int | None:
     return 443 if scheme.casefold() == "https" else 80
 
 
-class AdmissionDetector:
-    """Recognize normal navigation to one of the protected staging destinations."""
+# DOM markers that only a Queue-it waiting-room page carries: the classic and demo
+# live elements, the transfer dialog, the footer Queue ID, Queue-it's bot-challenge
+# page, and the staging-theme test IDs. Their presence means "still queuing".
+WAITING_ROOM_MARKERS: tuple[str, ...] = (
+    "[id^='MainPart_']",
+    "#queueIdLinkURL",
+    "#queueIdLinkModal",
+    "#hlLinkToQueueTicket2",
+    "#divChallenge",
+    "#challenge-container",
+    "#expectedServiceTime",
+    "[data-testid='pre-queue']",
+    "[data-testid='active-queue']",
+    "[data-testid='queue-progress']",
+    "[data-testid='queue-transfer-link']",
+    "[data-testid='queue-transfer-url']",
+)
 
-    def __init__(self, destinations: tuple[ExpectedDestination, ...]) -> None:
+_POLL_SECONDS = 0.25
+
+
+class AdmissionDetector:
+    """Recognize admission only after the visitor has actually left the waiting room.
+
+    A page counts as admitted when it carries no Queue-it waiting-room marker and
+    either matches a configured destination or is no longer the session's own queue
+    page (a different origin or path). The second rule supports runs whose operator
+    only knows the queue page: a target URL equal to the queue page can no longer make
+    the queue page itself look like admission.
+    """
+
+    def __init__(
+        self,
+        destinations: tuple[ExpectedDestination, ...],
+        *,
+        waiting_room_markers: tuple[str, ...] = WAITING_ROOM_MARKERS,
+    ) -> None:
         if not destinations:
             raise ValueError("At least one expected destination is required")
         self.destinations = destinations
+        self._marker_selector = ", ".join(waiting_room_markers)
 
     @classmethod
     def from_urls(cls, *values: str) -> "AdmissionDetector":
         return cls(tuple(ExpectedDestination.from_url(value) for value in values))
 
     def matches(self, value: str) -> bool:
+        """URL-only destination match (no DOM evidence); see ``detect`` for admission."""
+
         return any(destination.matches(value) for destination in self.destinations)
 
-    async def detect(self, page: Page, *, wait_timeout_ms: float = 0) -> bool:
-        if self.matches(page.url):
+    async def detect(
+        self,
+        page: Page,
+        *,
+        wait_timeout_ms: float = 0,
+        queue_url: str | None = None,
+    ) -> bool:
+        """Return whether the page shows verified admission, optionally waiting for it."""
+
+        if await self._admitted(page, queue_url):
             return True
         if wait_timeout_ms <= 0:
             return False
+        deadline = asyncio.get_running_loop().time() + wait_timeout_ms / 1000
+        while asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(_POLL_SECONDS)
+            if await self._admitted(page, queue_url):
+                return True
+        return False
+
+    async def is_waiting_room(self, page: Page) -> bool:
+        """Whether the page still carries any Queue-it waiting-room marker.
+
+        An unreadable page (for example mid-navigation) counts as a waiting room, so
+        uncertainty never produces admission.
+        """
+
         try:
-            await page.wait_for_url(
-                lambda url: self.matches(str(url)),
-                timeout=wait_timeout_ms,
-                wait_until="domcontentloaded",
-            )
-        except BROWSER_TIMEOUT_ERROR_TYPES:
+            return bool(await page.locator(self._marker_selector).count())
+        except BROWSER_ERROR_TYPES:
+            return True
+
+    async def _admitted(self, page: Page, queue_url: str | None) -> bool:
+        url = page.url
+        if not _is_http(url):
             return False
-        return self.matches(page.url)
+        if not (self.matches(url) or _left_queue_page(url, queue_url)):
+            return False
+        return not await self.is_waiting_room(page)
+
+
+def _is_http(value: str) -> bool:
+    try:
+        return urlsplit(value).scheme.casefold() in {"http", "https"}
+    except ValueError:
+        return False
+
+
+def _left_queue_page(url: str, queue_url: str | None) -> bool:
+    """A different origin or path from the session's own queue page."""
+
+    if not queue_url:
+        return False
+    try:
+        current, queue = urlsplit(url), urlsplit(queue_url)
+        current_port = _effective_port(current.scheme, current.port)
+        queue_port = _effective_port(queue.scheme, queue.port)
+    except ValueError:
+        return False
+    if current.hostname is None or queue.hostname is None:
+        return False
+    same_origin = (
+        current.scheme.casefold() == queue.scheme.casefold()
+        and current.hostname.casefold() == queue.hostname.casefold()
+        and current_port == queue_port
+    )
+    same_path = (current.path.rstrip("/") or "/") == (queue.path.rstrip("/") or "/")
+    return not (same_origin and same_path)
 
 
 class TerminalQueueState(StrEnum):

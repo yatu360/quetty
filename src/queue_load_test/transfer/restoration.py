@@ -821,7 +821,7 @@ class QueueSessionRestorer:
                     )
                     attempt = RestoreAttempt(method=method, success=False, failure=failure)
                 elif self._admission_detector is not None and await self._admission_detector.detect(
-                    page
+                    page, queue_url=session.transfer_url
                 ):
                     attempt = RestoreAttempt(
                         method=method,
@@ -1003,7 +1003,9 @@ class QueueSessionRestorer:
                 else RestoreFailure.INVALID_TRANSFER_URL
             )
             return RestoreAttempt(method=method, success=False, failure=failure)
-        if self._admission_detector is not None and await self._admission_detector.detect(page):
+        if self._admission_detector is not None and await self._admission_detector.detect(
+            page, queue_url=session.transfer_url
+        ):
             return RestoreAttempt(
                 method=method,
                 success=True,
@@ -1080,7 +1082,9 @@ class QueueSessionRestorer:
                     failure=failure,
                     expired=True,
                 )
-            if self._admission_detector is not None and await self._admission_detector.detect(page):
+            if self._admission_detector is not None and await self._admission_detector.detect(
+                page, queue_url=session.transfer_url
+            ):
                 return RestoreAttempt(
                     method=method,
                     success=True,
@@ -1095,6 +1099,7 @@ class QueueSessionRestorer:
                 if self._admission_detector is not None and await self._admission_detector.detect(
                     page,
                     wait_timeout_ms=self._admission_wait_timeout_ms,
+                    queue_url=session.transfer_url,
                 ):
                     return RestoreAttempt(
                         method=method,
