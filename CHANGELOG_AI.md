@@ -4942,3 +4942,105 @@ sessions, repeated polls, open/closed browser cases, and an application restart.
 
 **Phase 8 Prompt 4 — Direct-vs-Browser Observation Equivalence is NOT READY and must
 not begin until that evidence resolves the state-sufficiency questions.**
+
+## 2026-09-29 — Phase 8 Prompt 4 — Direct-vs-Browser Observation Equivalence
+
+### Goal
+
+Determine whether a successful, genuine direct visitor-status response can normalize
+to the same monitoring and lifecycle semantics as the existing browser/DOM observation,
+without enabling production direct monitoring.
+
+### Changes
+
+- Added source-neutral `MonitoringObservation` and `ObservationSource` domain types.
+  Browser restore results and experimental direct responses now have one shape for
+  identity, progress, page/lifecycle signals, redirect presence, timing hints, missing
+  fields, and schema additions.
+- Added `evaluate_monitoring_observation`, a thin adapter over the existing authoritative
+  `evaluate_queue_status`. No direct-specific QueueStatus rules were added. Progress
+  percentage alone remains insufficient lifecycle evidence.
+- Refined `QueueSessionMonitor` to normalize its existing browser restore result before
+  lifecycle evaluation. Restore, retry, persistence, polling, leasing, and production
+  strategy dispatch remain unchanged; both strategies still use the browser monitor.
+- Added an evidence-defined direct JSON schema. The parser contains no Queue-it response
+  property names and requires a reviewed path for authoritative Queue ID. Optional
+  values remain absent rather than fabricated; unknown leaves and missing mappings are
+  recorded; unexpected types are schema failures.
+- Missing/ambiguous Queue ID and Queue ID mismatch are hard direct failures. A redirect
+  becomes admission only when the existing admission detector verifies the persisted
+  protected destination. Direct fields cannot silently redefine admission.
+- Added field/lifecycle comparison with exact, acceptable-drift, unavailable,
+  source-missing, mismatch, unexpected-schema, and hard-failure classifications.
+  Identity ambiguity and every lifecycle disagreement are hard failures.
+- Added `queue-load-test-phase8-equivalence`, a protected direct-then-browser shadow
+  harness for 1–50 manifest cases. It requires a Direct run, paused monitoring, no
+  current owner, fenced per-session operator leases, matching Prompt 2/3 artifacts,
+  immutable persisted backend provenance, and a reviewed authorised schema.
+- The harness requires `RUN_STAGING_TESTS=1`, `RUN_PHASE8_EQUIVALENCE=1`, and explicit
+  confirmation. Reports contain case numbers, statuses, classifications, bounded
+  numeric deltas, coverage, and failure counts—never visitor credentials or identities.
+- No optional Queue-it customer API integration was added because no credentials or
+  Swagger evidence were available. It remains optional and distinct from visitor
+  monitoring.
+- Created `docs/phase8_observation_equivalence.md` and updated PROJECT_CONTEXT and
+  PHASE_PLAN.
+
+### Tests
+
+- Focused equivalence/replay/lifecycle/monitoring/UI suite: **132 passed**.
+- First full non-staging run: **601 passed, 1 failed, 4 staging deselected**. The failure
+  was the previously documented intermittent fake-timing assertion in
+  `test_chrome_loss_while_open_is_detected_without_relaunch`; it passed immediately in
+  isolation.
+- Final full non-staging suite: **603 passed, 4 staging deselected** in 230.27 seconds.
+- `python3 -m ruff check src tests`: **PASS**.
+- `python3 -m mypy src`: **PASS** (strict, 92 source files).
+- `git diff --check`: **PASS**.
+
+Coverage includes exact observation agreement, field absence, schema removal/addition,
+progress and timestamp drift, identity ambiguity/mismatch, lifecycle contradiction,
+unknown fields/types, verified and unrelated redirects, browser-result normalization,
+historical admitted priority, direct-then-browser ordering, protected manifest/report
+handling, and staging gates. Existing lifecycle, monitoring, and UI tests cover the
+unchanged headed/browser production path.
+
+### Staging
+
+**NOT RUN.** No authorised Queue-it target, genuine Prompt 2 artifact, successful
+Prompt 3 replay, reviewed response schema, or customer API credential was supplied.
+Every Queue-it field and lifecycle equivalence result is **UNKNOWN**.
+
+### Decisions
+
+- Conclusion: **UNKNOWN / NOT READY FOR PRODUCTION DIRECT MONITORING**. Deterministic
+  parser/comparator tests are mechanism evidence, not Queue-it semantic evidence.
+- The existing lifecycle evaluator remains authoritative. Direct response values can
+  populate only reviewed semantics and cannot redefine ADMITTED, TURN_STARTED,
+  SERVICED_SOON, or other QueueStatus meanings.
+- A lifecycle disagreement or identity ambiguity is never reconciled; it is a hard
+  direct-monitor failure. Expected Queue ID is never overwritten.
+- Unknown schema additions are recorded without values. Schema removals remain missing
+  fields. Neither is guessed from names or historical JavaScript.
+- Prompt 5 is not the next task because the requested real evidence is absent.
+
+### Known Issues
+
+- PRE_QUEUE, ACTIVE_QUEUE, paused queue, SERVICED_SOON, TURN_STARTED, and admission are
+  all UNKNOWN for direct/browser equivalence.
+- Queue ID, progress, queue number, users ahead, last update, pause state, expected
+  service time, redirect, lifecycle indicators, and poll timing are all UNKNOWN for a
+  genuine direct response.
+- Prompt 3 state sufficiency remains UNKNOWN, so even semantic equivalence would not by
+  itself establish a production storage design.
+- The existing intermittent operator-fencing fake-timing test and Starlette `httpx`
+  TestClient deprecation warning remain.
+
+### Next Task
+
+Resolve the Phase 8 evidence blocker by running the explicitly gated Prompt 2 discovery,
+Prompt 3 replay, and Prompt 4 shadow comparison against an authorised Queue-it staging
+event with multiple legitimate sessions and every lifecycle stage that event exposes.
+
+**Do not begin Phase 8 Prompt 5 — Production Direct Monitoring with Browser Fallback
+until that evidence is sufficient.**

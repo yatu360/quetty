@@ -10,7 +10,7 @@ live monitoring.
 
 ## Current Status
 
-### Monitoring strategy and direct-status research (Phase 8 Prompts 1–3, 2026-09-29)
+### Monitoring strategy and direct-status research (Phase 8 Prompts 1–4, 2026-09-29)
 
 - Every run now persists one immutable monitoring strategy independently from its
   browser backend: `headed_window` (**Headed Window Strategy**) or `direct`
@@ -37,9 +37,14 @@ live monitoring.
   session's persisted browser state. It has bounded HTTP resources, distinct failure
   classes, protected response-cookie continuation, repeated header/cookie minimisation,
   and no production-monitor integration. See `docs/phase8_direct_replay.md`.
-- Queue-it staging is **NOT RUN / UNKNOWN**. No genuine artifact exists in the
-  workspace, so storage sufficiency A/B/C/D remains unknown and Phase 8 Prompt 4 is
-  blocked pending an authorised Prompt 3 evidence run.
+- Prompt 4 adds a source-neutral `MonitoringObservation`; both the existing browser
+  result and experimental direct response feed the unchanged lifecycle evaluator.
+  Direct JSON property paths are supplied only by a reviewed evidence schema. A gated,
+  fenced shadow harness performs direct then browser observation and emits protected
+  field/lifecycle comparisons. See `docs/phase8_observation_equivalence.md`.
+- Queue-it staging is **NOT RUN / UNKNOWN**. No genuine artifact/schema exists in the
+  workspace, so storage sufficiency and semantic equivalence remain unknown. Prompt 5
+  production direct monitoring is blocked.
 
 ### Browser backend policy (authoritative, Phase 7 accepted 2026-09-28)
 
@@ -837,6 +842,13 @@ The harness cannot create a URL or Queue ID: its recipe, session, persisted Queu
 and integrity-checked browser state must all match. Any refreshed HTTP cookies remain
 in separate protected experimental state and never rewrite the browser-state document.
 
+`MonitoringObservation` is the browser-neutral domain boundary. The production browser
+monitor converts its restore result into this type, then calls the same authoritative
+lifecycle rules as before. The experimental direct parser can produce the same type
+only from a successful, identity-matching replay plus an explicitly reviewed schema.
+Identity ambiguity or lifecycle disagreement is a hard shadow failure. No direct
+observation is persisted by normal runtime code.
+
 `ParkedSessionScheduler` selects only due, unleased, non-terminal sessions through the
 repository, claims at most the free space in a bounded `asyncio.Queue`, and feeds a
 fixed worker pool. SQLite uses a short `BEGIN IMMEDIATE` transaction for the local
@@ -1171,6 +1183,8 @@ mechanics only; they are not Queue-it staging or performance measurements.
   rules, setup/dashboard behavior, browser fallback boundary, and Prompt 2 handoff.
 - `docs/phase8_direct_replay.md` — Prompt 3 replay boundary, protected state,
   minimisation method, UNKNOWN findings, and Prompt 4 evidence gate.
+- `docs/phase8_observation_equivalence.md` — common observation model, schema and
+  comparison rules, shadow harness, UNKNOWN evidence, and Prompt 5 gate.
 - `docs/phase8_status_discovery.md` — protected network-observation mechanism,
   historical-versus-observed boundary, evidence questions, and Prompt 3 gate.
 - `docs/phase4_postgresql_readiness.md` — 10,000-row SQLite results, repository and
@@ -1362,12 +1376,12 @@ python -m mypy src
 
 ## Next Task
 
-Phase 8 Prompt 3's experimental implementation is complete with conclusion
-**UNKNOWN**. Next: run its explicit gates against genuine browser-observed evidence from
-an authorised Queue-it staging event. **Phase 8 Prompt 4 — Direct-vs-Browser Observation
-Equivalence** remains blocked until that evidence resolves the state-sufficiency
-questions. Authorised Patchright staging validation also remains open; never claim
-staging PASS without an authorised run.
+Phase 8 Prompt 4's shadow implementation is complete with conclusion **UNKNOWN**. Next:
+run the explicitly gated Prompt 2–4 evidence sequence against an authorised Queue-it
+staging event. **Phase 8 Prompt 5 — Production Direct Monitoring with Browser Fallback**
+is blocked and is not the next task unless that evidence is sufficient. Authorised
+Patchright staging validation also remains open; never claim staging PASS without an
+authorised run.
 
 ## Instructions for Future AI Sessions
 

@@ -1,4 +1,4 @@
-"""Queue-it progress observed from browser-rendered pages."""
+"""Source-neutral Queue-it progress used by lifecycle and persistence."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,10 +15,10 @@ class QueueExtractionDiagnostics:
 
 @dataclass(slots=True)
 class QueueProgress:
-    """Layout-dependent queue progress.
+    """Optional queue progress normalized from an observed source.
 
-    Every scraped Queue-it field is optional because layouts and pre-queue pages
-    may omit or rename values.
+    Every field is optional because browser layouts and direct response schemas may
+    omit values. Source adapters must not fabricate unavailable fields.
     """
 
     session_id: str

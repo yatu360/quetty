@@ -3,8 +3,11 @@
 from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.lifecycle import (
     InvalidQueueTransition,
+    MonitoringObservation,
+    ObservationSource,
     QueuePageSignals,
     can_transition,
+    evaluate_monitoring_observation,
     evaluate_queue_status,
     validate_transition,
 )
@@ -24,7 +27,9 @@ __all__ = [
     "BrowserBackendName",
     "BrowserRuntimeState",
     "InvalidQueueTransition",
+    "MonitoringObservation",
     "MonitoringStrategy",
+    "ObservationSource",
     "QueueExtractionDiagnostics",
     "QueuePageSignals",
     "QueueProgress",
@@ -37,6 +42,7 @@ __all__ = [
     "SessionSummaryPage",
     "WorkItem",
     "can_transition",
+    "evaluate_monitoring_observation",
     "evaluate_queue_status",
     "validate_transition",
 ]

@@ -844,9 +844,23 @@ browser-observed behavior; undocumented URL construction is out of scope.
      was supplied. Storage outcomes A/B/C/D and all Queue-it replay questions remain
      **UNKNOWN**.
 
-4. **Direct-vs-Browser Observation Equivalence** — **BLOCKED / NOT STARTED**.
-   - First resolve Prompt 3's evidence blocker with authorised multi-session replay,
-     repeated polls, open/closed browser cases, and an application restart.
+4. **Direct-vs-Browser Observation Equivalence** — **implementation completed on
+   2026-09-29; evidence UNKNOWN**
+   (`docs/phase8_observation_equivalence.md`).
+   - Added a source-neutral monitoring observation consumed by the existing lifecycle
+     evaluator. Browser restore semantics remain the production path; direct JSON maps
+     only through a reviewed evidence-defined schema with no assumed Queue-it fields.
+   - Added strict identity/schema parsing, field/lifecycle comparison with bounded drift
+     treatment, and hard failure for identity ambiguity or lifecycle contradiction.
+   - Added a triple-gated, fenced direct-then-browser shadow harness with protected
+     aggregate reports and lifecycle coverage tracking.
+   - Queue-it staging was **NOT RUN**. All field/lifecycle equivalence results remain
+     **UNKNOWN**, so production direct monitoring is disabled.
+
+5. **Production Direct Monitoring with Browser Fallback** — **BLOCKED / NOT STARTED**.
+   - This becomes the next task only after authorised Prompt 2–4 evidence proves
+     replay state sufficiency and direct/browser semantic equivalence for the lifecycle
+     stages available in the tested event.
 
 ## Scaling Gates
 

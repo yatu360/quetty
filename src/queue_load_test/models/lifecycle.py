@@ -1,6 +1,8 @@
-"""Queue lifecycle transitions and deterministic state evaluation."""
+"""Queue lifecycle transitions and source-neutral observation evaluation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
 
 from queue_load_test.models.progress import QueueProgress
 from queue_load_test.models.session import QueueStatus
@@ -89,6 +91,37 @@ class QueuePageSignals:
     active_queue: bool | None = None
 
 
+class ObservationSource(StrEnum):
+    """How a domain monitoring observation was obtained."""
+
+    BROWSER_DOM = "browser_dom"
+    DIRECT_RESPONSE = "direct_response"
+
+
+@dataclass(frozen=True, slots=True)
+class MonitoringObservation:
+    """Browser-neutral input to the one authoritative lifecycle evaluator."""
+
+    source: ObservationSource
+    session_id: str
+    observed_at: datetime
+    progress: QueueProgress
+    page: QueuePageSignals = QueuePageSignals()
+    expected_queue_id: str | None = field(default=None, repr=False)
+    observed_queue_id: str | None = field(default=None, repr=False)
+    identity_match: bool | None = None
+    redirect_present: bool | None = None
+    poll_after_seconds: float | None = None
+    missing_fields: tuple[str, ...] = ()
+    unknown_fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.progress.session_id != self.session_id:
+            raise ValueError("observation progress belongs to another session")
+        if self.poll_after_seconds is not None and self.poll_after_seconds < 0:
+            raise ValueError("poll_after_seconds cannot be negative")
+
+
 def evaluate_queue_status(
     progress: QueueProgress,
     page: QueuePageSignals | None = None,
@@ -131,3 +164,9 @@ def evaluate_queue_status(
     if active_evidence >= 2:
         return QueueStatus.ACTIVE_QUEUE
     return QueueStatus.CHECKING
+
+
+def evaluate_monitoring_observation(observation: MonitoringObservation) -> QueueStatus:
+    """Evaluate either source through the existing authoritative lifecycle rules."""
+
+    return evaluate_queue_status(observation.progress, observation.page)

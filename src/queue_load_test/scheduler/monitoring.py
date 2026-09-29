@@ -13,7 +13,15 @@ from uuid import uuid4
 from queue_load_test.config import Settings
 from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
-from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, evaluate_queue_status
+from queue_load_test.models import (
+    MonitoringObservation,
+    ObservationSource,
+    QueuePageSignals,
+    QueueProgress,
+    QueueSession,
+    QueueStatus,
+    evaluate_monitoring_observation,
+)
 from queue_load_test.repository import ClaimedSessions, SessionRepository
 from queue_load_test.transfer import RestoreFailure, SessionRestoreResult
 
@@ -292,18 +300,30 @@ class QueueSessionMonitor:
         previous_progress = await self._repository.get_progress(session.session_id)
         observed_at = self._clock()
         progress_changed = False
+        observation = browser_observation_from_restore_result(
+            session_id=session.session_id,
+            result=result,
+            observed_at=observed_at,
+        )
 
         if result.admitted:
-            observed_status = QueueStatus.ADMITTED
+            observed_status = evaluate_monitoring_observation(observation)
             session.status = observed_status
         elif result.expired or result.failure in _EXPIRED_FAILURES:
-            observed_status = QueueStatus.EXPIRED
+            observed_status = evaluate_monitoring_observation(
+                browser_observation_from_restore_result(
+                    session_id=session.session_id,
+                    result=result,
+                    observed_at=observed_at,
+                    force_expired=True,
+                )
+            )
             session.status = observed_status
         elif not result.success and result.failure in _PERMANENT_FAILURES:
             observed_status = QueueStatus.FAILED
             session.status = observed_status
         elif is_verified_observation(result) and result.progress is not None:
-            observed_status = evaluate_queue_status(result.progress)
+            observed_status = evaluate_monitoring_observation(observation)
             session.status = observed_status
             progress_changed = _progress_signature(previous_progress) != _progress_signature(
                 result.progress
@@ -378,6 +398,36 @@ def _progress_signature(progress: QueueProgress | None) -> tuple[object, ...] | 
         progress.connection_lost,
         progress.pre_queue,
         progress.active_queue,
+    )
+
+
+def browser_observation_from_restore_result(
+    *,
+    session_id: str,
+    result: SessionRestoreResult,
+    observed_at: datetime,
+    force_expired: bool = False,
+) -> MonitoringObservation:
+    """Normalize the existing browser restore result without changing its meaning."""
+
+    progress = result.progress or QueueProgress(session_id=session_id)
+    return MonitoringObservation(
+        source=ObservationSource.BROWSER_DOM,
+        session_id=session_id,
+        observed_at=observed_at,
+        expected_queue_id=result.expected_queue_id,
+        observed_queue_id=result.observed_queue_id,
+        identity_match=result.identity_match,
+        progress=progress,
+        page=QueuePageSignals(
+            admitted=result.admitted,
+            # Preserve QueueSessionMonitor's historical admitted-before-expired
+            # handling if an inconsistent adapter ever sets both flags.
+            expired=force_expired or (result.expired and not result.admitted),
+            pre_queue=progress.pre_queue,
+            active_queue=progress.active_queue,
+        ),
+        redirect_present=True if result.admitted else None,
     )
 
 

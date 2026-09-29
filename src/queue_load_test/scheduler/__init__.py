@@ -19,6 +19,7 @@ from queue_load_test.scheduler.monitoring import (
     ParkedSessionScheduler,
     PollingPolicy,
     QueueSessionMonitor,
+    browser_observation_from_restore_result,
     is_permanent_restore_failure,
     is_queue_update_stale,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "SessionCreationController",
     "SessionCreationHandler",
     "TransientCreationError",
+    "browser_observation_from_restore_result",
     "is_permanent_restore_failure",
     "is_queue_update_stale",
 ]

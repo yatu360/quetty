@@ -161,6 +161,6 @@ visitor contract or staging behavior.
 
 Run the gated Prompt 2 discovery and Prompt 3 replay experiment against an authorised
 Queue-it staging event with multiple legitimate sessions, repeated polls, browser-open
-and browser-closed observations, and a real application restart. Until that produces
-sufficient evidence, **Phase 8 Prompt 4 — Direct-vs-Browser Observation Equivalence**
-must not begin.
+and browser-closed observations, and a real application restart. Prompt 4's shadow
+mechanism now exists, but its equivalence result remains UNKNOWN and production direct
+monitoring must not begin until the missing evidence is sufficient.
