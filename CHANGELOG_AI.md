@@ -5703,3 +5703,34 @@ was never detected there. The operator chose detection only, with no automatic c
 ### Git State
 
 - Branch: main
+
+## 2026-09-30 — Keep dashboard table scroll across automatic refresh
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+The operator reported that the sessions table jumped back to the left shortly after
+being scrolled right. Cause: the polled `#session-results` block is replaced every 2 s
+(`hx-swap="outerHTML"`), which resets the new `.table-wrap` to `scrollLeft = 0`.
+
+### Changes Made
+
+- Added `web/static/dashboard.js`. It records the table's `scrollLeft` on
+  `htmx:beforeSwap` for `#session-results` and restores it on `htmx:afterSwap`. Polling,
+  swap behavior, and server responses are unchanged.
+- `dashboard.html` loads the script, deferred, after `htmx.min.js`.
+
+### Tests Run
+
+- `tests/integration/test_dashboard_scroll.py` (real Chrome, real `htmx.min.js`) — 2
+  passed. With the script, the scroll position survives several polled replacements.
+  Without it, the position resets to 0, reproducing the reported bug.
+- Web UI, UI reliability, Manual Open, and operator-action suites — 74 passed.
+- The operator verified the fix in the running dashboard.
+
+### Git State
+
+- Branch: main
