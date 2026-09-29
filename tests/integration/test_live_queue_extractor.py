@@ -134,3 +134,32 @@ async def test_manual_warning_and_first_in_line_signals() -> None:
     assert progress.connection_lost is True
     assert progress.first_in_line is True
     assert evaluate_queue_status(progress) is QueueStatus.CONNECTION_LOST
+
+
+async def test_turn_started_confirmation_dialog_is_turn_started_and_never_clicked() -> None:
+    from queue_load_test.queue_monitor import AdmissionDetector
+
+    html = (FIXTURES / "turn_started_confirm_dialog.html").read_text(encoding="utf-8")
+    hidden = html.replace(
+        'id="divConfirmRedirectModal" role="dialog"',
+        'id="divConfirmRedirectModal" style="display: none" role="dialog"',
+    )
+    extractor = QueueItLiveStateExtractor()
+    detector = AdmissionDetector.from_urls("https://queue.example.test/queue/view")
+    async with BrowserManager() as manager:
+        async with manager.context() as context:
+            page = await context.new_page()
+            await page.set_content(html)
+            progress = await extractor.extract(page, session_id="confirm")
+            clicked = await page.evaluate("document.body.dataset.confirmed || null")
+            admitted = await detector.detect(page)
+        async with manager.context() as context:
+            page = await context.new_page()
+            await page.set_content(hidden)
+            closed = await extractor.extract(page, session_id="closed")
+
+    assert progress.turn_started is True
+    assert evaluate_queue_status(progress) is QueueStatus.TURN_STARTED
+    assert clicked is None  # observation only; the confirmation is never clicked
+    assert admitted is False  # still on the waiting-room page
+    assert closed.turn_started is None

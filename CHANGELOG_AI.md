@@ -5663,3 +5663,43 @@ before a session is called admitted.
 ### Git State
 
 - Branch: main
+
+## 2026-09-29 — Detect the Queue-it "Your turn started" confirmation dialog
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+On the Glastonbury 2025 layout, turn start is shown as the `#divConfirmRedirectModal`
+dialog ("Your turn started at … Please confirm that you want to proceed … Yes, please").
+The app only knew `#turn-started` and `[data-testid="turn-started"]`, so TURN_STARTED
+was never detected there. The operator chose detection only, with no automatic click.
+
+### Changes Made
+
+- `QueueItSelectors.turn_started` adds `#divConfirmRedirectModal`. Only a visible dialog
+  counts. The app never clicks `#buttonConfirmRedirect`.
+- `parse_turn_started` also recognises "your turn started".
+- Admission is unchanged: the dialog is on the waiting-room page, so the session is not
+  admitted until it actually leaves.
+
+### Tests Run
+
+- New synthetic fixture `turn_started_confirm_dialog.html`. It checks that
+  TURN_STARTED is detected, the button is not clicked, the page is not admitted, and a
+  hidden dialog is ignored. Also a parser phrase test.
+- `python -m pytest` — 743 passed, 4 staging deselected (391.86 s). Ruff and strict mypy
+  PASS.
+
+### Known Issues
+
+- A session at TURN_STARTED is re-checked immediately and repeatedly. Each check waits
+  up to `ADMISSION_WAIT_SECONDS` for a redirect, until an operator uses Manual Open to
+  confirm or Queue-it redirects.
+- When Glastonbury shows the dialog is not known from the 2025 snapshot.
+
+### Git State
+
+- Branch: main

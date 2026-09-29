@@ -218,7 +218,7 @@ def parse_turn_started(value: RawValue, *, visible: bool = True) -> bool | None:
     return _parse_boolean(
         value,
         visible=visible,
-        true_phrases=("turn has started", "it is your turn"),
+        true_phrases=("turn has started", "it is your turn", "your turn started"),
         false_phrases=("turn has not started",),
     )
 

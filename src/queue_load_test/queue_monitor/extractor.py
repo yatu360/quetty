@@ -53,7 +53,14 @@ class QueueItSelectors:
     queue_paused: tuple[str, ...] = ("#queue-paused", '[data-testid="queue-paused"]')
     first_in_line: tuple[str, ...] = ("#first-in-line", '[data-testid="first-in-line"]')
     serviced_soon: tuple[str, ...] = ("#serviced-soon", '[data-testid="serviced-soon"]')
-    turn_started: tuple[str, ...] = ("#turn-started", '[data-testid="turn-started"]')
+    # ``#divConfirmRedirectModal`` is the current Queue-it layout's "Your turn started
+    # at … Please confirm that you want to proceed … Yes, please" dialog (Glastonbury
+    # 2025). It is only observed; the app never clicks its confirmation button.
+    turn_started: tuple[str, ...] = (
+        "#turn-started",
+        '[data-testid="turn-started"]',
+        "#divConfirmRedirectModal",
+    )
     manual_update_warning: tuple[str, ...] = ("#MainPart_lbManualUpdateWarning",)
     pre_queue: tuple[str, ...] = ('[data-testid="pre-queue"]',)
     active_queue: tuple[str, ...] = ('[data-testid="active-queue"]',)

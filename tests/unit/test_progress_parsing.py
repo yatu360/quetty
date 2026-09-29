@@ -144,3 +144,10 @@ def test_invalid_twelve_hour_clock_time_is_not_invented() -> None:
     from queue_load_test.queue_monitor.parsing import parse_expected_service_time
 
     assert parse_expected_service_time("13:45 PM", reference_date=date(2026, 9, 29)) is None
+
+
+def test_turn_started_phrase_from_the_confirmation_dialog() -> None:
+    from queue_load_test.queue_monitor.parsing import parse_turn_started
+
+    assert parse_turn_started("Your turn started at 14:30 Please confirm") is True
+    assert parse_turn_started("Your turn has not started") is False

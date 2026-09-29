@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- Synthetic fixture modelled on the Glastonbury 2025 turn-started confirmation dialog.
+     The confirmation button is present but must never be clicked by the app. -->
+<html>
+  <body>
+    <div id="MainPart_divProgressbar" role="progressbar" aria-valuenow="100" style="width: 100%; height: 10px"></div>
+    <span id="first-in-line" style="display: none">It is your turn</span>
+    <div id="divConfirmRedirectModal" role="dialog" class="modal queueElement">
+      <div id="divConfirmRedirectModal_Content" class="modal-content">
+        <div class="modal-body">
+          <p id="h2ConfirmRedirect">Your turn started at</p>
+          <p id="pConfirmRedirectTime"><span>14:30</span></p>
+          <p id="pConfirmRedirect">Please confirm that you want to proceed to the site as soon as possible</p>
+          <button id="buttonConfirmRedirect" type="button" class="btn"
+                  onclick="document.body.dataset.confirmed = 'yes'"><span>Yes, please</span></button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
