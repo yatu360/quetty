@@ -199,8 +199,9 @@ async def test_fresh_context_has_no_shared_storage_state() -> None:
     second = await manager.create_context()
 
     assert first.context is not second.context
-    assert playwright.chromium.browsers[0].contexts[0].options == {}
-    assert playwright.chromium.browsers[0].contexts[1].options == {}
+    # No storage state is shared; the only option is the pinned timezone.
+    assert playwright.chromium.browsers[0].contexts[0].options == {"timezone_id": "Europe/London"}
+    assert playwright.chromium.browsers[0].contexts[1].options == {"timezone_id": "Europe/London"}
     await first.close()
     await second.close()
     await manager.shutdown()
@@ -238,7 +239,10 @@ async def test_storage_state_is_used_only_when_explicitly_restoring() -> None:
 
     owned = await manager.create_context(storage_state=state)
 
-    assert playwright.chromium.browsers[0].contexts[0].options == {"storage_state": state}
+    assert playwright.chromium.browsers[0].contexts[0].options == {
+        "storage_state": state,
+        "timezone_id": "Europe/London",
+    }
     await owned.close()
     await manager.shutdown()
 

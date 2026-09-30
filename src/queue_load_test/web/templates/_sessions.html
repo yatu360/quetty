@@ -29,9 +29,9 @@
         <td class="mono">{{ session.queue_id or "—" }}</td>
         <td><span class="badge">{{ session.status.value }}</span></td>
         <td>{% if session.progress_percentage is not none %}{{ "%.1f" | format(session.progress_percentage) }}%{% else %}—{% endif %}</td>
-        <td>{{ session.last_queue_update or "—" }}</td>
-        <td>{{ session.last_checked_at or "—" }}</td>
-        <td>{{ session.next_check_at or "—" }}</td>
+        <td>{{ session.last_queue_update | local_time }}</td>
+        <td>{{ session.last_checked_at | local_time }}</td>
+        <td>{{ session.next_check_at | local_time }}</td>
         <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN BROWSER{% else %}{{ session.runtime_state.value }}{% endif %}</td>
         <td>
           {% if action %}<div class="action-status">{{ action.kind.value | title }}: {{ action.status.value | lower }}</div>{% endif %}

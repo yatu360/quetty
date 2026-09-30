@@ -1,8 +1,9 @@
 """Pure, defensive parsers for text extracted from Queue-it layouts."""
 
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 RawValue = str | int | float | bool | datetime | None
 
@@ -78,16 +79,62 @@ def parse_estimated_wait_text(value: RawValue, *, visible: bool = True) -> str |
     return _visible_text(value, visible)
 
 
+_OFFSET_LABEL = re.compile(r"^(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+# Only unambiguous zone words are accepted; other abbreviations are never guessed.
+_NAMED_LABELS: dict[str, tzinfo] = {
+    "UTC": UTC,
+    "GMT": UTC,
+    "Z": UTC,
+    "BST": timezone(timedelta(hours=1), "BST"),
+}
+
+
+def parse_timezone_label(value: RawValue) -> tzinfo | None:
+    """Parse a page's own timezone label ("GMT+01:00", "(UTC)", "BST", "Europe/London")."""
+
+    text = _visible_text(value, True) if not isinstance(value, datetime) else None
+    if text is None:
+        return None
+    text = text.strip("()[] ").strip()
+    named = _NAMED_LABELS.get(text.upper())
+    if named is not None:
+        return named
+    match = _OFFSET_LABEL.match(text)
+    if match is not None:
+        sign, hours, minutes = match.groups()
+        offset = timedelta(hours=int(hours), minutes=int(minutes or 0))
+        if offset > timedelta(hours=14):
+            return None
+        return timezone(offset if sign == "+" else -offset)
+    if "/" in text:
+        try:
+            return ZoneInfo(text)
+        except (ZoneInfoNotFoundError, ValueError):
+            return None
+    return None
+
+
 def _parse_datetime(
     value: RawValue,
     *,
     visible: bool,
     reference_date: date | None = None,
+    zone: tzinfo | None = None,
+    now: datetime | None = None,
 ) -> datetime | None:
+    """Parse a displayed timestamp and return it in UTC.
+
+    Values without their own offset are interpreted in ``zone`` (the page's timezone;
+    UTC when unknown). A time without a date takes the occurrence nearest to ``now``,
+    so "00:05" read at 23:58 means the next day; ``reference_date`` is the older
+    fallback when no ``now`` is supplied.
+    """
+
+    local = zone or UTC
     if not visible or value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return _to_utc(value, local)
 
     text_value = _visible_text(value, visible)
     if text_value is None:
@@ -100,7 +147,7 @@ def _parse_datetime(
     )
     candidate = text_value.replace("Z", "+00:00")
     try:
-        parsed = datetime.fromisoformat(candidate)
+        parsed: datetime | None = datetime.fromisoformat(candidate)
     except ValueError:
         parsed = None
 
@@ -112,7 +159,7 @@ def _parse_datetime(
             "%d/%m/%Y %H:%M",
         ):
             try:
-                parsed = datetime.strptime(text_value, pattern).replace(tzinfo=UTC)
+                parsed = datetime.strptime(text_value, pattern).replace(tzinfo=local)
                 break
             except ValueError:
                 continue
@@ -123,20 +170,38 @@ def _parse_datetime(
         except (TypeError, ValueError, OverflowError):
             parsed = None
 
-    if parsed is None and reference_date is not None:
+    if parsed is None and (now is not None or reference_date is not None):
         # 24-hour and 12-hour clock forms ("14:45", "2:45 PM", "2:45PM").
         compact = re.sub(r"\s+(?=[AaPp][Mm]$)", "", text_value)
         for pattern in ("%H:%M:%S", "%H:%M", "%I:%M:%S%p", "%I:%M%p"):
             try:
-                parsed_time = datetime.strptime(compact, pattern).replace(tzinfo=UTC).time()
-                parsed = datetime.combine(reference_date, parsed_time, tzinfo=UTC)
-                break
+                parsed_time = datetime.strptime(compact, pattern).replace(tzinfo=local).time()
             except ValueError:
                 continue
+            if now is not None:
+                parsed = _nearest_occurrence(parsed_time, local, now)
+            else:
+                assert reference_date is not None
+                parsed = datetime.combine(reference_date, parsed_time, tzinfo=local)
+            break
 
     if parsed is None:
         return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return _to_utc(parsed, local)
+
+
+def _nearest_occurrence(clock_time: time, zone: tzinfo, now: datetime) -> datetime:
+    local_now = now.astimezone(zone)
+    candidates = [
+        datetime.combine(local_now.date() + timedelta(days=offset), clock_time, tzinfo=zone)
+        for offset in (-1, 0, 1)
+    ]
+    return min(candidates, key=lambda candidate: abs(candidate - now))
+
+
+def _to_utc(value: datetime, zone: tzinfo) -> datetime:
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=zone)
+    return aware.astimezone(UTC)
 
 
 def parse_expected_service_time(
@@ -144,10 +209,14 @@ def parse_expected_service_time(
     *,
     visible: bool = True,
     reference_date: date | None = None,
+    zone: tzinfo | None = None,
+    now: datetime | None = None,
 ) -> datetime | None:
     """Parse an expected-service timestamp without inventing a missing date."""
 
-    return _parse_datetime(value, visible=visible, reference_date=reference_date)
+    return _parse_datetime(
+        value, visible=visible, reference_date=reference_date, zone=zone, now=now
+    )
 
 
 def parse_last_updated(
@@ -155,10 +224,14 @@ def parse_last_updated(
     *,
     visible: bool = True,
     reference_date: date | None = None,
+    zone: tzinfo | None = None,
+    now: datetime | None = None,
 ) -> datetime | None:
     """Parse a Queue-it last-updated timestamp."""
 
-    return _parse_datetime(value, visible=visible, reference_date=reference_date)
+    return _parse_datetime(
+        value, visible=visible, reference_date=reference_date, zone=zone, now=now
+    )
 
 
 def _parse_boolean(

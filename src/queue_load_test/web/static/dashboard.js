@@ -30,3 +30,37 @@
     saved = null;
   });
 })();
+
+// Show <time class="local-time" datetime="…Z"> values in the viewer's own timezone
+// (the machine running the browser), including its GMT/BST-style abbreviation. The
+// server always sends the exact UTC instant; the element text is only a fallback.
+(function () {
+  "use strict";
+  var FORMAT = new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+
+  function localize(root) {
+    var nodes = (root || document).querySelectorAll("time.local-time[datetime]");
+    for (var index = 0; index < nodes.length; index += 1) {
+      var node = nodes[index];
+      var instant = new Date(node.getAttribute("datetime"));
+      if (!isNaN(instant.getTime())) {
+        node.textContent = FORMAT.format(instant);
+        node.title = instant.toISOString();
+      }
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { localize(document); });
+  } else {
+    localize(document);
+  }
+  document.addEventListener("htmx:afterSwap", function () { localize(document); });
+})();

@@ -2,8 +2,9 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from playwright.async_api import Locator, Page
 
@@ -19,6 +20,7 @@ from queue_load_test.queue_monitor.parsing import (
     parse_queue_number,
     parse_queue_paused,
     parse_serviced_soon,
+    parse_timezone_label,
     parse_turn_started,
     parse_users_ahead,
 )
@@ -62,6 +64,12 @@ class QueueItSelectors:
         "#divConfirmRedirectModal",
     )
     manual_update_warning: tuple[str, ...] = ("#MainPart_lbManualUpdateWarning",)
+    # The page's own timezone label beside displayed times, when the layout shows one.
+    timezone_labels: tuple[str, ...] = (
+        "#MainPart_lbExpectedServiceTimeTimeZonePostfix",
+        "#MainPart_lbLastUpdateTimeTextTimeZonePostfix",
+        "#MainPart_lbEventStartTimeTimeZonePostfix",
+    )
     pre_queue: tuple[str, ...] = ('[data-testid="pre-queue"]',)
     active_queue: tuple[str, ...] = ('[data-testid="active-queue"]',)
 
@@ -107,6 +115,7 @@ class QueueItLiveStateExtractor:
 
         diagnostics = _DiagnosticsBuilder()
         now = self._clock()
+        zone = await self._page_timezone(page, diagnostics)
 
         progress_element = await self._find_visible(
             page,
@@ -129,7 +138,8 @@ class QueueItLiveStateExtractor:
                 self.selectors.expected_service_time,
                 diagnostics,
             ),
-            reference_date=now.date(),
+            zone=zone,
+            now=now,
         )
         estimated_wait_text = parse_estimated_wait_text(
             await self._text(
@@ -141,7 +151,8 @@ class QueueItLiveStateExtractor:
         )
         last_updated_at = parse_last_updated(
             await self._text(page, "last_updated", self.selectors.last_updated, diagnostics),
-            reference_date=now.date(),
+            zone=zone,
+            now=now,
         )
         queue_paused = await self._indicator(
             page,
@@ -181,7 +192,7 @@ class QueueItLiveStateExtractor:
         )
         connection_lost = parse_connection_lost(manual_update_warning)
 
-        pre_queue = await self._detect_pre_queue(page, diagnostics, now)
+        pre_queue = await self._detect_pre_queue(page, diagnostics, now, zone)
         explicit_active = await self._has_visible(
             page,
             "active_queue",
@@ -243,6 +254,30 @@ class QueueItLiveStateExtractor:
                 diagnostics.error(field_name, exc)
         return None
 
+    async def _page_timezone(self, page: Page, diagnostics: _DiagnosticsBuilder) -> tzinfo:
+        """The timezone the page displays times in.
+
+        A visible timezone label on the page wins. Otherwise the browser's own zone
+        (the page formats times with it; contexts are pinned, default Europe/London).
+        UTC only when neither can be read.
+        """
+
+        label = await self._text(page, "timezone_label", self.selectors.timezone_labels, diagnostics)
+        labelled = parse_timezone_label(label)
+        if labelled is not None:
+            return labelled
+        try:
+            name = await page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+        except BROWSER_ERROR_TYPES as exc:
+            diagnostics.error("timezone", exc)
+            return UTC
+        if isinstance(name, str) and name:
+            try:
+                return ZoneInfo(name)
+            except (ZoneInfoNotFoundError, ValueError):
+                return UTC
+        return UTC
+
     async def _text(
         self,
         page: Page,
@@ -298,6 +333,7 @@ class QueueItLiveStateExtractor:
         page: Page,
         diagnostics: _DiagnosticsBuilder,
         now: datetime,
+        zone: tzinfo,
     ) -> bool:
         if await self._has_visible(
             page,
@@ -336,7 +372,7 @@ class QueueItLiveStateExtractor:
 
         event_start = body_values.get("eventStartTime") or page_state.get("eventStartTime")
         event_time = (
-            parse_expected_service_time(event_start)
+            parse_expected_service_time(event_start, zone=zone)
             if isinstance(event_start, str | int | float | bool | datetime)
             else None
         )

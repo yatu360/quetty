@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -151,3 +152,86 @@ def test_turn_started_phrase_from_the_confirmation_dialog() -> None:
 
     assert parse_turn_started("Your turn started at 14:30 Please confirm") is True
     assert parse_turn_started("Your turn has not started") is False
+
+
+# ------------------------------------------------------------- timezone handling
+
+LONDON = ZoneInfo("Europe/London")
+
+
+def _utc(*parts: int) -> datetime:
+    return datetime(*parts, tzinfo=UTC)  # type: ignore[arg-type, misc]
+
+
+@pytest.mark.parametrize(
+    ("now", "raw", "expected"),
+    [
+        # Winter: Europe/London is GMT (UTC+0).
+        (_utc(2026, 1, 15, 14, 0), "14:30", _utc(2026, 1, 15, 14, 30)),
+        (_utc(2026, 1, 15, 14, 0), "2:30 PM", _utc(2026, 1, 15, 14, 30)),
+        # Summer: Europe/London is BST (UTC+1); 14:30 on the page is 13:30 UTC.
+        (_utc(2026, 7, 15, 13, 0), "14:30", _utc(2026, 7, 15, 13, 30)),
+        (_utc(2026, 9, 29, 22, 12), "11:13PM", _utc(2026, 9, 29, 22, 13)),
+        # DST starts 29 March 2026 at 01:00 UTC; 03:00 BST is 02:00 UTC.
+        (_utc(2026, 3, 29, 1, 30), "03:00", _utc(2026, 3, 29, 2, 0)),
+        # Midnight rollover picks the nearest occurrence, not "today".
+        (_utc(2026, 1, 15, 23, 58), "00:05", _utc(2026, 1, 16, 0, 5)),
+        (_utc(2026, 1, 16, 0, 2), "23:59", _utc(2026, 1, 15, 23, 59)),
+    ],
+)
+def test_time_only_values_use_the_page_timezone_and_nearest_date(
+    now: datetime, raw: str, expected: datetime
+) -> None:
+    from queue_load_test.queue_monitor.parsing import (
+        parse_expected_service_time,
+        parse_last_updated,
+    )
+
+    assert parse_expected_service_time(raw, zone=LONDON, now=now) == expected
+    assert parse_last_updated(raw, zone=LONDON, now=now) == expected
+
+
+def test_full_timestamps_use_the_zone_only_when_they_carry_no_offset() -> None:
+    from queue_load_test.queue_monitor.parsing import parse_last_updated
+
+    assert parse_last_updated("2026-07-01 14:30", zone=LONDON) == _utc(2026, 7, 1, 13, 30)
+    assert parse_last_updated("2026-01-01 14:30", zone=LONDON) == _utc(2026, 1, 1, 14, 30)
+    assert parse_last_updated("2026-07-01T14:30:00+02:00", zone=LONDON) == _utc(2026, 7, 1, 12, 30)
+    assert parse_last_updated("2026-07-01T14:30:00Z", zone=LONDON) == _utc(2026, 7, 1, 14, 30)
+    # Without a zone the historical UTC interpretation is unchanged.
+    assert parse_last_updated("2026-07-01 14:30") == _utc(2026, 7, 1, 14, 30)
+
+
+@pytest.mark.parametrize(
+    ("label", "offset_hours"),
+    [
+        ("(GMT+01:00)", 1),
+        ("GMT+1", 1),
+        ("UTC-05:00", -5),
+        ("(UTC)", 0),
+        ("GMT", 0),
+        ("BST", 1),
+        ("utc +5:30", 5.5),
+    ],
+)
+def test_page_timezone_labels_are_parsed(label: str, offset_hours: float) -> None:
+    from datetime import timedelta
+
+    from queue_load_test.queue_monitor.parsing import parse_timezone_label
+
+    zone = parse_timezone_label(label)
+    assert zone is not None
+    assert zone.utcoffset(None) == timedelta(hours=offset_hours)
+
+
+def test_iana_labels_follow_daylight_saving_and_unknown_labels_are_not_guessed() -> None:
+    from datetime import timedelta
+
+    from queue_load_test.queue_monitor.parsing import parse_timezone_label
+
+    zone = parse_timezone_label("Europe/London")
+    assert zone is not None
+    assert zone.utcoffset(_utc(2026, 7, 1).replace(tzinfo=None)) == timedelta(hours=1)
+    assert zone.utcoffset(_utc(2026, 1, 1).replace(tzinfo=None)) == timedelta(0)
+    for unknown in ("CET", "EST", "local time", "GMT+99", "", None):
+        assert parse_timezone_label(unknown) is None

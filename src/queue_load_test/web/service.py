@@ -321,6 +321,7 @@ class ApplicationRunRuntime:
                     observability=metrics,
                     shared_capacity=shared_capacity,
                     backend=create_browser_backend(settings.browser_backend),
+                    timezone_id=settings.browser_timezone,
                 )
             creator = QueueSessionCreator(
                 browser_manager=creation_browser_manager,
@@ -388,6 +389,7 @@ class ApplicationRunRuntime:
                 observability=metrics,
                 shared_capacity=shared_capacity,
                 backend=create_browser_backend(settings.browser_backend),
+                timezone_id=settings.browser_timezone,
             )
             headed_restorer = QueueSessionRestorer(
                 browser_manager=headed_manager,

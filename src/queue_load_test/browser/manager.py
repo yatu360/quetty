@@ -215,6 +215,9 @@ async def _start_playwright() -> Playwright:
     return await async_playwright().start()
 
 
+DEFAULT_BROWSER_TIMEZONE = "Europe/London"
+
+
 class BrowserManager:
     """Own shared browser processes and isolated visitor contexts."""
 
@@ -231,7 +234,14 @@ class BrowserManager:
         close_timeout_seconds: float = 5.0,
         shared_capacity: BrowserContextCapacity | None = None,
         backend: BrowserBackend | None = None,
+        timezone_id: str | None = DEFAULT_BROWSER_TIMEZONE,
     ) -> None:
+        """``timezone_id`` pins every context's timezone (default Europe/London).
+
+        Queue-it formats times in the visitor's browser timezone, so a fixed zone
+        makes page readings independent of the host running the app.
+        """
+
         if operation_timeout_seconds <= 0 or close_timeout_seconds <= 0:
             raise ValueError("browser operation timeouts must be positive")
         if chrome_process_count < 1:
@@ -263,6 +273,7 @@ class BrowserManager:
         self._close_timeout_seconds = close_timeout_seconds
         self._shared_capacity = shared_capacity
         self._backend = backend or ChromeBackend()
+        self.timezone_id = timezone_id
         self._unresponsive_threshold: int | None = getattr(
             self._backend, "unresponsive_restart_threshold", None
         )
@@ -286,6 +297,7 @@ class BrowserManager:
             observability=observability,
             shared_capacity=shared_capacity,
             backend=create_browser_backend(settings.browser_backend),
+            timezone_id=settings.browser_timezone,
         )
 
     @property
@@ -603,7 +615,9 @@ class BrowserManager:
         browser: ManagedBrowser,
         storage_state: ContextStorageState | None,
     ) -> ManagedBrowserContext:
-        return await self._backend.new_context(browser, storage_state=storage_state)
+        return await self._backend.new_context(
+            browser, storage_state=storage_state, timezone_id=self.timezone_id
+        )
 
     @asynccontextmanager
     async def context(

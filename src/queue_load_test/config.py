@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, HttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -125,6 +126,10 @@ class Settings(BaseSettings):
         ge=0,
         le=1_000,
     )
+    # Every browser context uses this IANA timezone. Queue-it formats times in the
+    # visitor's browser timezone, so pinning it makes readings host-independent.
+    # Europe/London is GMT in winter and BST (UTC+1) in summer.
+    browser_timezone: str = Field(default="Europe/London", alias="BROWSER_TIMEZONE")
     chrome_process_count: int = Field(default=2, alias="CHROME_PROCESS_COUNT", ge=1, le=4)
     max_contexts_per_browser: int = Field(
         default=25, alias="MAX_CONTEXTS_PER_BROWSER", ge=1, le=25
@@ -250,6 +255,15 @@ class Settings(BaseSettings):
         if not isinstance(value, str | BrowserBackendName):
             raise ValueError("BROWSER_BACKEND must be a string")  # noqa: TRY004
         return BrowserBackendName.parse(value)
+
+    @field_validator("browser_timezone")
+    @classmethod
+    def validate_browser_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("BROWSER_TIMEZONE must be an IANA timezone name") from exc
+        return value
 
     @field_validator("direct_monitor_schema_path", mode="before")
     @classmethod

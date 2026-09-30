@@ -16,6 +16,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
@@ -77,6 +78,7 @@ def create_app(
     run_runtime = runtime or ApplicationRunRuntime(settings=settings, repository=repository)
     dashboard = DashboardService(repository, run_runtime)
     templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
+    templates.env.filters["local_time"] = local_time_markup
     lifecycle = {"accepting": False, "resetting": False, "stopping": False}
 
     @asynccontextmanager
@@ -652,6 +654,24 @@ def _failure_response(request: Request, message: str, *, status_code: int = 503)
         f'<p class="error" role="alert">{safe}</p>',
         status_code=status_code,
         headers={"HX-Retarget": target, "HX-Reswap": "innerHTML"},
+    )
+
+
+def local_time_markup(value: datetime | None) -> Markup:
+    """A ``<time>`` element the dashboard script shows in the viewer's local timezone.
+
+    The attribute carries the exact UTC instant; the text is a readable UTC fallback
+    for a browser without JavaScript.
+    """
+
+    if value is None:
+        return Markup("—")
+    instant = (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).astimezone(UTC)
+    return Markup(
+        '<time class="local-time" datetime="{iso}">{fallback}</time>'
+    ).format(
+        iso=instant.isoformat().replace("+00:00", "Z"),
+        fallback=instant.strftime("%d %b %H:%M:%S UTC"),
     )
 
 

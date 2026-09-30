@@ -66,6 +66,7 @@ class BrowserBackend(Protocol):
         browser: ManagedBrowser,
         *,
         storage_state: ContextStorageState | None = None,
+        timezone_id: str | None = None,
     ) -> ManagedBrowserContext: ...
 
     def is_connected(self, browser: ManagedBrowser) -> bool: ...
@@ -77,6 +78,19 @@ class BrowserBackend(Protocol):
     def diagnostics(
         self, browser: ManagedBrowser | None = None
     ) -> BrowserBackendDiagnostics: ...
+
+
+def _context_options(
+    storage_state: ContextStorageState | None, timezone_id: str | None
+) -> dict[str, Any]:
+    """Playwright context options; only the ones actually set are passed."""
+
+    options: dict[str, Any] = {}
+    if storage_state is not None:
+        options["storage_state"] = storage_state
+    if timezone_id is not None:
+        options["timezone_id"] = timezone_id
+    return options
 
 
 class ChromeBackend:
@@ -99,10 +113,9 @@ class ChromeBackend:
         browser: Browser,
         *,
         storage_state: ContextStorageState | None = None,
+        timezone_id: str | None = None,
     ) -> BrowserContext:
-        if storage_state is None:
-            return await browser.new_context()
-        return await browser.new_context(storage_state=storage_state)
+        return await browser.new_context(**_context_options(storage_state, timezone_id))
 
     def is_connected(self, browser: Browser) -> bool:
         return browser.is_connected()
@@ -175,10 +188,9 @@ class CamoufoxBackend:
         browser: Browser,
         *,
         storage_state: ContextStorageState | None = None,
+        timezone_id: str | None = None,
     ) -> BrowserContext:
-        kwargs: dict[str, Any] = (
-            {} if storage_state is None else {"storage_state": storage_state}
-        )
+        kwargs: dict[str, Any] = _context_options(storage_state, timezone_id)
         if not self._serialize_contexts:
             return await AsyncNewContext(browser, **kwargs)
         lease = self._process_leases.setdefault(id(browser), asyncio.Semaphore(1))
@@ -261,10 +273,9 @@ class PatchrightBackend:
         browser: ManagedBrowser,
         *,
         storage_state: ContextStorageState | None = None,
+        timezone_id: str | None = None,
     ) -> ManagedBrowserContext:
-        if storage_state is None:
-            return await browser.new_context()
-        return await browser.new_context(storage_state=storage_state)
+        return await browser.new_context(**_context_options(storage_state, timezone_id))
 
     def is_connected(self, browser: ManagedBrowser) -> bool:
         return bool(browser.is_connected())

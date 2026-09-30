@@ -5734,3 +5734,57 @@ being scrolled right. Cause: the polled `#session-results` block is replaced eve
 ### Git State
 
 - Branch: main
+
+## 2026-09-30 — Timezone-correct Queue-it times and local-time dashboard display
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Queue-it pages show times in the visitor's browser timezone. On the demo, the
+BST "11:13PM" was stored as 23:13 UTC, an hour late. The operator asked for the browser
+timezone to be pinned to London, the times to be read correctly, and the dashboard to
+show the viewer's machine-local time.
+
+### Changes Made
+
+- `BROWSER_TIMEZONE` setting (default `Europe/London`, validated as an IANA zone).
+  `BrowserManager` passes `timezone_id` to every context: monitoring, creation, and
+  Manual Open. All backends accept it.
+- The extractor resolves the page timezone once per observation, in this order:
+  1. a visible page label (`MainPart_lb…TimeZonePostfix`: "GMT+01:00", "UTC", "BST",
+     or an IANA name);
+  2. otherwise the browser's own zone (`Intl…timeZone`);
+  3. UTC as a last resort.
+- `parse_expected_service_time` and `parse_last_updated` accept `zone` and `now`.
+  - Values without an offset are read in that zone.
+  - A time-only value takes the occurrence nearest to now, handling midnight.
+  - Results are returned in UTC, and explicit offsets are kept.
+  - Ambiguous abbreviations are never guessed.
+- Dashboard: a new `local_time` filter renders `<time datetime="…Z">` with a UTC
+  fallback. `dashboard.js` formats these in the viewer's local timezone, with the zone
+  label, on load and after each HTMX refresh. Storage remains UTC.
+
+### Tests Run
+
+- Parsing: GMT and BST days, the 29 March 2026 change-over, midnight both directions,
+  12-hour times, labels, explicit offsets, and unknown labels.
+- `test_browser_timezone.py` (real Chrome): contexts pinned to London or a configured
+  zone; extraction converts correctly in summer and winter; a page label overrides the
+  browser zone.
+- `test_dashboard_local_time.py` (real Chrome and HTMX): the same instant shown as
+  23:13:05 BST, 18:13:05 EDT, or 22:13:05 UTC by viewer zone, and still converted
+  after refresh.
+- `python -m pytest` — 771 passed, 4 staging deselected (383.27 s). Ruff and strict mypy
+  PASS.
+
+### Known Issues
+
+- Sessions already persisted keep their earlier, hour-shifted times until they are
+  next observed.
+
+### Git State
+
+- Branch: main
