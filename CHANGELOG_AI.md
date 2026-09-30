@@ -5298,6 +5298,71 @@ Validation.**
 
 - Branch: main
 
+## 2026-09-30 — Primed Residential proxy compatibility spike
+
+### Agent / Model
+
+OpenAI Codex
+
+### Goal
+
+Determine, without contacting Queue-it or changing Quetty's production proxy/session
+model, whether Primed Residential sticky identities retain one exit IP across temporary
+Patchright contexts, managed-browser restarts, and independent Python-process restarts.
+
+### Changes Made
+
+- Added the explicitly gated `queue-load-test-primed-proxy-spike` harness and generated
+  `test_spike_results.md`. It accepts either separate local environment values or the
+  operator's complete documented connection string, keeps credentials in memory, uses
+  deterministic eight-digit logical session identifiers, masks report IPs, and uses a
+  protected salted hash for cross-process comparison.
+- Added deterministic tests in `tests/unit/test_primed_proxy_spike.py`, local configuration
+  documentation in `.env.example` and `README.md`, and ignored protected spike artifacts.
+- Added only a narrow optional per-context proxy argument to the browser backend and
+  `BrowserManager`. Existing callers omit it, so normal acquisition, restoration,
+  monitoring, Direct Monitoring, operator actions, persistence, and production manager
+  semantics remain unchanged. No schema, dashboard, or production proxy integration was
+  added.
+
+### Validation and Live Evidence
+
+- Focused spike/backend/manager tests: 67 passed.
+- Full ordinary suite: 791 passed, 4 staging tests deselected. The first full run had one
+  timing-sensitive operator-fencing cleanup failure after 790 passes; that test passed in
+  isolation and the complete rerun passed.
+- `ruff check src tests`, strict `mypy src`, and `git diff --check`: PASS.
+- Live command actually run:
+  `.venv/bin/python -m queue_load_test.harness.primed_proxy_spike --report test_spike_results.md`.
+- Bandwidth-conscious count: 28 tiny proxy-routed HTTPS IP observations/diagnostics total
+  (22 in the formal run and 6 preliminary connectivity diagnostics). No Queue-it or other
+  production/unauthorised target was contacted.
+- Result: `SPIKE_PARTIAL`. Patchright connectivity, demonstrable proxy routing, concurrent
+  per-context configuration, failure cleanup, secret-artifact audit, and final resource
+  cleanup passed. Across three logical sessions, fresh-context comparisons produced three
+  SAME and three CHANGED results; one of three managed-browser restart comparisons changed;
+  the independent Python-process comparison changed; 10 seconds disconnected stayed SAME;
+  and 60 seconds disconnected changed. No cross-session IP collision was observed.
+
+### Safety and Limitations
+
+- The generated markdown contains masked IPs only. Raw IPs were held in memory; protected
+  restart artifacts used a salted hash and were removed. Final counts were zero contexts,
+  zero managed browser processes, and no detected orphan process.
+- Credentials were absent from repository logs, JSON, markdown, reprs, SQLite, and temporary
+  result artifacts. The operator pasted a temporary credential into the external
+  conversation and must rotate it; that conversation is outside the repository audit.
+- Evidence is limited to one Primed Residential trial/account, one diagnostic service, the
+  supplied 60-minute session modifier, and disconnected intervals through 60 seconds. It
+  establishes observed behavior only, not a provider guarantee. It is not Queue-it staging
+  evidence.
+
+### Follow-up
+
+Do not implement production proxy assignment yet. Ask Primed to explain the observed
+reassignment for a reused sticky session identity, confirm the provider's disconnect and
+reconnect contract, then rerun this bounded spike using their documented correction.
+
 ## 2026-09-29 — Phase 8 Prompt 7 — Direct vs Headed Monitoring Benchmark and Authorised Staging Validation
 
 ### Agent / Model

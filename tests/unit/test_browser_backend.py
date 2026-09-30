@@ -80,13 +80,27 @@ async def test_patchright_backend_uses_its_controller_and_installed_chrome_chann
 
     launched = await backend.launch(controller, headless=False)
     context = await backend.new_context(launched, storage_state="state.json")
+    proxied = await backend.new_context(
+        launched,
+        proxy={"server": "http://proxy.invalid:8888", "username": "user", "password": "pass"},
+    )
 
     assert launched is browser
     assert controller.chromium.calls == [
         {"channel": PATCHRIGHT_BROWSER_CHANNEL, "headless": False}
     ]
-    assert browser.context_calls == [{"storage_state": "state.json"}]
+    assert browser.context_calls == [
+        {"storage_state": "state.json"},
+        {
+            "proxy": {
+                "server": "http://proxy.invalid:8888",
+                "username": "user",
+                "password": "pass",
+            }
+        },
+    ]
     assert context is not None
+    assert proxied is not None
 
 
 async def test_camoufox_backend_uses_supported_async_api_and_exact_installed_build(

@@ -247,6 +247,25 @@ async def test_storage_state_is_used_only_when_explicitly_restoring() -> None:
     await manager.shutdown()
 
 
+async def test_optional_per_context_proxy_is_forwarded_without_changing_default_contexts() -> None:
+    manager, playwright = manager_and_playwright()
+    await manager.start()
+    proxy = {
+        "server": "http://proxy.invalid:8888",
+        "username": "user",
+        "password": "password",
+    }
+
+    owned = await manager.create_context(proxy=proxy)
+
+    assert playwright.chromium.browsers[0].contexts[0].options == {
+        "timezone_id": "Europe/London",
+        "proxy": proxy,
+    }
+    await owned.close()
+    await manager.shutdown()
+
+
 async def test_least_loaded_browser_allocation() -> None:
     manager, playwright = manager_and_playwright(processes=2, per_browser=2, global_limit=4)
     await manager.start()

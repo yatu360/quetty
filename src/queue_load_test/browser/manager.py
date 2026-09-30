@@ -17,6 +17,7 @@ from queue_load_test.browser.backend import (
     BrowserBackend,
     BrowserBackendDiagnostics,
     BrowserController,
+    BrowserProxySettings,
     ChromeBackend,
     ManagedBrowser,
     ManagedBrowserContext,
@@ -484,12 +485,13 @@ class BrowserManager:
         self,
         *,
         storage_state: ContextStorageState | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> OwnedBrowserContext:
         """Allocate one isolated visitor context with explicit ownership."""
 
         started = time.perf_counter()
         try:
-            return await self._create_context(storage_state=storage_state)
+            return await self._create_context(storage_state=storage_state, proxy=proxy)
         finally:
             if self._observability is not None:
                 self._observability.record_context_acquisition_duration(
@@ -500,6 +502,7 @@ class BrowserManager:
         self,
         *,
         storage_state: ContextStorageState | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> OwnedBrowserContext:
         """Implement allocation separately so all exits receive timing instrumentation."""
 
@@ -540,7 +543,7 @@ class BrowserManager:
                                     "Global browser context capacity is exhausted"
                                 )
                         context = await await_bounded(
-                            self._new_context(slot.browser, storage_state),
+                            self._new_context(slot.browser, storage_state, proxy),
                             timeout=self._operation_timeout_seconds,
                             discard=self._discard_context,
                         )
@@ -614,9 +617,13 @@ class BrowserManager:
         self,
         browser: ManagedBrowser,
         storage_state: ContextStorageState | None,
+        proxy: BrowserProxySettings | None,
     ) -> ManagedBrowserContext:
         return await self._backend.new_context(
-            browser, storage_state=storage_state, timezone_id=self.timezone_id
+            browser,
+            storage_state=storage_state,
+            timezone_id=self.timezone_id,
+            proxy=proxy,
         )
 
     @asynccontextmanager
@@ -624,10 +631,11 @@ class BrowserManager:
         self,
         *,
         storage_state: ContextStorageState | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> AsyncIterator[ManagedBrowserContext]:
         """Yield an isolated context and always release it on scope exit."""
 
-        owned_context = await self.create_context(storage_state=storage_state)
+        owned_context = await self.create_context(storage_state=storage_state, proxy=proxy)
         try:
             yield owned_context.context
         finally:

@@ -60,6 +60,7 @@ queue-load-test-phase8-direct-replay = "queue_load_test.harness.phase8_direct_re
 queue-load-test-phase8-equivalence = "queue_load_test.harness.phase8_observation_equivalence:main"
 queue-load-test-phase8-direct-runtime = "queue_load_test.harness.phase8_direct_runtime:main"
 queue-load-test-phase8-monitoring-benchmark = "queue_load_test.harness.phase8_monitoring_benchmark:main"
+queue-load-test-primed-proxy-spike = "queue_load_test.harness.primed_proxy_spike:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

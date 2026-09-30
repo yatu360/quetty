@@ -695,3 +695,42 @@ queue-load-test-phase2-tuning --confirm-authorized-staging --matrix-file benchma
 
 The aggregate output contains comparison rows and objective saturation flags, not a
 winner. See [the concurrency benchmark guide](docs/phase2-concurrency-benchmark.md).
+
+## Primed Residential Proxy Compatibility Spike
+
+`queue-load-test-primed-proxy-spike` is an isolated, explicitly gated compatibility
+probe. It does not proxy normal Quetty activity, does not use SQLite or Queue-it, and
+uses at most three temporary Patchright contexts against a small HTTPS public-IP
+diagnostic response. The checked-in `test_spike_results.md` is generated from the most
+recent invocation.
+
+Supply the exact server, port, credentials, and sticky authenticated-username format
+from the Primed dashboard/current documentation. The template is only the authenticated
+username and must contain exactly one `{username}` plus one `{session_id}` or
+`{random_integer}`; all provider literals (including any country, pool, or session-time
+syntax) must be written exactly as documented by Primed. Quetty substitutes a stable
+eight-digit integer so a logical session can be reconstructed after restart. It does not
+infer provider syntax. The relevant names are documented in `.env.example`; credentials
+belong only in exported environment variables or a local ignored configuration.
+Alternatively, the isolated harness accepts Primed's complete documented connection
+string through `PRIMED_PROXY_TEMP`; it parses that value only in memory and replaces
+the example eight-digit session value deterministically for each logical spike session.
+
+After reviewing the conservative request count and intervals, enable the live gate:
+
+```powershell
+$env:RUN_PRIMED_PROXY_SPIKE = "1"
+queue-load-test-primed-proxy-spike --report test_spike_results.md
+```
+
+The full run starts a separate Python child process for the application-restart test.
+The same check can instead be performed as two explicit invocations; the prepare phase
+stores only a salted IP digest in a mode-0600 ignored artifact, and resume removes it:
+
+```powershell
+queue-load-test-primed-proxy-spike --mode restart-prepare
+queue-load-test-primed-proxy-spike --mode restart-resume
+```
+
+Without `RUN_PRIMED_PROXY_SPIKE=1` and complete exact configuration, the command fails
+closed, sends no proxy traffic, and writes a `NOT RUN` / `UNKNOWN` report.

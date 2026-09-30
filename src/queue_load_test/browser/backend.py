@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from camoufox.async_api import AsyncNewBrowser, AsyncNewContext
 from patchright.async_api import async_playwright as async_patchright
@@ -20,6 +20,18 @@ type BrowserController = Any
 type ManagedBrowser = Any
 type ManagedBrowserContext = Any
 type BrowserControllerStarter = Callable[[], Awaitable[BrowserController]]
+
+
+class BrowserProxySettings(TypedDict):
+    """Per-context proxy values accepted by the browser APIs.
+
+    Normal Quetty paths never supply these values. The optional seam exists for the
+    isolated Primed compatibility spike, where credentials remain in memory only.
+    """
+
+    server: str
+    username: str
+    password: str
 
 # The selector is deliberately exact. Passing it to AsyncNewBrowser uses an installed
 # browser or raises; unlike Camoufox's implicit active-version path, it cannot fetch.
@@ -67,6 +79,7 @@ class BrowserBackend(Protocol):
         *,
         storage_state: ContextStorageState | None = None,
         timezone_id: str | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> ManagedBrowserContext: ...
 
     def is_connected(self, browser: ManagedBrowser) -> bool: ...
@@ -81,7 +94,9 @@ class BrowserBackend(Protocol):
 
 
 def _context_options(
-    storage_state: ContextStorageState | None, timezone_id: str | None
+    storage_state: ContextStorageState | None,
+    timezone_id: str | None,
+    proxy: BrowserProxySettings | None = None,
 ) -> dict[str, Any]:
     """Playwright context options; only the ones actually set are passed."""
 
@@ -90,6 +105,8 @@ def _context_options(
         options["storage_state"] = storage_state
     if timezone_id is not None:
         options["timezone_id"] = timezone_id
+    if proxy is not None:
+        options["proxy"] = dict(proxy)
     return options
 
 
@@ -114,8 +131,9 @@ class ChromeBackend:
         *,
         storage_state: ContextStorageState | None = None,
         timezone_id: str | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> BrowserContext:
-        return await browser.new_context(**_context_options(storage_state, timezone_id))
+        return await browser.new_context(**_context_options(storage_state, timezone_id, proxy))
 
     def is_connected(self, browser: Browser) -> bool:
         return browser.is_connected()
@@ -189,8 +207,9 @@ class CamoufoxBackend:
         *,
         storage_state: ContextStorageState | None = None,
         timezone_id: str | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> BrowserContext:
-        kwargs: dict[str, Any] = _context_options(storage_state, timezone_id)
+        kwargs: dict[str, Any] = _context_options(storage_state, timezone_id, proxy)
         if not self._serialize_contexts:
             return await AsyncNewContext(browser, **kwargs)
         lease = self._process_leases.setdefault(id(browser), asyncio.Semaphore(1))
@@ -274,8 +293,9 @@ class PatchrightBackend:
         *,
         storage_state: ContextStorageState | None = None,
         timezone_id: str | None = None,
+        proxy: BrowserProxySettings | None = None,
     ) -> ManagedBrowserContext:
-        return await browser.new_context(**_context_options(storage_state, timezone_id))
+        return await browser.new_context(**_context_options(storage_state, timezone_id, proxy))
 
     def is_connected(self, browser: ManagedBrowser) -> bool:
         return bool(browser.is_connected())
