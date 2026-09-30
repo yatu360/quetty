@@ -155,7 +155,7 @@ activemq-data/
 .direct-replay/
 .observation-equivalence/
 .direct-monitor/
-.primed-proxy-spike/
+.iproyal-proxy-spike/
 .phase4-browser-state/
 *.sqlite3
 *.sqlite3-shm
@@ -183,7 +183,7 @@ phase4-monitoring-benchmark*.json
 phase4-monitoring-synthetic*.sqlite3
 phase4-recovery-benchmark*.json
 phase4-recovery-run*/
-primed-proxy-spike*.json
+iproyal-proxy-spike*.json
 .phase2-concurrency-runs/
 .venv
 env/

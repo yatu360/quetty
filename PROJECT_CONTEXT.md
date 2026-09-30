@@ -1493,6 +1493,27 @@ python -m ruff check src tests
 python -m mypy src
 ```
 
+## IPRoyal Residential Compatibility Spike
+
+The isolated IPRoyal Residential spike completed with `SPIKE_PASS` for the
+operator-approved 30-minute continuity window. Patchright connectivity, distinct
+per-context configuration for three logical sessions, proxy bypass detection, GB
+egress, fresh-context affinity, managed-browser restart affinity, independent-Python
+restart affinity, and fully disconnected T+5/T+30 affinity all passed. The T+30 exit
+matched T+0 exactly while no BrowserContext or browser process was retained. Credential
+leakage and resource-cleanup checks passed. The live run made 44 tiny proxy-routed
+diagnostic requests across the initial run, safe finalization, and geo fallback.
+
+The operator shortened the long-window scope during execution. T+60, T+90, and T+115
+were intentionally not run, so this evidence must not be presented as proof of the full
+configured `2h` lifetime. The historical Primed `SPIKE_PARTIAL` remains in
+`CHANGELOG_AI.md`. No production proxy routing, schema, acquisition, restoration,
+monitoring, dashboard, Direct Monitoring, or operator-action behavior was added.
+
+If production proxy work is explicitly authorised, the exact follow-up is:
+
+`Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`
+
 ## Next Task
 
 Phase 8 is closed as **PARTIAL**. The next justified task is authorised Queue-it staging

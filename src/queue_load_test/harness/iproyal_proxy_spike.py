@@ -1,4 +1,4 @@
-"""Opt-in, low-bandwidth Primed Residential proxy compatibility spike.
+"""Opt-in, low-bandwidth IPRoyal Residential proxy compatibility spike.
 
 This module is deliberately outside production configuration and session persistence.
 It uses only small HTTPS public-IP responses and never contacts Queue-it.
@@ -16,7 +16,6 @@ import json
 import os
 import platform
 import re
-import string
 import subprocess
 import sys
 import time
@@ -29,7 +28,7 @@ from importlib.metadata import PackageNotFoundError, version
 from itertools import pairwise
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from dotenv import dotenv_values
@@ -39,10 +38,12 @@ from queue_load_test.direct_replay.store import read_protected_json, write_prote
 from queue_load_test.harness.resource_benchmark import is_browser_main_process
 from queue_load_test.models import BrowserBackendName
 
-LIVE_GATE = "RUN_PRIMED_PROXY_SPIKE"
+LIVE_GATE = "RUN_IPROYAL_PROXY_SPIKE"
 DEFAULT_REPORT_PATH = Path("test_spike_results.md")
-DEFAULT_STATE_PATH = Path(".primed-proxy-spike/restart-state.json")
+DEFAULT_STATE_PATH = Path(".iproyal-proxy-spike/restart-state.json")
+DEFAULT_LONG_STATE_PATH = Path(".iproyal-proxy-spike/long-checkpoint-state.json")
 DEFAULT_DIAGNOSTIC_URL = "https://api.ipify.org?format=json"
+DEFAULT_GEO_URL = "https://api.country.is/"
 ALLOWED_DIAGNOSTIC_URLS = frozenset(
     {
         DEFAULT_DIAGNOSTIC_URL,
@@ -52,13 +53,12 @@ ALLOWED_DIAGNOSTIC_URLS = frozenset(
         "https://ifconfig.me/ip",
     }
 )
-LOGICAL_REFERENCES = ("proxy-spike-1", "proxy-spike-2", "proxy-spike-3")
-PRIMED_DOCUMENTATION = (
-    "https://primed-proxies.gitbook.io/primed-proxies-documentation/"
-    "residential-proxies/making-requests"
-)
-_RESTART_FORMAT = "queue-load-test.primed-proxy-spike-restart"
+LOGICAL_REFERENCES = ("iproyal-spike-1", "iproyal-spike-2", "iproyal-spike-3")
+LONG_CHECKPOINT_MINUTES = (5, 30)
+_RESTART_FORMAT = "queue-load-test.iproyal-proxy-spike-restart"
 _RESTART_VERSION = 1
+_LONG_FORMAT = "queue-load-test.iproyal-proxy-spike-long-checkpoints"
+_LONG_VERSION = 1
 
 
 class SpikeStatus(StrEnum):
@@ -90,7 +90,7 @@ class SpikeConfigurationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True, repr=False)
-class PrimedProxyConfiguration:
+class IPRoyalProxyConfiguration:
     """One resolved in-memory proxy configuration; credentials never enter repr."""
 
     logical_reference: str
@@ -101,7 +101,7 @@ class PrimedProxyConfiguration:
 
     def __repr__(self) -> str:
         return (
-            "PrimedProxyConfiguration(provider='primed', "
+            "IPRoyalProxyConfiguration(provider='iproyal', "
             f"logical_reference={self.logical_reference!r}, credentials='<redacted>')"
         )
 
@@ -114,22 +114,23 @@ class PrimedProxyConfiguration:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
-class PrimedSpikeConfig:
+class IPRoyalSpikeConfig:
     server: str = field(repr=False)
-    base_username: str = field(repr=False)
-    password: str = field(repr=False)
-    username_template: str = field(repr=False)
+    username: str = field(repr=False)
+    base_password: str = field(repr=False)
+    country: str
+    lifetime: str
     diagnostic_url: str
-    logical_session_count: int
-    observations_per_session: int
-    park_interval_seconds: float
-    inactivity_intervals_seconds: tuple[float, ...]
-    navigation_timeout_seconds: float
-    test_authentication_failure: bool
+    geo_url: str
+    navigation_timeout_seconds: float = 20.0
+    logical_session_count: int = 3
+    observations_per_session: int = 3
+    park_interval_seconds: float = 2.0
+    test_authentication_failure: bool = False
 
     def __repr__(self) -> str:
         return (
-            "PrimedSpikeConfig(provider='primed', credentials='<redacted>', "
+            "IPRoyalSpikeConfig(provider='iproyal', credentials='<redacted>', "
             f"logical_session_count={self.logical_session_count}, "
             f"diagnostic_url={self.diagnostic_url!r})"
         )
@@ -138,38 +139,35 @@ class PrimedSpikeConfig:
     def logical_references(self) -> tuple[str, ...]:
         return LOGICAL_REFERENCES[: self.logical_session_count]
 
-    def proxy_for(self, logical_reference: str) -> PrimedProxyConfiguration:
+    def proxy_for(self, logical_reference: str) -> IPRoyalProxyConfiguration:
         if logical_reference not in self.logical_references:
             raise SpikeConfigurationError("logical proxy session is outside configured population")
         session_id = deterministic_sticky_session_id(logical_reference)
-        username = self.username_template.format(
-            username=self.base_username,
+        password = construct_effective_password(
+            self.base_password,
+            country=self.country,
             session_id=session_id,
-            random_integer=session_id,
+            lifetime=self.lifetime,
         )
-        if not username or username == self.base_username:
-            raise SpikeConfigurationError(
-                "PRIMED_PROXY_USERNAME_TEMPLATE did not produce a sticky-session username"
-            )
-        return PrimedProxyConfiguration(
+        return IPRoyalProxyConfiguration(
             logical_reference=logical_reference,
             sticky_session_id=session_id,
             server=self.server,
-            username=username,
-            password=self.password,
+            username=self.username,
+            password=password,
         )
 
     def secret_candidates(self) -> tuple[str, ...]:
-        values = [self.base_username, self.password]
+        values = [self.username, self.base_password]
         for logical_reference in self.logical_references:
             proxy = self.proxy_for(logical_reference)
-            values.extend((proxy.username, authenticated_proxy_uri(proxy)))
+            values.append(proxy.password)
         return tuple(dict.fromkeys(value for value in values if value))
 
 
 @dataclass(frozen=True, slots=True)
 class ConfigLoadResult:
-    config: PrimedSpikeConfig | None
+    config: IPRoyalSpikeConfig | None
     gate_enabled: bool
     missing: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
@@ -178,7 +176,9 @@ class ConfigLoadResult:
 
     @property
     def ready(self) -> bool:
-        return self.gate_enabled and self.config is not None and not self.missing and not self.errors
+        return (
+            self.gate_enabled and self.config is not None and not self.missing and not self.errors
+        )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -229,6 +229,10 @@ class SessionSummary:
     longest_same_interval_seconds: float | None = None
     errors: set[str] = field(default_factory=set)
 
+    @property
+    def provider_session_id(self) -> str:
+        return deterministic_sticky_session_id(self.logical_reference)
+
 
 @dataclass(frozen=True, slots=True)
 class FreshContextCycle:
@@ -237,6 +241,17 @@ class FreshContextCycle:
     affinity: str
     duration_seconds: float
     masked_ip: str | None
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class LongCheckpoint:
+    checkpoint_minutes: int
+    elapsed_seconds: float
+    affinity: AffinityResult
+    masked_ip: str | None
+    browser_restarted: bool
+    fresh_python_process: bool
     error: str | None
 
 
@@ -262,22 +277,29 @@ class SpikeEvidence:
     orphan_process: bool | None = None
     collisions: int = 0
     configuration_borrow_suspected: bool = False
-    inactivity_intervals_tested: tuple[float, ...] = ()
     fresh_context_cycles: list[FreshContextCycle] = field(default_factory=list)
+    long_checkpoints: list[LongCheckpoint] = field(default_factory=list)
+    configured_country: str = "unknown"
+    configured_lifetime: str = "unknown"
+    geo_service: str = DEFAULT_GEO_URL
+    geo_country: str | None = None
     captured_surfaces: list[str] = field(default_factory=list, repr=False)
     outcome: str = "SPIKE_PARTIAL"
 
 
 TEST_NAMES = (
     "Basic proxy connectivity",
+    "Bypass check",
+    "UK geo verification",
     "Fresh-context affinity",
     "Browser-process restart affinity",
     "Independent Python/application restart affinity",
-    "Inactivity 10s",
-    "Inactivity 60s",
-    "Optional longer inactivity",
+    "5-minute disconnected affinity",
+    "30-minute disconnected affinity",
+    "60-minute disconnected affinity",
+    "90-minute disconnected affinity",
+    "115-minute disconnected affinity",
     "Three-session concurrency",
-    "Bypass check",
     "Failure cleanup",
     "Secret leakage audit",
     "Final context count",
@@ -290,10 +312,30 @@ def _initial_tests() -> dict[str, SpikeTestResult]:
 
 
 def deterministic_sticky_session_id(logical_reference: str) -> str:
-    """Return a stable eight-digit non-secret identifier for a logical session."""
+    """Return a stable eight-character alphanumeric ID for one logical session."""
 
-    digest = hashlib.sha256(f"quetty-primed-spike:{logical_reference}".encode()).digest()
-    return str(10_000_000 + int.from_bytes(digest[:8], "big") % 90_000_000)
+    return hashlib.sha256(f"quetty-iproyal-spike:{logical_reference}".encode()).hexdigest()[:8]
+
+
+def validate_provider_session_id(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9]{8}", value) is None:
+        raise SpikeConfigurationError(
+            "IPRoyal provider session ID must be exactly 8 alphanumeric characters"
+        )
+    return value
+
+
+def construct_effective_password(
+    base_password: str,
+    *,
+    country: str,
+    session_id: str,
+    lifetime: str,
+) -> str:
+    """Resolve IPRoyal authentication in memory without logging or persistence."""
+
+    validate_provider_session_id(session_id)
+    return f"{base_password}_country-{country}_session-{session_id}_lifetime-{lifetime}"
 
 
 def classify_affinity(previous_ip: str | None, current_ip: str | None) -> AffinityResult:
@@ -344,11 +386,52 @@ def compare_restart_observation(metadata: Mapping[str, object], ip: str | None) 
     previous_digest = metadata.get("previous_ip_sha256")
     if not isinstance(salt, str) or not isinstance(previous_digest, str):
         return AffinityResult.UNKNOWN
-    return (
-        AffinityResult.SAME
-        if hash_ip(ip, salt) == previous_digest
-        else AffinityResult.CHANGED
-    )
+    return AffinityResult.SAME if hash_ip(ip, salt) == previous_digest else AffinityResult.CHANGED
+
+
+def build_long_checkpoint_state(
+    *,
+    logical_reference: str,
+    provider_session_id: str,
+    ip: str,
+    country: str,
+    lifetime: str,
+    started_epoch: float | None = None,
+    salt: str | None = None,
+) -> dict[str, object]:
+    """Build resumable long-test state without persisting the exact exit IP."""
+
+    selected_salt = salt or hashlib.sha256(os.urandom(32)).hexdigest()
+    return {
+        "format": _LONG_FORMAT,
+        "version": _LONG_VERSION,
+        "logical_reference": logical_reference,
+        "provider_session_id": validate_provider_session_id(provider_session_id),
+        "country": country,
+        "lifetime": lifetime,
+        "salt": selected_salt,
+        "baseline_ip_sha256": hash_ip(ip, selected_salt),
+        "baseline_masked_ip": mask_ip(ip),
+        "started_epoch": started_epoch if started_epoch is not None else time.time(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "checkpoints": [],
+    }
+
+
+def compare_long_checkpoint(state: Mapping[str, object], ip: str | None) -> AffinityResult:
+    if ip is None:
+        return AffinityResult.UNKNOWN
+    salt = state.get("salt")
+    digest = state.get("baseline_ip_sha256")
+    if not isinstance(salt, str) or not isinstance(digest, str):
+        return AffinityResult.UNKNOWN
+    return AffinityResult.SAME if hash_ip(ip, salt) == digest else AffinityResult.CHANGED
+
+
+def classify_geo_country(value: str | None) -> SpikeStatus:
+    if value is None:
+        return SpikeStatus.UNKNOWN
+    return SpikeStatus.PASS if value.strip().upper() == "GB" else SpikeStatus.FAIL
 
 
 def remove_protected_artifacts(paths: Sequence[Path]) -> bool:
@@ -362,6 +445,13 @@ def _integer_field(document: Mapping[str, object], key: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _float_field(document: Mapping[str, object], key: str, default: float) -> float:
+    value = document.get(key)
+    return (
+        float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else default
+    )
+
+
 def parse_ip_response(text: str) -> str:
     candidate = text.strip()
     with contextlib.suppress(json.JSONDecodeError):
@@ -373,6 +463,17 @@ def parse_ip_response(text: str) -> str:
                     candidate = value.split(",", maxsplit=1)[0].strip()
                     break
     return str(ipaddress.ip_address(candidate))
+
+
+def parse_geo_response(text: str) -> str:
+    candidate = text.strip().upper()
+    with contextlib.suppress(json.JSONDecodeError):
+        payload = json.loads(text)
+        if isinstance(payload, dict) and isinstance(payload.get("country"), str):
+            candidate = cast(str, payload["country"]).strip().upper()
+    if re.fullmatch(r"[A-Z]{2}", candidate) is None:
+        raise ValueError("geo endpoint returned an invalid country code")
+    return candidate
 
 
 def classify_failure(exc: BaseException) -> FailureClass:
@@ -401,121 +502,29 @@ def _parse_positive_float(name: str, raw: str, *, maximum: float) -> float:
     return value
 
 
-def _validate_template(template: str) -> None:
-    fields: list[str] = []
-    try:
-        parsed = tuple(string.Formatter().parse(template))
-    except ValueError as exc:
-        raise SpikeConfigurationError("PRIMED_PROXY_USERNAME_TEMPLATE is malformed") from exc
-    for _, field_name, format_spec, conversion in parsed:
-        if field_name is None:
-            continue
-        if format_spec or conversion:
-            raise SpikeConfigurationError(
-                "PRIMED_PROXY_USERNAME_TEMPLATE cannot use conversions or format specs"
-            )
-        fields.append(field_name)
-    accepted_fields = (
-        fields.count("username") == 1
-        and len(fields) == 2
-        and (fields.count("session_id") == 1 or fields.count("random_integer") == 1)
-    )
-    if not accepted_fields:
-        raise SpikeConfigurationError(
-            "PRIMED_PROXY_USERNAME_TEMPLATE must be the authenticated username only and "
-            "contain exactly one {username} plus one {session_id} or {random_integer}; "
-            "embed every provider-documented literal explicitly"
-        )
-
-
-def _normalize_server(server: str, port: str | None) -> str:
+def _normalize_server(server: str) -> str:
     try:
         parsed = urlsplit(server)
         embedded_port = parsed.port
     except ValueError as exc:
-        raise SpikeConfigurationError("PRIMED_PROXY_SERVER is malformed") from exc
+        raise SpikeConfigurationError("IPROYAL_PROXY_SERVER is malformed") from exc
     if parsed.scheme not in {"http", "https", "socks5"} or not parsed.hostname:
         raise SpikeConfigurationError(
-            "PRIMED_PROXY_SERVER must include an explicit http, https, or socks5 protocol"
+            "IPROYAL_PROXY_SERVER must include an explicit http, https, or socks5 protocol"
         )
     if parsed.username is not None or parsed.password is not None:
         raise SpikeConfigurationError(
-            "PRIMED_PROXY_SERVER must not contain credentials; use separate environment values"
+            "IPROYAL_PROXY_SERVER must not contain credentials; use separate environment values"
         )
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        raise SpikeConfigurationError("PRIMED_PROXY_SERVER cannot contain a path, query, or fragment")
-    if embedded_port is not None and port:
         raise SpikeConfigurationError(
-            "set the proxy port either in PRIMED_PROXY_SERVER or PRIMED_PROXY_PORT, not both"
+            "IPROYAL_PROXY_SERVER cannot contain a path, query, or fragment"
         )
     if embedded_port is None:
-        if not port:
-            raise SpikeConfigurationError(
-                "PRIMED_PROXY_PORT is required when PRIMED_PROXY_SERVER has no embedded port"
-            )
-        try:
-            numeric_port = int(port)
-        except ValueError as exc:
-            raise SpikeConfigurationError("PRIMED_PROXY_PORT must be an integer") from exc
-        if not 1 <= numeric_port <= 65535:
-            raise SpikeConfigurationError("PRIMED_PROXY_PORT must be between 1 and 65535")
-        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
-        netloc = f"{host}:{numeric_port}"
-    else:
-        netloc = parsed.netloc
-    return urlunsplit((parsed.scheme, netloc, "", "", ""))
-
-
-def _parse_intervals(raw: str) -> tuple[float, ...]:
-    values: list[float] = []
-    for item in raw.split(","):
-        if not item.strip():
-            continue
-        values.append(
-            _parse_positive_float(
-                "PRIMED_PROXY_INACTIVITY_SECONDS",
-                item.strip(),
-                maximum=300,
-            )
-        )
-    if not values:
-        raise SpikeConfigurationError("PRIMED_PROXY_INACTIVITY_SECONDS cannot be empty")
-    return tuple(values)
-
-
-def _parse_operator_connection(raw: str) -> tuple[str, str, str, str]:
-    """Parse Primed's documented server:port:username:password connection format."""
-
-    scheme, separator, connection = raw.partition("://")
-    if not separator or scheme not in {"http", "https", "socks5"}:
         raise SpikeConfigurationError(
-            "PRIMED_PROXY_TEMP must include an explicit http, https, or socks5 protocol"
+            "IPROYAL_PROXY_SERVER must include its port in the server URL"
         )
-    parts = connection.rsplit(":", 3)
-    if len(parts) != 4:
-        raise SpikeConfigurationError(
-            "PRIMED_PROXY_TEMP must use the documented server:port:username:password format"
-        )
-    host, port, resolved_username, password = parts
-    if not host or not port or not resolved_username or not password:
-        raise SpikeConfigurationError("PRIMED_PROXY_TEMP contains an empty connection field")
-    server = _normalize_server(f"{scheme}://{host}", port)
-    session_match = re.search(r"-sessionid-(\d{8})(?=-|$)", resolved_username)
-    country_marker = resolved_username.find("-cc-")
-    if session_match is None or country_marker <= 0 or country_marker >= session_match.start():
-        raise SpikeConfigurationError(
-            "PRIMED_PROXY_TEMP username must contain the documented -cc- modifier and "
-            "an eight-digit -sessionid- value"
-        )
-    base_username = resolved_username[:country_marker]
-    username_template = (
-        "{username}"
-        + resolved_username[country_marker : session_match.start(1)]
-        + "{random_integer}"
-        + resolved_username[session_match.end(1) :]
-    )
-    _validate_template(username_template)
-    return server, base_username, password, username_template
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 def _spike_environment(env_file: Path) -> tuple[dict[str, str], str, str | None]:
@@ -523,9 +532,7 @@ def _spike_environment(env_file: Path) -> tuple[dict[str, str], str, str | None]
     file_mode: str | None = None
     if env_file.is_file():
         file_values = {
-            key: value
-            for key, value in dotenv_values(env_file).items()
-            if isinstance(value, str)
+            key: value for key, value in dotenv_values(env_file).items() if isinstance(value, str)
         }
         file_mode = oct(env_file.stat().st_mode & 0o777)
     source = {**file_values, **os.environ}
@@ -547,16 +554,12 @@ def load_spike_config(
         credentials_source = "provided mapping"
         environment_file_mode = None
     gate_enabled = source.get(LIVE_GATE, "").strip() == "1"
-    operator_connection = source.get("PRIMED_PROXY_TEMP", "").strip()
     required = (
-        ()
-        if operator_connection
-        else (
-            "PRIMED_PROXY_SERVER",
-            "PRIMED_PROXY_USERNAME",
-            "PRIMED_PROXY_PASSWORD",
-            "PRIMED_PROXY_USERNAME_TEMPLATE",
-        )
+        "IPROYAL_PROXY_SERVER",
+        "IPROYAL_PROXY_USERNAME",
+        "IPROYAL_PROXY_PASSWORD",
+        "IPROYAL_PROXY_COUNTRY",
+        "IPROYAL_PROXY_LIFETIME",
     )
     missing = tuple(name for name in required if not source.get(name, "").strip())
     if missing:
@@ -567,92 +570,34 @@ def load_spike_config(
             credentials_source=credentials_source,
             environment_file_mode=environment_file_mode,
         )
-    validation_errors: list[str] = []
-    server: str | None = None
-    base_username: str | None = None
-    password: str | None = None
-    template: str | None = None
-    if operator_connection:
-        try:
-            server, base_username, password, template = _parse_operator_connection(
-                operator_connection
-            )
-        except SpikeConfigurationError as exc:
-            validation_errors.append(str(exc))
-    else:
-        try:
-            server = _normalize_server(
-                source["PRIMED_PROXY_SERVER"].strip(),
-                source.get("PRIMED_PROXY_PORT", "").strip() or None,
-            )
-        except SpikeConfigurationError as exc:
-            validation_errors.append(str(exc))
-        template = source["PRIMED_PROXY_USERNAME_TEMPLATE"]
-        base_username = source["PRIMED_PROXY_USERNAME"]
-        password = source["PRIMED_PROXY_PASSWORD"]
-        try:
-            _validate_template(template)
-        except SpikeConfigurationError as exc:
-            validation_errors.append(str(exc))
-    if validation_errors:
-        return ConfigLoadResult(
-            config=None,
-            gate_enabled=gate_enabled,
-            errors=tuple(validation_errors),
-            credentials_source=credentials_source,
-            environment_file_mode=environment_file_mode,
-        )
-    assert server is not None
-    assert base_username is not None
-    assert password is not None
-    assert template is not None
     try:
-        diagnostic_url = source.get(
-            "PRIMED_PROXY_DIAGNOSTIC_URL", DEFAULT_DIAGNOSTIC_URL
-        ).strip()
-        if diagnostic_url not in ALLOWED_DIAGNOSTIC_URLS:
+        server = _normalize_server(source["IPROYAL_PROXY_SERVER"].strip())
+        country = source["IPROYAL_PROXY_COUNTRY"].strip()
+        lifetime = source["IPROYAL_PROXY_LIFETIME"].strip()
+        if country != "gb":
             raise SpikeConfigurationError(
-                "PRIMED_PROXY_DIAGNOSTIC_URL must be one of the built-in benign HTTPS IP services"
+                "IPROYAL_PROXY_COUNTRY must be gb for this UK compatibility spike"
             )
-        count = int(source.get("PRIMED_PROXY_LOGICAL_SESSION_COUNT", "3"))
-        if not 1 <= count <= 3:
+        if lifetime != "2h":
             raise SpikeConfigurationError(
-                "PRIMED_PROXY_LOGICAL_SESSION_COUNT must be between 1 and 3"
+                "IPROYAL_PROXY_LIFETIME must be exactly 2h for this compatibility spike"
             )
-        cycles = int(source.get("PRIMED_PROXY_OBSERVATIONS_PER_SESSION", "3"))
-        if cycles != 3:
-            raise SpikeConfigurationError(
-                "PRIMED_PROXY_OBSERVATIONS_PER_SESSION must be 3 for this fixed spike"
-            )
-        config = PrimedSpikeConfig(
+        config = IPRoyalSpikeConfig(
             server=server,
-            base_username=base_username,
-            password=password,
-            username_template=template,
-            diagnostic_url=diagnostic_url,
-            logical_session_count=count,
-            observations_per_session=cycles,
-            park_interval_seconds=_parse_positive_float(
-                "PRIMED_PROXY_PARK_INTERVAL_SECONDS",
-                source.get("PRIMED_PROXY_PARK_INTERVAL_SECONDS", "2"),
-                maximum=60,
-            ),
-            inactivity_intervals_seconds=_parse_intervals(
-                source.get("PRIMED_PROXY_INACTIVITY_SECONDS", "10,60")
-            ),
-            navigation_timeout_seconds=_parse_positive_float(
-                "PRIMED_PROXY_NAVIGATION_TIMEOUT_SECONDS",
-                source.get("PRIMED_PROXY_NAVIGATION_TIMEOUT_SECONDS", "20"),
-                maximum=120,
-            ),
-            test_authentication_failure=(
-                source.get("PRIMED_PROXY_TEST_AUTH_FAILURE", "0").strip() == "1"
-            ),
+            username=source["IPROYAL_PROXY_USERNAME"],
+            base_password=source["IPROYAL_PROXY_PASSWORD"],
+            country=country,
+            lifetime=lifetime,
+            diagnostic_url=DEFAULT_DIAGNOSTIC_URL,
+            geo_url=DEFAULT_GEO_URL,
+            navigation_timeout_seconds=20.0,
         )
-        resolved = [config.proxy_for(item).username for item in config.logical_references]
-        if len(set(resolved)) != len(resolved):
+        provider_ids = [
+            config.proxy_for(item).sticky_session_id for item in config.logical_references
+        ]
+        if len(set(provider_ids)) != len(provider_ids):
             raise SpikeConfigurationError(
-                "PRIMED_PROXY_USERNAME_TEMPLATE did not create distinct logical sessions"
+                "deterministic IPRoyal provider session IDs were not unique"
             )
     except (SpikeConfigurationError, ValueError) as exc:
         return ConfigLoadResult(
@@ -668,12 +613,6 @@ def load_spike_config(
         credentials_source=credentials_source,
         environment_file_mode=environment_file_mode,
     )
-
-
-def authenticated_proxy_uri(proxy: PrimedProxyConfiguration) -> str:
-    parsed = urlsplit(proxy.server)
-    credentials = f"{quote(proxy.username, safe='')}:{quote(proxy.password, safe='')}@"
-    return urlunsplit((parsed.scheme, credentials + parsed.netloc, "", "", ""))
 
 
 def _manager() -> BrowserManager:
@@ -711,10 +650,10 @@ def browser_main_process_ids() -> set[int] | None:
     return identifiers
 
 
-class PrimedSpikeRunner:
+class IPRoyalSpikeRunner:
     def __init__(
         self,
-        config: PrimedSpikeConfig,
+        config: IPRoyalSpikeConfig,
         *,
         manager_factory: Callable[[], BrowserManager] = _manager,
         sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -733,6 +672,9 @@ class PrimedSpikeRunner:
             tests=_initial_tests(),
             sessions={item: SessionSummary(item) for item in config.logical_references},
             diagnostic_url=config.diagnostic_url,
+            configured_country=config.country,
+            configured_lifetime=config.lifetime,
+            geo_service=config.geo_url,
         )
         self._observations: dict[str, list[IpObservation]] = defaultdict(list)
         self._baseline_browser_processes = browser_main_process_ids()
@@ -743,7 +685,7 @@ class PrimedSpikeRunner:
         stage: str,
         *,
         url: str | None = None,
-        proxy_override: PrimedProxyConfiguration | None = None,
+        proxy_override: IPRoyalProxyConfiguration | None = None,
     ) -> IpObservation:
         started = time.perf_counter()
         owned = None
@@ -800,6 +742,35 @@ class PrimedSpikeRunner:
             self.evidence.direct_ip_masked = mask_ip(self.evidence.direct_ip)
         except (httpx.HTTPError, ValueError):
             self.evidence.direct_ip = None
+
+    async def test_geo(self) -> None:
+        result = self.evidence.tests["UK geo verification"]
+        owned = None
+        try:
+            proxy = self.config.proxy_for(self.config.logical_references[0])
+            owned = await self.manager.create_context(proxy=proxy.browser_proxy())
+            page = await owned.context.new_page()
+            self.evidence.request_count += 1
+            await page.goto(
+                self.config.geo_url,
+                wait_until="domcontentloaded",
+                timeout=self.config.navigation_timeout_seconds * 1000,
+            )
+            self.evidence.geo_country = parse_geo_response(await page.locator("body").inner_text())
+        except Exception:  # noqa: BLE001 - only UNKNOWN is retained
+            self.evidence.geo_country = None
+        finally:
+            if owned is not None:
+                await owned.close()
+        result.observations = 1
+        result.status = classify_geo_country(self.evidence.geo_country)
+        result.errors = int(result.status is SpikeStatus.UNKNOWN)
+        if result.status is SpikeStatus.PASS:
+            result.evidence = "GB confirmed by the proxied lightweight geo endpoint"
+        elif result.status is SpikeStatus.FAIL:
+            result.evidence = f"geo endpoint returned {self.evidence.geo_country}; expected GB"
+        else:
+            result.evidence = "geo endpoint unavailable or returned an invalid country code"
 
     async def test_basic(self) -> IpObservation:
         result = self.evidence.tests["Basic proxy connectivity"]
@@ -898,7 +869,10 @@ class PrimedSpikeRunner:
         )
         await self.manager.start()
         observations = await asyncio.gather(
-            *(self.observe(item, "browser-process-restart") for item in self.config.logical_references)
+            *(
+                self.observe(item, "browser-process-restart")
+                for item in self.config.logical_references
+            )
         )
         for observation in observations:
             affinity = classify_affinity(previous[observation.logical_reference], observation.ip)
@@ -941,7 +915,7 @@ class PrimedSpikeRunner:
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "queue_load_test.harness.primed_proxy_spike",
+            "queue_load_test.harness.iproyal_proxy_spike",
             "--mode",
             "restart-child",
             "--restart-state",
@@ -988,45 +962,171 @@ class PrimedSpikeRunner:
         )
         await self.manager.start()
 
-    async def test_inactivity(self) -> None:
+    async def test_long_disconnect(self, state_path: Path) -> None:
+        """Observe one sticky identity while fully disconnected for almost two hours."""
+
         logical = self.config.logical_references[0]
-        baseline = await self.observe(logical, "inactivity-baseline")
-        previous = baseline.ip
-        for interval in self.config.inactivity_intervals_seconds:
-            await self.sleeper(interval)
-            observation = await self.observe(logical, f"inactivity-{interval:g}s")
-            affinity = classify_affinity(previous, observation.ip)
-            name = (
-                "Inactivity 10s"
-                if interval == 10
-                else "Inactivity 60s"
-                if interval == 60
-                else "Optional longer inactivity"
+        baseline = await self.observe(logical, "long-disconnect-baseline")
+        await self.manager.shutdown()
+        if baseline.ip is None:
+            for minutes in LONG_CHECKPOINT_MINUTES:
+                result = self.evidence.tests[f"{minutes}-minute disconnected affinity"]
+                result.status = SpikeStatus.UNKNOWN
+                result.errors = 1
+                result.evidence = "T+0 baseline observation failed"
+            return
+
+        state = build_long_checkpoint_state(
+            logical_reference=logical,
+            provider_session_id=self.config.proxy_for(logical).sticky_session_id,
+            ip=baseline.ip,
+            country=self.config.country,
+            lifetime=self.config.lifetime,
+        )
+        write_protected_json(state_path, state)
+        started_epoch = cast(float, state["started_epoch"])
+        for minutes in LONG_CHECKPOINT_MINUTES:
+            remaining = minutes * 60 - (time.time() - started_epoch)
+            if remaining > 0:
+                await self.sleeper(remaining)
+            child_path = state_path.with_name(f"long-child-{minutes}.json")
+            fresh_python = minutes >= 60
+            if fresh_python:
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "queue_load_test.harness.iproyal_proxy_spike",
+                    "--mode",
+                    "long-child",
+                    "--long-state",
+                    str(state_path),
+                    "--checkpoint-minutes",
+                    str(minutes),
+                    "--child-result",
+                    str(child_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await process.communicate()
+                self.evidence.captured_surfaces.extend(
+                    (stdout.decode(errors="replace"), stderr.decode(errors="replace"))
+                )
+                document = read_protected_json(child_path) if child_path.exists() else {}
+                self.evidence.request_count += _integer_field(document, "request_count")
+                affinity_value = document.get("affinity")
+                affinity = (
+                    AffinityResult(affinity_value)
+                    if affinity_value in {item.value for item in AffinityResult}
+                    else AffinityResult.UNKNOWN
+                )
+                masked_ip = cast(str | None, document.get("masked_ip"))
+                error = cast(str | None, document.get("error"))
+                elapsed = _float_field(document, "elapsed_seconds", time.time() - started_epoch)
+                child_path.unlink(missing_ok=True)
+            else:
+                await self.manager.start()
+                observation = await self.observe(logical, f"long-disconnect-{minutes}m")
+                await self.manager.shutdown()
+                affinity = compare_long_checkpoint(state, observation.ip)
+                masked_ip = observation.masked_ip
+                error = observation.error.value if observation.error else None
+                elapsed = time.time() - started_epoch
+            checkpoint = LongCheckpoint(
+                checkpoint_minutes=minutes,
+                elapsed_seconds=round(elapsed, 3),
+                affinity=affinity,
+                masked_ip=masked_ip,
+                browser_restarted=True,
+                fresh_python_process=fresh_python,
+                error=error,
             )
-            result = self.evidence.tests[name]
-            result.observations += 2
-            result.masked_example_ip = observation.masked_ip
-            if affinity is AffinityResult.SAME:
-                result.same_count += 1
+            self.evidence.long_checkpoints.append(checkpoint)
+            checkpoints = cast(list[object], state["checkpoints"])
+            checkpoints.append(asdict(checkpoint))
+            write_protected_json(state_path, state)
+            result = self.evidence.tests[f"{minutes}-minute disconnected affinity"]
+            result.observations = 1
+            result.masked_example_ip = masked_ip
+            result.same_count = int(affinity is AffinityResult.SAME)
+            result.changed_count = int(affinity is AffinityResult.CHANGED)
+            result.errors = int(error is not None or affinity is AffinityResult.UNKNOWN)
+            if affinity is AffinityResult.SAME and error is None:
                 result.status = SpikeStatus.PASS
-                result.evidence = f"SAME after {interval:g}s completely disconnected"
+                result.evidence = f"SAME vs T+0 after {elapsed / 60:.1f} minutes fully disconnected"
                 summary = self.evidence.sessions[logical]
                 summary.longest_same_interval_seconds = max(
-                    summary.longest_same_interval_seconds or 0,
-                    interval,
+                    summary.longest_same_interval_seconds or 0.0, elapsed
                 )
             elif affinity is AffinityResult.CHANGED:
-                result.changed_count += 1
                 result.status = SpikeStatus.PARTIAL
                 result.evidence = (
-                    f"provider reassigned the exit IP after {interval:g}s; not a Quetty code error"
+                    f"IPRoyal reassigned the exit after {elapsed / 60:.1f} minutes; "
+                    "Queue identity was not involved"
                 )
             else:
-                result.errors += 1
                 result.status = SpikeStatus.UNKNOWN
-                result.evidence = f"observation error after {interval:g}s"
-            previous = observation.ip
-            self.evidence.inactivity_intervals_tested += (interval,)
+                result.evidence = "checkpoint observation failed"
+        self.evidence.protected_state_removed = remove_protected_artifacts((state_path,))
+
+    def import_completed_long_disconnect(self, state_path: Path) -> None:
+        """Import safe checkpoint evidence after an operator-shortened live run."""
+
+        state = read_protected_json(state_path)
+        checkpoints = state.get("checkpoints")
+        if not isinstance(checkpoints, list):
+            raise SpikeConfigurationError("protected long-checkpoint evidence is incomplete")
+        logical = self.config.logical_references[0]
+        for value in checkpoints:
+            if not isinstance(value, dict):
+                continue
+            minutes = _integer_field(value, "checkpoint_minutes")
+            if minutes not in LONG_CHECKPOINT_MINUTES:
+                continue
+            affinity_value = value.get("affinity")
+            affinity = (
+                AffinityResult(affinity_value)
+                if affinity_value in {item.value for item in AffinityResult}
+                else AffinityResult.UNKNOWN
+            )
+            checkpoint = LongCheckpoint(
+                checkpoint_minutes=minutes,
+                elapsed_seconds=_float_field(value, "elapsed_seconds", minutes * 60.0),
+                affinity=affinity,
+                masked_ip=cast(str | None, value.get("masked_ip")),
+                browser_restarted=bool(value.get("browser_restarted")),
+                fresh_python_process=bool(value.get("fresh_python_process")),
+                error=cast(str | None, value.get("error")),
+            )
+            self.evidence.long_checkpoints.append(checkpoint)
+            result = self.evidence.tests[f"{minutes}-minute disconnected affinity"]
+            result.observations = 1
+            result.same_count = int(affinity is AffinityResult.SAME)
+            result.changed_count = int(affinity is AffinityResult.CHANGED)
+            result.errors = int(checkpoint.error is not None or affinity is AffinityResult.UNKNOWN)
+            result.masked_example_ip = checkpoint.masked_ip
+            result.status = (
+                SpikeStatus.PASS
+                if affinity is AffinityResult.SAME and checkpoint.error is None
+                else SpikeStatus.PARTIAL
+                if affinity is AffinityResult.CHANGED
+                else SpikeStatus.UNKNOWN
+            )
+            result.evidence = (
+                f"{affinity.value} vs T+0 after {checkpoint.elapsed_seconds / 60:.1f} minutes"
+            )
+            if affinity is AffinityResult.SAME:
+                summary = self.evidence.sessions[logical]
+                summary.longest_same_interval_seconds = max(
+                    summary.longest_same_interval_seconds or 0.0,
+                    checkpoint.elapsed_seconds,
+                )
+        for minutes in (60, 90, 115):
+            result = self.evidence.tests[f"{minutes}-minute disconnected affinity"]
+            result.status = SpikeStatus.NOT_RUN
+            result.evidence = (
+                "ignored after operator reduced the required continuity window to 30 minutes"
+            )
+        self.evidence.protected_state_removed = remove_protected_artifacts((state_path,))
 
     async def test_concurrency(self) -> None:
         result = self.evidence.tests["Three-session concurrency"]
@@ -1040,8 +1140,10 @@ class PrimedSpikeRunner:
         result.observations = len(observations)
         result.errors = len(observations) - len(successful)
         result.masked_example_ip = next((item.masked_ip for item in successful), None)
-        configs = [self.config.proxy_for(item).username for item in self.config.logical_references]
-        self.evidence.configuration_borrow_suspected = len(configs) != len(set(configs))
+        provider_ids = [
+            self.config.proxy_for(item).sticky_session_id for item in self.config.logical_references
+        ]
+        self.evidence.configuration_borrow_suspected = len(provider_ids) != len(set(provider_ids))
         if len(successful) == len(observations) and capacity.active_contexts == 0:
             result.status = SpikeStatus.PASS
             result.evidence = (
@@ -1081,31 +1183,35 @@ class PrimedSpikeRunner:
 
     async def test_failures(self) -> None:
         result = self.evidence.tests["Failure cleanup"]
-        synthetic_passed = all(
-            (
-                load_spike_config({LIVE_GATE: "1"}).config is None,
-                load_spike_config(
-                    {
-                        LIVE_GATE: "1",
-                        "PRIMED_PROXY_SERVER": "not-a-server",
-                        "PRIMED_PROXY_USERNAME": "x",
-                        "PRIMED_PROXY_PASSWORD": "y",
-                        "PRIMED_PROXY_USERNAME_TEMPLATE": "{username}-{session_id}",
-                    }
-                ).config
-                is None,
-                load_spike_config(
-                    {
-                        LIVE_GATE: "1",
-                        "PRIMED_PROXY_SERVER": "http://proxy.invalid:1",
-                        "PRIMED_PROXY_USERNAME": "x",
-                        "PRIMED_PROXY_PASSWORD": "y",
-                        "PRIMED_PROXY_USERNAME_TEMPLATE": "{username}",
-                    }
-                ).config
-                is None,
-            )
+        base = {
+            LIVE_GATE: "1",
+            "IPROYAL_PROXY_SERVER": "http://proxy.invalid:1234",
+            "IPROYAL_PROXY_USERNAME": "x",
+            "IPROYAL_PROXY_PASSWORD": "y",
+            "IPROYAL_PROXY_COUNTRY": "gb",
+            "IPROYAL_PROXY_LIFETIME": "2h",
+        }
+        missing_fields = (
+            "IPROYAL_PROXY_SERVER",
+            "IPROYAL_PROXY_USERNAME",
+            "IPROYAL_PROXY_PASSWORD",
+            "IPROYAL_PROXY_COUNTRY",
+            "IPROYAL_PROXY_LIFETIME",
         )
+        synthetic_passed = all(
+            load_spike_config({key: value for key, value in base.items() if key != missing}).config
+            is None
+            for missing in missing_fields
+        )
+        malformed = dict(base)
+        malformed["IPROYAL_PROXY_SERVER"] = "not-a-server"
+        synthetic_passed = synthetic_passed and load_spike_config(malformed).config is None
+        try:
+            validate_provider_session_id("bad!")
+        except SpikeConfigurationError:
+            pass
+        else:
+            synthetic_passed = False
         unreachable = await self.observe(
             self.config.logical_references[0],
             "unreachable-endpoint",
@@ -1116,7 +1222,7 @@ class PrimedSpikeRunner:
         if self.config.test_authentication_failure:
             authentication_exercised = True
             valid = self.config.proxy_for(self.config.logical_references[0])
-            invalid = PrimedProxyConfiguration(
+            invalid = IPRoyalProxyConfiguration(
                 logical_reference=valid.logical_reference,
                 sticky_session_id=valid.sticky_session_id,
                 server=valid.server,
@@ -1146,7 +1252,7 @@ class PrimedSpikeRunner:
             result.status = SpikeStatus.PASS
             auth_note = "exercised" if authentication_exercised else "not requested"
             result.evidence = (
-                "missing password, malformed server, invalid template, unreachable endpoint, "
+                "missing required fields, malformed server, invalid session ID, unreachable endpoint, "
                 f"cleanup, and recovery behaved safely; invalid auth={auth_note}"
             )
         else:
@@ -1171,27 +1277,33 @@ class PrimedSpikeRunner:
             else "credentials and authenticated proxy URIs were absent from logs, reprs, JSON, markdown inputs, and temporary artifacts"
         )
 
-    async def run(self, state_path: Path) -> SpikeEvidence:
+    async def run(
+        self,
+        state_path: Path,
+        *,
+        completed_long_state: Path | None = None,
+    ) -> SpikeEvidence:
         await self.manager.start()
         try:
             self.evidence.browser_version = self.manager.backend_diagnostics().browser_version
             await self.test_basic()
             await self.test_bypass()
+            await self.test_geo()
             await self.test_fresh_contexts()
             await self.test_browser_restart()
             await self.test_process_restart(state_path)
-            await self.test_inactivity()
             await self.test_concurrency()
             await self.test_failures()
+            if completed_long_state is None:
+                await self.test_long_disconnect(DEFAULT_LONG_STATE_PATH)
+            else:
+                self.import_completed_long_disconnect(completed_long_state)
         finally:
             await self.manager.shutdown()
         self.evidence.final_context_count = self.manager.active_context_count
         self.evidence.final_process_count = self.manager.managed_process_count
         current_browser_processes = browser_main_process_ids()
-        if (
-            current_browser_processes is not None
-            and self._baseline_browser_processes is not None
-        ):
+        if current_browser_processes is not None and self._baseline_browser_processes is not None:
             self.evidence.orphan_process = bool(
                 current_browser_processes - self._baseline_browser_processes
             )
@@ -1222,26 +1334,22 @@ class PrimedSpikeRunner:
 def determine_outcome(evidence: SpikeEvidence) -> str:
     required = (
         "Basic proxy connectivity",
+        "Bypass check",
+        "UK geo verification",
         "Fresh-context affinity",
         "Browser-process restart affinity",
         "Independent Python/application restart affinity",
-        "Bypass check",
+        "5-minute disconnected affinity",
+        "30-minute disconnected affinity",
+        "Three-session concurrency",
+        "Failure cleanup",
         "Secret leakage audit",
         "Final context count",
         "Final managed browser-process count",
     )
     statuses = {name: evidence.tests[name].status for name in required}
     if all(status is SpikeStatus.PASS for status in statuses.values()):
-        inactivity = [
-            evidence.tests[name].status
-            for name in ("Inactivity 10s", "Inactivity 60s", "Optional longer inactivity")
-            if evidence.tests[name].status is not SpikeStatus.NOT_RUN
-        ]
-        return (
-            "SPIKE_PARTIAL"
-            if any(status is SpikeStatus.PARTIAL for status in inactivity)
-            else "SPIKE_PASS"
-        )
+        return "SPIKE_PASS"
     if any(
         statuses[name] is SpikeStatus.FAIL
         for name in (
@@ -1281,8 +1389,12 @@ def safe_evidence_dict(evidence: SpikeEvidence) -> dict[str, object]:
         "orphan_process": evidence.orphan_process,
         "collisions": evidence.collisions,
         "configuration_borrow_suspected": evidence.configuration_borrow_suspected,
-        "inactivity_intervals_tested": evidence.inactivity_intervals_tested,
         "fresh_context_cycles": [asdict(item) for item in evidence.fresh_context_cycles],
+        "long_checkpoints": [asdict(item) for item in evidence.long_checkpoints],
+        "configured_country": evidence.configured_country,
+        "configured_lifetime": evidence.configured_lifetime,
+        "geo_service": evidence.geo_service,
+        "geo_country": evidence.geo_country,
         "outcome": evidence.outcome,
     }
 
@@ -1311,11 +1423,14 @@ def _status_text(result: SpikeTestResult) -> str:
 
 
 def render_report(evidence: SpikeEvidence) -> str:
-    intervals = sorted(set(evidence.inactivity_intervals_tested))
     missing = ", ".join(evidence.missing_configuration) or "none"
     errors = "; ".join(evidence.configuration_errors) or "none"
+    completed = (
+        ", ".join(f"T+{item.checkpoint_minutes}m" for item in evidence.long_checkpoints)
+        or "NOT RUN"
+    )
     lines = [
-        "# Primed Residential Proxy Spike Results",
+        "# IPRoyal Residential Proxy Spike Results",
         "",
         "## Date and Environment",
         "",
@@ -1326,36 +1441,30 @@ def render_report(evidence: SpikeEvidence) -> str:
         "- Browser backend: Patchright with installed Google Chrome",
         f"- Patchright version: {_package_version('patchright')}",
         f"- Installed Chrome version: {evidence.browser_version or 'NOT RUN / unknown'}",
-        "- Primed product: Residential",
+        "- Provider: IPRoyal Residential",
+        f"- Configured country: `{evidence.configured_country}`",
+        f"- Configured lifetime: `{evidence.configured_lifetime}`",
         f"- Logical session count: {len(evidence.sessions)}",
-        f"- Proxy-routed request/navigation count: {evidence.request_count}",
-        f"- Diagnostic IP service used: `{evidence.diagnostic_url}`",
-        "- Inactivity intervals tested: "
-        + (", ".join(f"{item:g}s" for item in intervals) if intervals else "NOT RUN"),
-        f"- Live gate: {'enabled' if evidence.config_ready else 'not ready'}",
+        f"- Proxy-routed request count: {evidence.request_count}",
+        f"- IP diagnostic service: `{evidence.diagnostic_url}`",
+        f"- Geo diagnostic service: `{evidence.geo_service}`",
+        f"- Disconnect checkpoints completed: {completed}",
+        f"- Live gate state: {'enabled' if evidence.config_ready else 'not ready'}",
         f"- Missing configuration: {missing}",
         f"- Configuration errors: {errors}",
         "",
-        "No Queue-it or other production/unauthorised target was contacted.",
+        "No Queue-it or ordinary website was contacted.",
         "",
         "## Configuration Safety",
         "",
         f"- Credentials source: {evidence.credentials_source}.",
-        "- Environment file mode: "
-        + (evidence.environment_file_mode or "not applicable / unknown"),
-        "- Credentials were not written to SQLite or any ordinary result file.",
-        "- Credential leakage audit: "
-        + _status_text(evidence.tests["Secret leakage audit"]),
-        "- Raw exit IPs were compared in memory and were not retained in this report.",
-        "- Cross-process comparison uses a salted SHA-256 value, never the raw IP.",
-        "- Protected restart artifacts: "
-        + (
-            "removed"
-            if evidence.protected_state_removed is True
-            else "not created"
-            if evidence.protected_state_removed is None
-            else "removal failed"
-        ),
+        f"- `.env` permission status: {evidence.environment_file_mode or 'unknown / not applicable'}.",
+        "- Credentials and constructed effective passwords were held in memory only.",
+        f"- Leakage-audit result: {_status_text(evidence.tests['Secret leakage audit'])}.",
+        "- Full observed IPs were not retained in human or ordinary machine results.",
+        "- Cross-process comparison used a salted SHA-256 digest.",
+        "- Protected temporary state cleanup: "
+        + ("removed" if evidence.protected_state_removed else "not created / not yet removed"),
         "",
         "## Test Results",
         "",
@@ -1369,213 +1478,182 @@ def render_report(evidence: SpikeEvidence) -> str:
             f"{result.same_count} | {result.changed_count} | {result.errors} | "
             f"{result.masked_example_ip or '—'} | {result.evidence} |"
         )
-    lines.extend(
-        [
-            "",
-            "### Fresh-context cycle detail",
-            "",
-            "| Logical session | Observation | Result vs prior context | Duration | Masked IP | Error |",
-            "|---|---:|---|---:|---|---|",
-        ]
-    )
-    if evidence.fresh_context_cycles:
-        for cycle in evidence.fresh_context_cycles:
-            lines.append(
-                f"| {cycle.logical_reference} | {cycle.observation} | {cycle.affinity} | "
-                f"{cycle.duration_seconds:.3f}s | {cycle.masked_ip or '—'} | "
-                f"{cycle.error or 'none'} |"
-            )
-    else:
+    lines += [
+        "",
+        "## Fresh-context cycle detail",
+        "",
+        "| Logical reference | Observation | Result | Duration | Masked IP | Error |",
+        "|---|---:|---|---:|---|---|",
+    ]
+    for cycle in evidence.fresh_context_cycles:
+        lines.append(
+            f"| {cycle.logical_reference} | {cycle.observation} | {cycle.affinity} | "
+            f"{cycle.duration_seconds:.3f}s | {cycle.masked_ip or '—'} | {cycle.error or 'none'} |"
+        )
+    if not evidence.fresh_context_cycles:
         lines.append("| — | 0 | NOT RUN | — | — | none |")
-    lines.extend(
-        [
-            "",
-            "## Per-Logical-Session Summary",
-            "",
-            "| Logical session reference | Observations | SAME / CHANGED | Masked IP | Browser restart | Process restart | Longest disconnected interval with same IP | Sanitized errors |",
-            "|---|---:|---|---|---|---|---|---|",
-        ]
-    )
+    lines += [
+        "",
+        "## Long disconnect detail",
+        "",
+        "| Checkpoint | Elapsed | Result vs T+0 | Masked IP | Full browser restart | Fresh Python process | Error |",
+        "|---|---:|---|---|---|---|---|",
+    ]
+    for checkpoint in evidence.long_checkpoints:
+        lines.append(
+            f"| T+{checkpoint.checkpoint_minutes}m | {checkpoint.elapsed_seconds / 60:.1f}m | "
+            f"{checkpoint.affinity.value} | {checkpoint.masked_ip or '—'} | "
+            f"{'yes' if checkpoint.browser_restarted else 'no'} | "
+            f"{'yes' if checkpoint.fresh_python_process else 'no'} | {checkpoint.error or 'none'} |"
+        )
+    if not evidence.long_checkpoints:
+        lines.append("| — | — | NOT RUN | — | — | — | none |")
+    lines += [
+        "",
+        "## Per-logical-session summary",
+        "",
+        "| Logical reference | Provider session ID | Observations | SAME | CHANGED | Masked IP | Browser restart | Python restart | Longest SAME disconnect | Errors |",
+        "|---|---|---:|---:|---:|---|---|---|---|---|",
+    ]
     for summary in evidence.sessions.values():
         longest_label = (
-            f"{summary.longest_same_interval_seconds:g}s"
+            f"{summary.longest_same_interval_seconds / 60:.1f}m"
             if summary.longest_same_interval_seconds is not None
             else "UNKNOWN"
         )
         lines.append(
-            f"| {summary.logical_reference} | {summary.observations} | "
-            f"{summary.same_count} / {summary.changed_count} | {summary.masked_ip or '—'} | "
-            f"{summary.browser_restart.value} | {summary.process_restart.value} | "
-            f"{longest_label} | {', '.join(sorted(summary.errors)) or 'none'} |"
+            f"| {summary.logical_reference} | `{summary.provider_session_id}` | "
+            f"{summary.observations} | {summary.same_count} | {summary.changed_count} | "
+            f"{summary.masked_ip or '—'} | {summary.browser_restart.value} | "
+            f"{summary.process_restart.value} | {longest_label} | "
+            f"{', '.join(sorted(summary.errors)) or 'none'} |"
         )
-    basic = evidence.tests["Basic proxy connectivity"]
-    fresh = evidence.tests["Fresh-context affinity"]
-    browser_restart = evidence.tests["Browser-process restart affinity"]
-    process_restart = evidence.tests["Independent Python/application restart affinity"]
-    bypass = evidence.tests["Bypass check"]
-    concurrency = evidence.tests["Three-session concurrency"]
+
+    def decision(name: str, statement: str | None = None) -> str:
+        result = evidence.tests[name]
+        status = result.status.value
+        return f"{status} — {statement or result.evidence}"
+
+    longest_seconds = max(
+        (
+            checkpoint.elapsed_seconds
+            for checkpoint in evidence.long_checkpoints
+            if checkpoint.affinity is AffinityResult.SAME
+        ),
+        default=None,
+    )
+    changed = [
+        checkpoint
+        for checkpoint in evidence.long_checkpoints
+        if checkpoint.affinity is AffinityResult.CHANGED
+    ]
     cleanup_ok = (
         evidence.tests["Final context count"].status is SpikeStatus.PASS
         and evidence.tests["Final managed browser-process count"].status is SpikeStatus.PASS
     )
-    longest_values = [
-        item.longest_same_interval_seconds
-        for item in evidence.sessions.values()
-        if item.longest_same_interval_seconds is not None
+    lines += [
+        "",
+        "## Provider behavior observations",
+        "",
+        "- Patchright/Quetty integration failure: "
+        + (
+            "none observed"
+            if evidence.tests["Basic proxy connectivity"].status is SpikeStatus.PASS
+            else evidence.tests["Basic proxy connectivity"].evidence
+        ),
+        "- IPRoyal authentication/configuration failure: no failure observed"
+        if evidence.tests["Basic proxy connectivity"].status is SpikeStatus.PASS
+        else "- IPRoyal authentication/configuration failure: see Basic connectivity.",
+        f"- Residential provider IP reassignment: {sum(item.changed_count for item in evidence.tests.values())} exact comparison change(s).",
+        "- Residential peer disappearance: not separately distinguishable from provider reassignment.",
+        "- Network/timeout failure: see sanitized errors and Failure cleanup.",
+        "- Unknown/inconclusive behavior: every UNKNOWN or NOT RUN row remains unclaimed.",
+        f"- Cross-session collisions: {evidence.collisions}; collisions are not failures.",
+        "- An IP reassignment is provider continuity evidence, not Queue identity corruption.",
+        "",
+        "## Cleanup",
+        "",
+        f"- Active contexts after run: {evidence.final_context_count if evidence.final_context_count is not None else 'NOT RUN'}",
+        f"- Managed browser processes after shutdown: {evidence.final_process_count if evidence.final_process_count is not None else 'NOT RUN'}",
+        f"- Temporary files remaining: {evidence.temporary_files_remaining}",
+        f"- Protected restart state removed: {evidence.protected_state_removed if evidence.protected_state_removed is not None else 'NOT RUN'}",
+        f"- Orphan-process result: {evidence.orphan_process if evidence.orphan_process is not None else 'UNKNOWN'}",
+        "",
+        "## Decision Matrix",
+        "",
+        "1. Can Patchright connect through IPRoyal Residential? "
+        + decision("Basic proxy connectivity"),
+        "2. Is traffic demonstrably proxied? " + decision("Bypass check"),
+        "3. Is the proxy exit UK/GB? " + decision("UK geo verification"),
+        "4. Can proxy configuration be applied per temporary BrowserContext? "
+        + decision("Three-session concurrency"),
+        "5. Does the same IPRoyal session ID retain its IP across fresh BrowserContexts? "
+        + decision("Fresh-context affinity"),
+        "6. Does it retain its IP across managed browser-process restart? "
+        + decision("Browser-process restart affinity"),
+        "7. Does it retain its IP across independent Python/application restart? "
+        + decision("Independent Python/application restart affinity"),
+        "8. Same IP after 5 minutes disconnected? " + decision("5-minute disconnected affinity"),
+        "9. Same IP after 30 minutes disconnected? " + decision("30-minute disconnected affinity"),
+        "10. Same IP after 60 minutes disconnected? " + decision("60-minute disconnected affinity"),
+        "11. Same IP after 90 minutes disconnected? " + decision("90-minute disconnected affinity"),
+        "12. Same IP after approximately 115 minutes disconnected? "
+        + decision("115-minute disconnected affinity"),
+        "13. What is the longest tested disconnected interval retaining the T+0 baseline IP? "
+        + (
+            (f"PASS — {longest_seconds / 60:.1f} minutes")
+            if longest_seconds is not None
+            else "UNKNOWN — no interval proven"
+        ),
+        "14. Can three logical sessions operate concurrently? "
+        + decision("Three-session concurrency"),
+        "15. Did any test require keeping the browser/context/proxy connection alive? "
+        + (
+            "PASS — no; disconnect checkpoints retained no browser or proxy connection"
+            if evidence.long_checkpoints
+            else "UNKNOWN — not tested"
+        ),
+        "16. Did credentials remain absent from ordinary persistence/logs/results? "
+        + decision("Secret leakage audit"),
+        "17. Did resources return to baseline? "
+        + (
+            "PASS — final resource counts returned to baseline"
+            if cleanup_ok
+            else "UNKNOWN — clean return was not established"
+        ),
+        "18. Did the IP change at any point before the configured `2h` lifetime? "
+        + (
+            f"PARTIAL — yes, first recorded at T+{changed[0].checkpoint_minutes}m"
+            if changed
+            else "PASS — no change in completed checkpoints"
+            if evidence.long_checkpoints
+            else "UNKNOWN — not tested"
+        ),
+        "",
+        "## Final Outcome",
+        "",
+        f"`{evidence.outcome}`",
+        "",
+        "Evidence is limited to the exact configuration and intervals recorded above.",
+        "",
+        "## Production recommendation",
+        "",
     ]
-    longest_interval = max(longest_values) if longest_values else None
-
-    def decision(status: SpikeStatus, statement: str) -> str:
-        normalized = status if status in {
-            SpikeStatus.PASS,
-            SpikeStatus.FAIL,
-            SpikeStatus.PARTIAL,
-        } else SpikeStatus.UNKNOWN
-        return f"{normalized.value} — {statement}"
-
-    lines.extend(
-        [
-            "",
-            "## Provider-Behavior Observations",
-            "",
-            "- Quetty/browser integration failures: "
-            + ("none observed" if basic.status is SpikeStatus.PASS else basic.evidence),
-            "- Primed authentication failures: "
-            + (
-                "none observed"
-                if basic.status is SpikeStatus.PASS
-                else "UNKNOWN or classified in the results table"
-            ),
-            f"- Provider IP reassignment: {fresh.changed_count} immediate fresh-context changes; inactivity results are shown separately.",
-            "- Provider timeout/network failures: see Failure cleanup and sanitized session errors.",
-            "- Unknown/inconclusive behavior: every NOT RUN or UNKNOWN row remains unclaimed.",
-            (
-                "- Cross-session IP collisions are observational only and are not failures: "
-                f"{evidence.collisions} collision(s)."
-            ),
-            "",
-            "## Cleanup",
-            "",
-            f"- Active contexts after run: {evidence.final_context_count if evidence.final_context_count is not None else 'NOT RUN'}",
-            f"- Managed browser processes after shutdown: {evidence.final_process_count if evidence.final_process_count is not None else 'NOT RUN'}",
-            f"- Temporary files remaining: {evidence.temporary_files_remaining}",
-            "- Protected spike-state file: "
-            + (
-                "removed"
-                if evidence.protected_state_removed is True
-                else "not created"
-                if evidence.protected_state_removed is None
-                else "not removed"
-            ),
-            "- Orphan process: "
-            + ("no" if evidence.orphan_process is False else "NOT RUN / unknown" if evidence.orphan_process is None else "yes"),
-            "",
-            "## Decision Matrix",
-            "",
-            "1. Can Patchright connect through Primed Residential? "
-            + decision(basic.status, basic.evidence),
-            "2. Is traffic demonstrably proxied? " + decision(bypass.status, bypass.evidence),
-            "3. Can the proxy be configured per temporary BrowserContext? "
-            + decision(
-                concurrency.status,
-                (
-                    "all temporary contexts completed with distinct logical proxy "
-                    "configurations; IP reassignment is assessed separately"
-                    if concurrency.status is SpikeStatus.PASS
-                    else concurrency.evidence
-                ),
-            ),
-            "4. Does the same Primed sticky-session identity retain its IP after BrowserContext destruction? "
-            + decision(fresh.status, fresh.evidence),
-            "5. Does it retain its IP after managed browser-process destruction? "
-            + decision(browser_restart.status, browser_restart.evidence),
-            "6. Does it retain its IP across a new Python/application process? "
-            + decision(process_restart.status, process_restart.evidence),
-            "7. What is the longest tested disconnected interval that retained the same IP? "
-            + decision(
-                SpikeStatus.PASS if longest_interval is not None else SpikeStatus.UNKNOWN,
-                (
-                    f"{longest_interval:g}s"
-                    if longest_interval is not None
-                    else "no live interval was proven"
-                ),
-            ),
-            "8. Were multiple logical proxy sessions usable concurrently? "
-            + decision(concurrency.status, concurrency.evidence),
-            "9. Did any test require keeping a browser/context alive to preserve affinity? "
-            + decision(
-                SpikeStatus.PARTIAL if fresh.changed_count else fresh.status,
-                (
-                    "no context/browser was retained, but affinity was not consistently "
-                    "preserved after destruction"
-                    if fresh.changed_count
-                    else "no; every affinity observation closed the prior context"
-                ),
-            ),
-            "10. Did credentials remain absent from normal persistence/logging/results? "
-            + decision(
-                evidence.tests["Secret leakage audit"].status,
-                evidence.tests["Secret leakage audit"].evidence,
-            ),
-            "11. Did all resources cleanly return to baseline? "
-            + decision(
-                SpikeStatus.PASS if cleanup_ok else SpikeStatus.UNKNOWN if not evidence.config_ready else SpikeStatus.FAIL,
-                "final manager accounting is zero" if cleanup_ok else "not established",
-            ),
-            "12. Were any IP changes observed, and under what condition? "
-            + decision(
-                SpikeStatus.PARTIAL
-                if any(item.changed_count for item in evidence.tests.values())
-                else SpikeStatus.PASS
-                if evidence.config_ready
-                else SpikeStatus.UNKNOWN,
-                "see the per-test SAME/CHANGED counts; no behavior is generalized beyond tested intervals",
-            ),
-            "",
-            "## Final Outcome",
-            "",
-            f"`{evidence.outcome}`",
-            "",
-            (
-                "The live Primed probe did not run, so provider compatibility and affinity remain UNKNOWN."
-                if not evidence.config_ready
-                else "This outcome is limited to the exact endpoint, host, configuration, and intervals recorded above."
-            ),
-            "",
-            "## Implementation Recommendation",
-            "",
-        ]
-    )
     if evidence.outcome == "SPIKE_PASS":
-        lines.extend(
-            [
-                "A future production design may use:",
-                "",
-                "`QueueSession -> immutable proxy assignment -> deterministic Primed sticky-session identity -> create temporary proxied BrowserContext -> normal Queue ID restoration/verification -> inspect -> persist -> close/park`",
-                "",
-                "Queue ID must remain authoritative. Observed proxy IP remains observational metadata, never session identity.",
-                "",
-                "Exact follow-up:",
-                "",
-                "`Design and implement persisted per-session Primed Residential proxy assignments in Quetty using the proven sticky-session reconstruction mechanism, without changing Queue ID authority or bounded parked-session architecture.`",
-            ]
-        )
+        lines += [
+            "A future implementation may use:",
+            "",
+            "`QueueSession -> immutable IPRoyal proxy-session assignment -> deterministic 8-character provider session ID -> reconstruct password using country + session + lifetime -> create temporary proxied Patchright BrowserContext -> restore authoritative Queue ID -> verify identity -> inspect -> persist -> close/park`",
+            "",
+            "Queue ID remains authoritative. The residential IP is continuity/diagnostic metadata only; a change should surface as `PROXY_IP_CHANGED`.",
+            "",
+            "`Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`",
+        ]
     else:
         lines.append(
-            "Do not implement production proxy assignment yet. Collect the missing or failed live evidence first; Queue ID remains authoritative and proxy IP must never become identity."
+            "Do not implement production proxy support from this result. Queue ID remains authoritative, and proxy IP remains observational metadata only."
         )
-    lines.extend(
-        [
-            "",
-            (
-                "Primed syntax was not guessed. The operator must supply the exact "
-                "documented username template through environment configuration; see "
-                f"[{PRIMED_DOCUMENTATION}]({PRIMED_DOCUMENTATION})."
-            ),
-            "",
-        ]
-    )
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def not_run_evidence(load: ConfigLoadResult) -> SpikeEvidence:
@@ -1600,7 +1678,7 @@ def not_run_evidence(load: ConfigLoadResult) -> SpikeEvidence:
 
 
 async def run_restart_child(
-    config: PrimedSpikeConfig,
+    config: IPRoyalSpikeConfig,
     state_path: Path,
     child_result_path: Path,
 ) -> int:
@@ -1613,7 +1691,7 @@ async def run_restart_child(
         previous_digest = state.get("previous_ip_sha256")
         if not all(isinstance(item, str) for item in (logical, salt, previous_digest)):
             raise SpikeConfigurationError("protected restart metadata is incomplete")
-        runner = PrimedSpikeRunner(config)
+        runner = IPRoyalSpikeRunner(config)
         await runner.manager.start()
         try:
             observation = await runner.observe(cast(str, logical), "independent-process-restart")
@@ -1647,30 +1725,107 @@ async def run_restart_child(
         return 1
 
 
+async def run_long_child(
+    config: IPRoyalSpikeConfig,
+    state_path: Path,
+    child_result_path: Path,
+    checkpoint_minutes: int,
+) -> int:
+    """Run one long-affinity observation in a genuinely fresh Python process."""
+
+    try:
+        state = read_protected_json(state_path)
+        if state.get("format") != _LONG_FORMAT or state.get("version") != _LONG_VERSION:
+            raise SpikeConfigurationError(
+                "protected long-checkpoint state has an unsupported format"
+            )
+        logical = state.get("logical_reference")
+        provider_id = state.get("provider_session_id")
+        if not isinstance(logical, str) or logical not in config.logical_references:
+            raise SpikeConfigurationError("protected long-checkpoint logical session is invalid")
+        expected_id = config.proxy_for(logical).sticky_session_id
+        if provider_id != expected_id:
+            raise SpikeConfigurationError(
+                "protected long-checkpoint provider session does not match"
+            )
+        if state.get("country") != config.country or state.get("lifetime") != config.lifetime:
+            raise SpikeConfigurationError("protected long-checkpoint configuration does not match")
+        started_epoch = state.get("started_epoch")
+        if not isinstance(started_epoch, (int, float)):
+            raise SpikeConfigurationError("protected long-checkpoint start time is invalid")
+        runner = IPRoyalSpikeRunner(config)
+        await runner.manager.start()
+        try:
+            observation = await runner.observe(logical, f"long-disconnect-{checkpoint_minutes}m")
+        finally:
+            await runner.manager.shutdown()
+        affinity = compare_long_checkpoint(state, observation.ip)
+        write_protected_json(
+            child_result_path,
+            {
+                "format": _LONG_FORMAT,
+                "version": _LONG_VERSION,
+                "checkpoint_minutes": checkpoint_minutes,
+                "affinity": affinity.value,
+                "masked_ip": observation.masked_ip,
+                "error": observation.error.value if observation.error else None,
+                "elapsed_seconds": time.time() - float(started_epoch),
+                "request_count": runner.evidence.request_count,
+                "final_context_count": runner.manager.active_context_count,
+                "final_process_count": runner.manager.managed_process_count,
+            },
+        )
+        return 0 if observation.succeeded else 1
+    except Exception as exc:  # noqa: BLE001 - child persists only a closed class
+        write_protected_json(
+            child_result_path,
+            {
+                "format": _LONG_FORMAT,
+                "version": _LONG_VERSION,
+                "checkpoint_minutes": checkpoint_minutes,
+                "affinity": AffinityResult.UNKNOWN.value,
+                "error": classify_failure(exc).value,
+                "request_count": 0,
+            },
+        )
+        return 1
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("full", "restart-prepare", "restart-resume", "restart-child"),
+        choices=(
+            "full",
+            "restart-prepare",
+            "restart-resume",
+            "restart-child",
+            "long-start",
+            "long-checkpoint",
+            "long-child",
+            "finalize-long",
+        ),
         default="full",
     )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--restart-state", type=Path, default=DEFAULT_STATE_PATH)
+    parser.add_argument("--long-state", type=Path, default=DEFAULT_LONG_STATE_PATH)
+    parser.add_argument("--checkpoint-minutes", type=int, choices=LONG_CHECKPOINT_MINUTES)
     parser.add_argument("--child-result", type=Path)
     return parser.parse_args()
 
 
-async def _prepare_restart(config: PrimedSpikeConfig, state_path: Path) -> SpikeEvidence:
-    runner = PrimedSpikeRunner(config)
+async def _prepare_restart(config: IPRoyalSpikeConfig, state_path: Path) -> SpikeEvidence:
+    runner = IPRoyalSpikeRunner(config)
     await runner.manager.start()
     try:
         observation = await runner.observe(config.logical_references[0], "restart-prepare")
     finally:
         await runner.manager.shutdown()
     if observation.ip is None:
-        runner.evidence.tests["Independent Python/application restart affinity"].status = (
-            SpikeStatus.FAIL
-        )
+        runner.evidence.tests[
+            "Independent Python/application restart affinity"
+        ].status = SpikeStatus.FAIL
         return runner.evidence
     write_protected_json(
         state_path,
@@ -1692,7 +1847,7 @@ async def _prepare_restart(config: PrimedSpikeConfig, state_path: Path) -> Spike
     return runner.evidence
 
 
-async def _resume_restart(config: PrimedSpikeConfig, state_path: Path) -> SpikeEvidence:
+async def _resume_restart(config: IPRoyalSpikeConfig, state_path: Path) -> SpikeEvidence:
     child_result = state_path.with_name("restart-resume-result.json")
     code = await run_restart_child(config, state_path, child_result)
     evidence = SpikeEvidence(
@@ -1719,9 +1874,114 @@ async def _resume_restart(config: PrimedSpikeConfig, state_path: Path) -> SpikeE
     evidence.request_count = test.observations
     evidence.final_context_count = cast(int | None, document.get("final_context_count"))
     evidence.final_process_count = cast(int | None, document.get("final_process_count"))
-    evidence.protected_state_removed = remove_protected_artifacts(
-        (child_result, state_path)
+    evidence.protected_state_removed = remove_protected_artifacts((child_result, state_path))
+    evidence.outcome = "SPIKE_PARTIAL"
+    return evidence
+
+
+async def _long_start(config: IPRoyalSpikeConfig, state_path: Path) -> SpikeEvidence:
+    runner = IPRoyalSpikeRunner(config)
+    await runner.manager.start()
+    try:
+        observation = await runner.observe(config.logical_references[0], "long-disconnect-baseline")
+    finally:
+        await runner.manager.shutdown()
+    if observation.ip is not None:
+        proxy = config.proxy_for(observation.logical_reference)
+        write_protected_json(
+            state_path,
+            build_long_checkpoint_state(
+                logical_reference=observation.logical_reference,
+                provider_session_id=proxy.sticky_session_id,
+                ip=observation.ip,
+                country=config.country,
+                lifetime=config.lifetime,
+            ),
+        )
+    runner.evidence.final_context_count = runner.manager.active_context_count
+    runner.evidence.final_process_count = runner.manager.managed_process_count
+    runner.evidence.protected_state_removed = False
+    runner.evidence.outcome = "SPIKE_PARTIAL"
+    return runner.evidence
+
+
+async def _long_checkpoint(
+    config: IPRoyalSpikeConfig,
+    state_path: Path,
+    checkpoint_minutes: int,
+) -> SpikeEvidence:
+    state = read_protected_json(state_path)
+    started_epoch = state.get("started_epoch")
+    if not isinstance(started_epoch, (int, float)):
+        raise SpikeConfigurationError("protected long-checkpoint start time is invalid")
+    elapsed = time.time() - float(started_epoch)
+    if elapsed + 30 < checkpoint_minutes * 60:
+        raise SpikeConfigurationError(f"{checkpoint_minutes}-minute checkpoint is not due yet")
+    child_path = state_path.with_name(f"long-resume-{checkpoint_minutes}.json")
+    code = await run_long_child(config, state_path, child_path, checkpoint_minutes)
+    document = read_protected_json(child_path)
+    child_path.unlink(missing_ok=True)
+    evidence = SpikeEvidence(
+        started_at=datetime.now(UTC),
+        config_ready=True,
+        missing_configuration=(),
+        configuration_errors=(),
+        credentials_source="environment configuration",
+        environment_file_mode=None,
+        tests=_initial_tests(),
+        sessions={item: SessionSummary(item) for item in config.logical_references},
+        diagnostic_url=config.diagnostic_url,
+        configured_country=config.country,
+        configured_lifetime=config.lifetime,
+        geo_service=config.geo_url,
     )
+    affinity_value = document.get("affinity")
+    affinity = (
+        AffinityResult(affinity_value)
+        if affinity_value in {item.value for item in AffinityResult}
+        else AffinityResult.UNKNOWN
+    )
+    masked_ip = cast(str | None, document.get("masked_ip"))
+    error = cast(str | None, document.get("error"))
+    elapsed_seconds = _float_field(document, "elapsed_seconds", elapsed)
+    checkpoint = LongCheckpoint(
+        checkpoint_minutes=checkpoint_minutes,
+        elapsed_seconds=elapsed_seconds,
+        affinity=affinity,
+        masked_ip=masked_ip,
+        browser_restarted=True,
+        fresh_python_process=True,
+        error=error,
+    )
+    evidence.long_checkpoints.append(checkpoint)
+    result = evidence.tests[f"{checkpoint_minutes}-minute disconnected affinity"]
+    result.observations = _integer_field(document, "request_count")
+    result.same_count = int(affinity is AffinityResult.SAME)
+    result.changed_count = int(affinity is AffinityResult.CHANGED)
+    result.errors = int(code != 0 or error is not None)
+    result.masked_example_ip = masked_ip
+    result.status = (
+        SpikeStatus.PASS
+        if affinity is AffinityResult.SAME and not result.errors
+        else SpikeStatus.PARTIAL
+        if affinity is AffinityResult.CHANGED
+        else SpikeStatus.UNKNOWN
+    )
+    result.evidence = f"{affinity.value} vs T+0 after {elapsed_seconds / 60:.1f} minutes"
+    checkpoints = state.get("checkpoints")
+    if not isinstance(checkpoints, list):
+        checkpoints = []
+        state["checkpoints"] = checkpoints
+    checkpoints.append(asdict(checkpoint))
+    final = checkpoint_minutes == LONG_CHECKPOINT_MINUTES[-1]
+    if final:
+        evidence.protected_state_removed = remove_protected_artifacts((state_path,))
+    else:
+        write_protected_json(state_path, state)
+        evidence.protected_state_removed = False
+    evidence.request_count = result.observations
+    evidence.final_context_count = cast(int | None, document.get("final_context_count"))
+    evidence.final_process_count = cast(int | None, document.get("final_process_count"))
     evidence.outcome = "SPIKE_PARTIAL"
     return evidence
 
@@ -1732,6 +1992,20 @@ async def async_main(args: argparse.Namespace) -> int:
         if not load.ready or load.config is None or args.child_result is None:
             return 2
         return await run_restart_child(load.config, args.restart_state, args.child_result)
+    if args.mode == "long-child":
+        if (
+            not load.ready
+            or load.config is None
+            or args.child_result is None
+            or args.checkpoint_minutes is None
+        ):
+            return 2
+        return await run_long_child(
+            load.config,
+            args.long_state,
+            args.child_result,
+            args.checkpoint_minutes,
+        )
 
     if not load.ready or load.config is None:
         evidence = not_run_evidence(load)
@@ -1742,17 +2016,32 @@ async def async_main(args: argparse.Namespace) -> int:
         evidence = await _prepare_restart(load.config, args.restart_state)
     elif args.mode == "restart-resume":
         evidence = await _resume_restart(load.config, args.restart_state)
+    elif args.mode == "long-start":
+        evidence = await _long_start(load.config, args.long_state)
+    elif args.mode == "long-checkpoint":
+        if args.checkpoint_minutes is None:
+            raise SpikeConfigurationError("--checkpoint-minutes is required")
+        evidence = await _long_checkpoint(
+            load.config,
+            args.long_state,
+            args.checkpoint_minutes,
+        )
+    elif args.mode == "finalize-long":
+        evidence = await IPRoyalSpikeRunner(load.config).run(
+            args.restart_state,
+            completed_long_state=args.long_state,
+        )
     else:
-        evidence = await PrimedSpikeRunner(load.config).run(args.restart_state)
+        evidence = await IPRoyalSpikeRunner(load.config).run(args.restart_state)
     evidence.credentials_source = load.credentials_source
     evidence.environment_file_mode = load.environment_file_mode
     rendered = render_report(evidence)
     # The final markdown itself participates in the leakage audit before persistence.
     if any(secret in rendered for secret in load.config.secret_candidates()):
         evidence.tests["Secret leakage audit"].status = SpikeStatus.FAIL
-        evidence.tests["Secret leakage audit"].evidence = (
-            "a supplied credential appeared in the rendered markdown"
-        )
+        evidence.tests[
+            "Secret leakage audit"
+        ].evidence = "a supplied credential appeared in the rendered markdown"
         evidence.outcome = "SPIKE_FAIL"
         rendered = render_report(evidence)
     args.report.write_text(rendered, encoding="utf-8")

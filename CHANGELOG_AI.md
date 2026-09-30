@@ -5853,3 +5853,51 @@ show the viewer's machine-local time.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Replace Primed spike with IPRoyal Residential compatibility spike
+
+### Goal
+
+Replace the Primed-specific isolated spike with an IPRoyal Residential probe and test
+deterministic sticky-session reconstruction across temporary contexts and processes.
+The historical Primed `SPIKE_PARTIAL` entry and evidence remain unchanged.
+
+### Changes Made
+
+- Replaced the Primed harness/tests/CLI with the explicitly gated IPRoyal equivalents.
+- Added strict parsing for the six requested environment fields, deterministic unique
+  8-character alphanumeric session IDs, and in-memory effective-password construction.
+- Reused the existing Patchright per-context seam and BrowserManager lifecycle. No
+  production schema, routing, acquisition, restoration, monitoring, dashboard, Direct
+  Monitoring, or operator-action behavior changed.
+- Added salted-hash restart/checkpoint state, deterministic non-live tests, low-bandwidth
+  IP/geo observations, bypass/concurrency/failure/leakage/cleanup checks, and generated
+  `test_spike_results.md` evidence.
+- Updated `.env.example`, `.gitignore`, `README.md`, `PROJECT_CONTEXT.md`, and the CLI.
+
+### Validation and Live Evidence
+
+- Focused tests: `22 passed`. Full non-staging suite: `794 passed, 4 deselected`.
+- Ruff, strict mypy, and `git diff --check`: PASS.
+- Live command:
+  `.venv/bin/python -m queue_load_test.harness.iproyal_proxy_spike --report test_spike_results.md`.
+- Live testing ran with country `gb`, lifetime `2h`, and 44 tiny proxy-routed diagnostic
+  requests across the initial run, safe finalization, and one geo fallback.
+- T+5 and T+30 were both `SAME` versus T+0 after full teardown. Fresh contexts (6/6),
+  managed-browser restart (3/3), independent Python restart (1/1), concurrency (3/3),
+  bypass, GB geo, leakage, and cleanup passed.
+- Final outcome: `SPIKE_PASS` for the operator-approved 30-minute continuity window.
+
+### Limitations
+
+- The operator reduced the final required checkpoint to 30 minutes during the run and
+  directed that 60–115 minutes be ignored. Those rows are `NOT RUN`; this does not prove
+  continuity through the full configured `2h` lifetime.
+- No Queue-it or ordinary website was contacted; this is not staging evidence. No
+  deliberate invalid-auth request was sent.
+
+### Exact Follow-up
+
+`Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`
+
+Do not begin that production implementation without an explicit task.
