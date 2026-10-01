@@ -195,15 +195,12 @@ class Settings(BaseSettings):
     creation_queue_capacity: int = Field(default=5, alias="CREATION_QUEUE_CAPACITY", ge=1)
     identity_replacement_limit: int = Field(default=0, alias="IDENTITY_REPLACEMENT_LIMIT", ge=0)
     # Consecutive pre-Queue access-restriction outcomes delay the next creation work
-    # item with bounded exponential backoff, then halt acquisition for this runtime.
+    # item with bounded exponential backoff; acquisition keeps retrying at that pace.
     access_restricted_backoff_initial_seconds: float = Field(
         default=5.0, alias="ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS", ge=0
     )
     access_restricted_backoff_max_seconds: float = Field(
         default=120.0, alias="ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS", ge=0
-    )
-    access_restricted_halt_after: int = Field(
-        default=20, alias="ACCESS_RESTRICTED_HALT_AFTER", ge=1
     )
     monitor_workers: int = Field(default=1, alias="MONITOR_WORKERS", ge=1)
     monitor_queue_capacity: int = Field(default=5, alias="MONITOR_QUEUE_CAPACITY", ge=1)

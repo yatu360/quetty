@@ -299,11 +299,6 @@ class PrometheusMetrics:
             "Access-restriction outcomes since the last successful Queue ID.",
             registry=self.registry,
         )
-        self.queue_creation_access_restricted_halted = Gauge(
-            "queue_creation_access_restricted_halted",
-            "1 when acquisition halted after too many consecutive access restrictions.",
-            registry=self.registry,
-        )
         self.queue_sessions_progress_bucket = Gauge(
             "queue_sessions_progress_bucket",
             "Non-terminal persisted sessions by last observed progress range.",
@@ -761,9 +756,8 @@ class PrometheusMetrics:
     def set_identity_replacement_blocked(self, blocked: bool) -> None:
         self.queue_identity_replacement_blocked.set(1 if blocked else 0)
 
-    def set_access_restriction_state(self, *, consecutive: int, halted: bool) -> None:
+    def set_access_restriction_consecutive(self, consecutive: int) -> None:
         self.queue_creation_access_restricted_consecutive.set(consecutive)
-        self.queue_creation_access_restricted_halted.set(1 if halted else 0)
 
     def refresh_rate_gauges(self) -> CheckStatistics:
         statistics = self.check_statistics()

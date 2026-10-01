@@ -138,23 +138,19 @@ class CreationRetryPolicy:
 
 @dataclass(frozen=True, slots=True)
 class AccessRestrictionPolicy:
-    """Pace and bound acquisition while attempts keep rendering the restriction page.
+    """Pace acquisition while attempts keep rendering the restriction page.
 
     Each consecutive restriction delays the next creation work item with the same
-    bounded exponential backoff and jitter as ``CreationRetryPolicy``. After
-    ``halt_after`` consecutive restrictions acquisition halts for the runtime, so a
-    persistent restriction stays visible instead of being retried forever. Only a
-    successful Queue ID resets the streak.
+    bounded exponential backoff and jitter as ``CreationRetryPolicy``. Acquisition
+    keeps retrying at most once per ``maximum_backoff_seconds`` until the target is
+    met or the runtime stops. Only a successful Queue ID resets the streak.
     """
 
     initial_backoff_seconds: float = 5.0
     maximum_backoff_seconds: float = 120.0
     jitter_seconds: float = 1.0
-    halt_after: int = 20
 
     def __post_init__(self) -> None:
-        if self.halt_after < 1:
-            raise ValueError("halt_after must be at least 1")
         # Validates the backoff fields with the shared retry-policy rules.
         self._backoff()
 
@@ -174,7 +170,6 @@ class AccessRestrictionPolicy:
         return cls(
             initial_backoff_seconds=settings.access_restricted_backoff_initial_seconds,
             maximum_backoff_seconds=settings.access_restricted_backoff_max_seconds,
-            halt_after=settings.access_restricted_halt_after,
         )
 
 
@@ -226,7 +221,6 @@ class CreationMetrics:
     consecutive_access_restricted: int = 0
     access_restriction_backoffs: int = 0
     access_restriction_backoff_seconds: float = 0.0
-    access_restriction_halted: bool = False
     retries: int = 0
     currently_creating: int = 0
     maximum_concurrent_creating: int = 0
@@ -846,14 +840,9 @@ class SessionCreationController:
                         self._observability.set_creation_rate(
                             self.metrics.unique_ids_acquired / elapsed
                         )
-                    if self.metrics.access_restriction_halted:
-                        break
                     if _is_access_restricted(outcome):
                         # Pace replacement work; no new work item starts meanwhile.
                         await self._access_restriction_backoff(stop_event)
-
-                if self.metrics.access_restriction_halted:
-                    break
 
                 # Successful outcomes are persisted by the handler, so they can drive
                 # the hot loop without an O(target) sequence of COUNT queries. Verify
@@ -931,26 +920,11 @@ class SessionCreationController:
         elif _is_access_restricted(outcome):
             self.metrics.access_restricted += 1
             self.metrics.consecutive_access_restricted += 1
-            if (
-                not self.metrics.access_restriction_halted
-                and self.metrics.consecutive_access_restricted
-                >= self._access_restriction_policy.halt_after
-            ):
-                self.metrics.access_restriction_halted = True
-                log_event(
-                    logger,
-                    logging.ERROR,
-                    "acquisition_halted_access_restricted",
-                    classification=AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.value,
-                    count=self.metrics.consecutive_access_restricted,
-                    valid_queue_ids=self.metrics.successful_unique_ids,
-                )
         else:
             return
         if self._observability is not None:
-            self._observability.set_access_restriction_state(
-                consecutive=self.metrics.consecutive_access_restricted,
-                halted=self.metrics.access_restriction_halted,
+            self._observability.set_access_restriction_consecutive(
+                self.metrics.consecutive_access_restricted
             )
 
     async def _effective_target(self) -> int:

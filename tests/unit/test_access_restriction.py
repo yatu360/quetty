@@ -631,12 +631,11 @@ class _RecordingSleep:
         self.delays.append(delay)
 
 
-def _policy(*, halt_after: int = 20) -> AccessRestrictionPolicy:
+def _policy() -> AccessRestrictionPolicy:
     return AccessRestrictionPolicy(
         initial_backoff_seconds=5,
         maximum_backoff_seconds=40,
         jitter_seconds=0,
-        halt_after=halt_after,
     )
 
 
@@ -669,8 +668,6 @@ def test_policy_reuses_bounded_exponential_backoff_and_validates() -> None:
 
     assert [policy.delay(n, lambda _a, _b: 0) for n in range(1, 6)] == [5, 10, 20, 40, 40]
     with pytest.raises(ValueError):
-        AccessRestrictionPolicy(halt_after=0)
-    with pytest.raises(ValueError):
         AccessRestrictionPolicy(initial_backoff_seconds=10, maximum_backoff_seconds=1)
 
 
@@ -679,23 +676,19 @@ def test_policy_from_settings_and_settings_validation() -> None:
         _env_file=None,
         ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=2,
         ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=30,
-        ACCESS_RESTRICTED_HALT_AFTER=7,
     )
 
     policy = AccessRestrictionPolicy.from_settings(settings)
 
     assert (policy.initial_backoff_seconds, policy.maximum_backoff_seconds) == (2, 30)
-    assert policy.halt_after == 7
-    defaults = Settings(_env_file=None)
-    assert defaults.access_restricted_halt_after == 20
+    defaults = AccessRestrictionPolicy.from_settings(Settings(_env_file=None))
+    assert (defaults.initial_backoff_seconds, defaults.maximum_backoff_seconds) == (5, 120)
     with pytest.raises(ValueError):
         Settings(
             _env_file=None,
             ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=10,
             ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=1,
         )
-    with pytest.raises(ValueError):
-        Settings(_env_file=None, ACCESS_RESTRICTED_HALT_AFTER=0)
 
 
 async def test_restrictions_then_success_back_off_and_reset_the_streak(tmp_path: Path) -> None:
@@ -726,33 +719,34 @@ async def test_restrictions_then_success_back_off_and_reset_the_streak(tmp_path:
     assert metrics.access_restriction_backoffs == 5
     assert metrics.access_restriction_backoff_seconds == 80
     assert metrics.consecutive_access_restricted == 0
-    assert metrics.access_restriction_halted is False
     assert creator.access_restricted_attempts == 5
     sample = observability.registry.get_sample_value
     assert sample("queue_creation_access_restricted_total") == 5
     assert sample("queue_creation_access_restricted_consecutive") == 0
-    assert sample("queue_creation_access_restricted_halted") == 0
     assert all(context.closed for context in manager.contexts)
     await repository.close()
 
 
-async def test_persistent_restriction_halts_instead_of_spinning(
+async def test_persistent_restriction_keeps_retrying_at_a_bounded_pace(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    repository = SQLiteSessionRepository(tmp_path / "halt.sqlite3")
+    repository = SQLiteSessionRepository(tmp_path / "persistent.sqlite3")
     await _seed(repository, 1)
-    manager = _BrowserManager([_Page(200, [RESTRICTED]) for _ in range(50)])
+    restricted = 12
+    manager = _BrowserManager(
+        [_Page(200, [RESTRICTED]) for _ in range(restricted)] + [_Page(200, [QUEUE_PAGE])]
+    )
     observability = PrometheusMetrics()
-    creator, state_store = _creator(tmp_path, repository, manager, observability=observability)
+    creator, state_store = _creator(
+        tmp_path, repository, manager, queue_ids=["q-late"], observability=observability
+    )
     sleep = _RecordingSleep()
     controller = _controller(
         repository,
         creator,
-        target=100,
-        workers=3,
-        capacity=3,
-        policy=_policy(halt_after=4),
+        target=2,
+        workers=1,
         sleep=sleep,
         observability=observability,
     )
@@ -760,23 +754,46 @@ async def test_persistent_restriction_halts_instead_of_spinning(
     with caplog.at_level(logging.WARNING, logger="queue_load_test.scheduler.creation"):
         metrics = await asyncio.wait_for(controller.run(), timeout=5)
 
-    assert metrics.access_restriction_halted is True
-    assert metrics.consecutive_access_restricted >= 4
-    # Bounded: the halt stops new work; only already-issued work items drain.
-    assert len(manager.contexts) <= 4 + 3
-    assert len(manager.contexts) == metrics.completed_work_items == metrics.access_restricted
+    # No halt: it keeps retrying until the later success satisfies the target.
+    assert metrics.successful_unique_ids == 2
+    assert metrics.access_restricted == restricted
+    assert len(manager.contexts) == restricted + 1
+    # Never spins: every restriction is followed by a bounded, capped delay.
+    assert sleep.delays == [5, 10, 20] + [40] * (restricted - 3)
+    assert manager.maximum_active == 1
+    assert manager.active == 0
+    assert len(_state_files(state_store)) == 1
+    assert not [r for r in caplog.records if "halt" in r.getMessage()]
+    sample = observability.registry.get_sample_value
+    assert sample("queue_creation_access_restricted_total") == restricted
+    assert sample("queue_creation_access_restricted_consecutive") == 0
+    await repository.close()
+
+
+async def test_concurrent_restricted_workers_stay_bounded(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "bounded.sqlite3")
+    manager = _BrowserManager(
+        [_Page(200, [RESTRICTED]) for _ in range(20)]
+        + [_Page(200, [QUEUE_PAGE]) for _ in range(10)]
+    )
+    creator, _ = _creator(
+        tmp_path, repository, manager, queue_ids=[f"q-{n}" for n in range(10)]
+    )
+    sleep = _RecordingSleep()
+    controller = _controller(
+        repository, creator, target=3, workers=3, capacity=3, sleep=sleep
+    )
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.successful_unique_ids == 3
+    assert await repository.count_successful_queue_ids() == 3
+    assert metrics.access_restricted == 20
+    assert len(sleep.delays) == 20
     assert manager.maximum_active <= 3
     assert metrics.maximum_queue_depth <= 3
-    assert len(sleep.delays) == 3
-    assert max(sleep.delays) <= 40
-    assert metrics.successful_unique_ids == 1
-    assert manager.active == 0
-    assert _state_files(state_store) == []
-    halted = [r for r in caplog.records if r.getMessage() == "acquisition_halted_access_restricted"]
-    assert len(halted) == 1 and halted[0].levelno == logging.ERROR
-    sample = observability.registry.get_sample_value
-    assert sample("queue_creation_access_restricted_halted") == 1
-    assert sample("queue_creation_access_restricted_total") == metrics.access_restricted
+    assert metrics.currently_creating == 0
+    assert all(context.closed for context in manager.contexts)
     await repository.close()
 
 
@@ -948,7 +965,6 @@ async def test_access_restriction_metrics_have_no_labels(tmp_path: Path) -> None
     assert {sample.name for sample in restriction_samples} >= {
         "queue_creation_access_restricted_total",
         "queue_creation_access_restricted_consecutive",
-        "queue_creation_access_restricted_halted",
     }
     assert all(sample.labels == {} for sample in restriction_samples)
     sensitive = {"queue-secret", *(context.page.url for context in manager.contexts)}
@@ -968,11 +984,17 @@ async def test_restart_counts_only_persisted_successes_and_never_resurrects_rest
         [_Page(200, [QUEUE_PAGE])] + [_Page(200, [RESTRICTED]) for _ in range(10)]
     )
     first_creator, _ = _creator(tmp_path, repository, first_manager, queue_ids=["q-1"])
-    first = _controller(repository, first_creator, target=3, policy=_policy(halt_after=3))
+    stop_event = asyncio.Event()
 
-    first_metrics = await first.run()
+    async def stop_after_three_backoffs(_: float) -> None:
+        if first.metrics.access_restriction_backoffs >= 3:
+            stop_event.set()
 
-    assert first_metrics.access_restriction_halted is True
+    first = _controller(repository, first_creator, target=3, sleep=stop_after_three_backoffs)
+
+    first_metrics = await first.run(stop_event)
+
+    assert first_metrics.access_restricted == 3
     assert first_metrics.successful_unique_ids == 1
     restricted_ids = {
         row.session_id for row in await repository.list(QueueStatus.FAILED)
@@ -992,7 +1014,7 @@ async def test_restart_counts_only_persisted_successes_and_never_resurrects_rest
     assert second_metrics.initial_successful_unique_ids == 1
     assert second_metrics.unique_ids_acquired == 2
     assert second_metrics.successful_unique_ids == 3
-    assert second_metrics.access_restriction_halted is False
+    assert second_metrics.access_restricted == 0
     assert len(second_manager.contexts) == 2
     for session_id in restricted_ids:
         row = await resumed_repository.get(session_id)

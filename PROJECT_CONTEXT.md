@@ -913,14 +913,11 @@ exponential backoff and jitter. The settings are `ACCESS_RESTRICTED_BACKOFF_INIT
 once on a graceful stop. While it waits, no new work item starts, and workers and queues
 stay fixed and bounded.
 
-After `ACCESS_RESTRICTED_HALT_AFTER` consecutive restrictions (default 20), acquisition
-halts for the runtime:
-- in-flight work drains, and `metrics.access_restriction_halted` is set;
-- the gauge `queue_creation_access_restricted_halted` reads 1;
-- `acquisition_halted_access_restricted` is logged at ERROR;
-- the dashboard shows Creation `HALTED`.
-
-Only a successful Queue ID resets the streak; other failures neither reset nor extend it.
+There is no halt. Acquisition keeps retrying, with at most one restricted attempt per
+`ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` once the backoff is at its cap, until the target
+is met or the runtime stops. While the streak is above zero, the dashboard shows Creation
+`BACKING OFF`. Only a successful Queue ID resets the streak; other failures neither reset
+nor extend it.
 Restarting the run resumes from persisted successful IDs only, and restricted `FAILED`
 rows are never counted or revived. Operator Add/Replace are not paced by this policy.
 

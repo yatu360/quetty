@@ -624,13 +624,12 @@ controlled evidence and the staging assumptions that remain unknown.
   example after an identity mismatch) are not refilled with new identities beyond this
   many replacements; creation stops and sets `queue_identity_replacement_blocked`
 - `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=5.0`,
-  `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=120.0`, `ACCESS_RESTRICTED_HALT_AFTER=20`. Each
-  attempt that renders the pre-Queue access-restriction page is recorded as `FAILED` with
-  `access_restricted_before_queue`, and new creation work then waits with bounded
-  exponential backoff. After this many restrictions in a row, acquisition halts for the
-  runtime and sets `queue_creation_access_restricted_halted`. The dashboard shows
-  Creation `HALTED`. Restarting the run resumes acquisition from the persisted
-  successful IDs.
+  `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=120.0`. Each attempt that renders the pre-Queue
+  access-restriction page is recorded as `FAILED` with `access_restricted_before_queue`.
+  New creation work then waits with bounded exponential backoff, doubling up to the
+  maximum. Acquisition keeps retrying at that pace until the target is met or the run
+  stops; it never halts. While restrictions continue, the dashboard shows Creation
+  `BACKING OFF`. A successful Queue ID resets the delay.
 - `MONITOR_WORKERS=1`
 - `MONITOR_QUEUE_CAPACITY=5`
 - `MONITOR_CLAIM_BATCH_SIZE=5`

@@ -6757,3 +6757,80 @@ resume, shutdown during resume, and no target overshoot. Update CHANGELOG_AI.md.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Remove the access-restriction halt; keep retrying with bounded backoff
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Operator request: remove the halt after `ACCESS_RESTRICTED_HALT_AFTER` consecutive
+restrictions and keep retrying.
+
+### Changes Made
+
+- `AccessRestrictionPolicy` no longer has `halt_after`. The controller keeps the bounded
+  exponential backoff between restricted work items, using `CreationRetryPolicy.delay`
+  capped at `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS`. It retries until the target is met
+  or the runtime stops.
+- Removed:
+  - the `ACCESS_RESTRICTED_HALT_AFTER` setting (`extra="ignore"`, so an old `.env`
+    entry is harmless);
+  - `CreationMetrics.access_restriction_halted`;
+  - the `acquisition_halted_access_restricted` log event;
+  - the `queue_creation_access_restricted_halted` gauge.
+- `set_access_restriction_state` became `set_access_restriction_consecutive`.
+- Dashboard:
+  - `AccessRestrictionStatus` now carries `attempts` and `consecutive`.
+  - Creation shows `BACKING OFF` instead of `HALTED` while the streak is above zero.
+  - "Access-restricted attempts" is unchanged.
+- `README.md`, `.env.example` and `PROJECT_CONTEXT.md` updated.
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/web/service.py`
+- `tests/unit/test_access_restriction.py`
+- `tests/unit/test_web_ui.py`
+- `README.md`, `.env.example`, `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- Test changes in `tests/unit/test_access_restriction.py`:
+  - The halt test was replaced. Now 12 consecutive restrictions are followed by a
+    success. The delays are `[5, 10, 20, 40 × 9]`, there is no halt, and the target is met.
+  - New test: concurrent restricted workers stay bounded, at most 3 active and queue
+    depth at most 3, and the target is met.
+  - The restart test now stops gracefully after 3 backoffs instead of relying on the halt.
+- Focused restriction, creation, web, config and observability suites: 153 passed.
+- `ruff check src tests`: PASS. `mypy src`: PASS.
+- `python -m pytest` (full): 993 passed, 4 deselected. The flaky operator-fencing test
+  passed on this run.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- Pacing is kept, so retrying forever cannot become a tight loop. Once at the cap, the
+  controller starts at most about one new work item per
+  `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS`.
+
+### Known Issues
+
+- A persistent restriction now retries indefinitely and adds one `FAILED` row per
+  attempt. At the 120 s cap that is about 30 rows an hour.
+- Operator Add/Replace are still not paced.
+
+### Follow-Up
+
+None.
+
+### Git State
+
+- Branch: main

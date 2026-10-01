@@ -659,7 +659,9 @@ class ApplicationRunRuntime:
         creation = self._creation
         return AccessRestrictionStatus(
             attempts=creator.access_restricted_attempts if creator is not None else 0,
-            halted=creation.metrics.access_restriction_halted if creation is not None else False,
+            consecutive=(
+                creation.metrics.consecutive_access_restricted if creation is not None else 0
+            ),
         )
 
     @property
@@ -749,7 +751,8 @@ def browser_build_label(run: RunConfig) -> str:
 @dataclass(frozen=True, slots=True)
 class AccessRestrictionStatus:
     attempts: int = 0
-    halted: bool = False
+    # Restrictions since the last successful Queue ID; > 0 means creation is backing off.
+    consecutive: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -802,8 +805,8 @@ class DashboardService:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
-        elif restriction.halted:
-            creation = "HALTED"
+        elif restriction.consecutive > 0:
+            creation = "BACKING OFF"
         else:
             creation = "RUNNING"
         return DashboardSummary(
