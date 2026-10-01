@@ -137,6 +137,48 @@ class CreationRetryPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class AccessRestrictionPolicy:
+    """Pace and bound acquisition while attempts keep rendering the restriction page.
+
+    Each consecutive restriction delays the next creation work item with the same
+    bounded exponential backoff and jitter as ``CreationRetryPolicy``. After
+    ``halt_after`` consecutive restrictions acquisition halts for the runtime, so a
+    persistent restriction stays visible instead of being retried forever. Only a
+    successful Queue ID resets the streak.
+    """
+
+    initial_backoff_seconds: float = 5.0
+    maximum_backoff_seconds: float = 120.0
+    jitter_seconds: float = 1.0
+    halt_after: int = 20
+
+    def __post_init__(self) -> None:
+        if self.halt_after < 1:
+            raise ValueError("halt_after must be at least 1")
+        # Validates the backoff fields with the shared retry-policy rules.
+        self._backoff()
+
+    def delay(self, consecutive: int, jitter: Jitter) -> float:
+        return self._backoff().delay(consecutive, jitter)
+
+    def _backoff(self) -> CreationRetryPolicy:
+        return CreationRetryPolicy(
+            max_attempts=1,
+            initial_backoff_seconds=self.initial_backoff_seconds,
+            maximum_backoff_seconds=self.maximum_backoff_seconds,
+            jitter_seconds=self.jitter_seconds,
+        )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> Self:
+        return cls(
+            initial_backoff_seconds=settings.access_restricted_backoff_initial_seconds,
+            maximum_backoff_seconds=settings.access_restricted_backoff_max_seconds,
+            halt_after=settings.access_restricted_halt_after,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CreationWorkItem:
     sequence: int
     session_id: str = field(default_factory=lambda: str(uuid4()))
@@ -181,6 +223,10 @@ class CreationMetrics:
     temporary_failure_outcomes: int = 0
     permanent_failures: int = 0
     access_restricted: int = 0
+    consecutive_access_restricted: int = 0
+    access_restriction_backoffs: int = 0
+    access_restriction_backoff_seconds: float = 0.0
+    access_restriction_halted: bool = False
     retries: int = 0
     currently_creating: int = 0
     maximum_concurrent_creating: int = 0
@@ -264,6 +310,9 @@ class QueueSessionCreator:
         self._attempt_timeout_seconds = (
             navigation_timeout_ms / 1_000 + live_page_timeout_seconds + 10.0
         )
+        # Restricted attempts by this creator (automatic acquisition and operator Add/
+        # Replace) for the current runtime; an aggregate for the operator status.
+        self.access_restricted_attempts = 0
 
     async def create(self, work_item: CreationWorkItem) -> CreationOutcome:
         outcome = await self._create(work_item)
@@ -324,11 +373,18 @@ class QueueSessionCreator:
                     # creation context has closed; diagnostic only.
                     await self._proxy_ip_tracker.observe_after_check(outcome.session)
                 return outcome
+            except AccessRestrictedError as exc:
+                return await self._access_restricted(
+                    work_item,
+                    attempt,
+                    exc.code,
+                    started,
+                    temporary_failures,
+                    reserved_session,
+                )
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()
-                    if isinstance(exc, AccessRestrictedError):
-                        self._observability.record_creation_access_restricted()
                 await self._persist_failed(work_item, attempt, exc.code, reserved_session)
                 return CreationOutcome(
                     kind=CreationOutcomeKind.PERMANENT_FAILURE,
@@ -535,6 +591,49 @@ class QueueSessionCreator:
                 progress=progress,
             )
 
+    async def _access_restricted(
+        self,
+        work_item: CreationWorkItem,
+        attempt: int,
+        failure_code: str,
+        started: float,
+        temporary_failures: int,
+        reserved_session: QueueSession | None,
+    ) -> CreationOutcome:
+        """End a restricted work item; its context is already closed by the attempt.
+
+        No Queue ID exists, so nothing was committed for this work item. Any state
+        document under its session ID can only be uncommitted and is removed.
+        """
+
+        self.access_restricted_attempts += 1
+        if self._observability is not None:
+            self._observability.record_creation_permanent_failure()
+            self._observability.record_creation_access_restricted()
+        with contextlib.suppress(OSError, StateStoreError):
+            await self._state_store.delete(work_item.session_id)
+        await self._persist_failed(work_item, attempt, failure_code, reserved_session)
+        duration = time.perf_counter() - started
+        log_event(
+            logger,
+            logging.WARNING,
+            "acquisition_access_restricted",
+            session_id=work_item.session_id,
+            attempt=attempt,
+            duration=duration,
+            status=QueueStatus.FAILED.value,
+            classification=AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.value,
+            # Not retried in this work item; the controller schedules replacement work.
+            retryable=False,
+        )
+        return CreationOutcome(
+            kind=CreationOutcomeKind.PERMANENT_FAILURE,
+            attempts=attempt,
+            temporary_failures=temporary_failures,
+            duration_seconds=duration,
+            failure_code=failure_code,
+        )
+
     async def _session_committed(self, session_id: str) -> bool:
         """Return whether the session row exists; assume it does when unknowable."""
 
@@ -651,6 +750,9 @@ class SessionCreationController:
         queue_capacity: int | None = None,
         observability: PrometheusMetrics | None = None,
         identity_replacement_limit: int | None = None,
+        access_restriction_policy: AccessRestrictionPolicy | None = None,
+        sleep: Sleep = asyncio.sleep,
+        jitter: Jitter = random.uniform,
     ) -> None:
         if identity_replacement_limit is not None and identity_replacement_limit < 0:
             raise ValueError("identity_replacement_limit cannot be negative")
@@ -666,6 +768,9 @@ class SessionCreationController:
         self._worker_count = worker_count
         self._queue_capacity = queue_capacity or worker_count
         self._identity_replacement_limit = identity_replacement_limit
+        self._access_restriction_policy = access_restriction_policy or AccessRestrictionPolicy()
+        self._sleep = sleep
+        self._jitter = jitter
         self.metrics = CreationMetrics()
         self._observability = observability
         if observability is not None:
@@ -695,6 +800,7 @@ class SessionCreationController:
             queue_capacity=settings.creation_queue_capacity,
             observability=observability,
             identity_replacement_limit=settings.identity_replacement_limit,
+            access_restriction_policy=AccessRestrictionPolicy.from_settings(settings),
         )
 
     async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
@@ -740,6 +846,14 @@ class SessionCreationController:
                         self._observability.set_creation_rate(
                             self.metrics.unique_ids_acquired / elapsed
                         )
+                    if self.metrics.access_restriction_halted:
+                        break
+                    if _is_access_restricted(outcome):
+                        # Pace replacement work; no new work item starts meanwhile.
+                        await self._access_restriction_backoff(stop_event)
+
+                if self.metrics.access_restriction_halted:
+                    break
 
                 # Successful outcomes are persisted by the handler, so they can drive
                 # the hot loop without an O(target) sequence of COUNT queries. Verify
@@ -778,6 +892,66 @@ class SessionCreationController:
                     self.metrics.sessions_created_per_second
                 )
         return self.metrics
+
+    async def _access_restriction_backoff(self, stop_event: asyncio.Event | None) -> None:
+        delay = self._access_restriction_policy.delay(
+            self.metrics.consecutive_access_restricted,
+            self._jitter,
+        )
+        if delay <= 0:
+            return
+        self.metrics.access_restriction_backoffs += 1
+        self.metrics.access_restriction_backoff_seconds += delay
+        await self._wait_unless_stopped(delay, stop_event)
+
+    async def _wait_unless_stopped(
+        self,
+        delay: float,
+        stop_event: asyncio.Event | None,
+    ) -> None:
+        """Sleep for ``delay`` but return as soon as a graceful stop is requested."""
+
+        if stop_event is None:
+            await self._sleep(delay)
+            return
+        if stop_event.is_set():
+            return
+        sleeper = asyncio.ensure_future(self._sleep(delay))
+        stopper = asyncio.ensure_future(stop_event.wait())
+        try:
+            await asyncio.wait({sleeper, stopper}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for waiter in (sleeper, stopper):
+                waiter.cancel()
+            await asyncio.gather(sleeper, stopper, return_exceptions=True)
+
+    def _track_access_restriction(self, outcome: CreationOutcome) -> None:
+        if outcome.kind is CreationOutcomeKind.SUCCESS:
+            self.metrics.consecutive_access_restricted = 0
+        elif _is_access_restricted(outcome):
+            self.metrics.access_restricted += 1
+            self.metrics.consecutive_access_restricted += 1
+            if (
+                not self.metrics.access_restriction_halted
+                and self.metrics.consecutive_access_restricted
+                >= self._access_restriction_policy.halt_after
+            ):
+                self.metrics.access_restriction_halted = True
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "acquisition_halted_access_restricted",
+                    classification=AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.value,
+                    count=self.metrics.consecutive_access_restricted,
+                    valid_queue_ids=self.metrics.successful_unique_ids,
+                )
+        else:
+            return
+        if self._observability is not None:
+            self._observability.set_access_restriction_state(
+                consecutive=self.metrics.consecutive_access_restricted,
+                halted=self.metrics.access_restriction_halted,
+            )
 
     async def _effective_target(self) -> int:
         """Return how many valid IDs may be pursued without mass identity replacement.
@@ -869,10 +1043,9 @@ class SessionCreationController:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
             self.metrics.permanent_failures += 1
-            if outcome.failure_code == AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.code:
-                self.metrics.access_restricted += 1
         elif outcome.kind is CreationOutcomeKind.TEMPORARY_FAILURE:
             self.metrics.temporary_failure_outcomes += 1
+        self._track_access_restriction(outcome)
         if outcome.failure_code == "unexpected_creation_error":
             self.metrics.worker_failures[worker_index] = (
                 self.metrics.worker_failures.get(worker_index, 0) + 1
@@ -893,3 +1066,7 @@ class SessionCreationController:
                 in_flight=self.metrics.currently_creating,
                 queue_depth=queue_depth,
             )
+
+
+def _is_access_restricted(outcome: CreationOutcome) -> bool:
+    return outcome.failure_code == AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.code

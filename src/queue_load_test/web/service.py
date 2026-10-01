@@ -49,6 +49,7 @@ from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import DirectMonitorMetadataRepository, SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
 from queue_load_test.scheduler import (
+    AccessRestrictionPolicy,
     MonitoringHandler,
     MonitoringRetryPolicy,
     ParkedSessionScheduler,
@@ -269,6 +270,8 @@ class ApplicationRunRuntime:
         self._headed_browser_manager: BrowserManager | None = None
         self._operator_actions: OperatorActionManager | None = None
         self._direct_handler: DirectMonitoringHandler | None = None
+        self._creator: QueueSessionCreator | None = None
+        self._creation: SessionCreationController | None = None
         self._metrics: PrometheusMetrics | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -387,6 +390,7 @@ class ApplicationRunRuntime:
                 queue_capacity=settings.creation_queue_capacity,
                 observability=metrics,
                 identity_replacement_limit=settings.identity_replacement_limit,
+                access_restriction_policy=AccessRestrictionPolicy.from_settings(settings),
             )
             restorer = QueueSessionRestorer(
                 browser_manager=browser_manager,
@@ -517,6 +521,8 @@ class ApplicationRunRuntime:
             self._headed_browser_manager = headed_manager
             self._operator_actions = operator_actions
             self._direct_handler = direct_handler
+            self._creator = creator
+            self._creation = creation
             self._metrics = metrics
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
@@ -646,6 +652,17 @@ class ApplicationRunRuntime:
         return metrics.render()
 
     @property
+    def access_restriction_status(self) -> AccessRestrictionStatus:
+        """Aggregate pre-Queue restriction state of the current runtime only."""
+
+        creator = self._creator
+        creation = self._creation
+        return AccessRestrictionStatus(
+            attempts=creator.access_restricted_attempts if creator is not None else 0,
+            halted=creation.metrics.access_restriction_halted if creation is not None else False,
+        )
+
+    @property
     def direct_monitoring_metrics(self) -> DirectMonitoringMetrics | None:
         """In-process Direct strategy counters; ``None`` for a Headed Window run."""
 
@@ -696,6 +713,8 @@ class ApplicationRunRuntime:
             self._headed_browser_manager = None
             self._operator_actions = None
             self._direct_handler = None
+            self._creator = None
+            self._creation = None
             self._metrics = None
         try:
             await self._repository.reset_all()
@@ -728,6 +747,12 @@ def browser_build_label(run: RunConfig) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class AccessRestrictionStatus:
+    attempts: int = 0
+    halted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class DashboardSummary:
     target_url: str
     requested_sessions: int
@@ -750,6 +775,8 @@ class DashboardSummary:
     # Direct Monitoring Strategy aggregates only (None for Headed Window runs).
     direct_capability: tuple[tuple[str, int], ...] | None = None
     direct_checks: str | None = None
+    # Pre-Queue access-restriction attempts in the current runtime (aggregate only).
+    access_restricted_attempts: int = 0
 
 
 class DashboardService:
@@ -768,10 +795,15 @@ class DashboardService:
         )
         effective_target = max(0, run.requested_sessions + population_adjustment)
         direct_capability, direct_checks = await self._direct_summary(run)
+        restriction = getattr(self._runtime, "access_restriction_status", None)
+        if not isinstance(restriction, AccessRestrictionStatus):
+            restriction = AccessRestrictionStatus()
         if runtime_error is not None:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
+        elif restriction.halted:
+            creation = "HALTED"
         else:
             creation = "RUNNING"
         return DashboardSummary(
@@ -797,6 +829,7 @@ class DashboardService:
             chrome_processes=capacity.chrome_processes,
             direct_capability=direct_capability,
             direct_checks=direct_checks,
+            access_restricted_attempts=restriction.attempts,
         )
 
     async def _direct_summary(

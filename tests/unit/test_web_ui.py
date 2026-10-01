@@ -30,6 +30,8 @@ from queue_load_test.web.actions import (
 )
 from queue_load_test.web.manual import ManualOpenResult, ManualOpenStatus
 from queue_load_test.web.service import (
+    AccessRestrictionStatus,
+    ApplicationRunRuntime,
     RuntimeCapacity,
     _automatic_monitor_for_strategy,
     _status_discovery_for_run,
@@ -248,6 +250,49 @@ def test_persisted_run_survives_restart_skips_setup_and_resumes_only_deficit(
         # The existing bounded controller receives target=5 and authoritatively counts 1,
         # so its restart deficit is 4 rather than a new population of 5.
         assert client.get("/partials/summary").text.find("<dd>4</dd>") != -1
+
+
+def test_summary_reports_aggregate_access_restriction_status(tmp_path: Path) -> None:
+    database = tmp_path / "restricted.sqlite3"
+    repository = SQLiteSessionRepository(database)
+    runtime = FakeRuntime()
+    app = create_app(settings=settings(database), repository=repository, runtime=runtime)
+
+    with TestClient(app) as client:
+        client.post(
+            "/setup",
+            data={"target_url": "https://staging.example.test/queue", "requested_sessions": "5"},
+            follow_redirects=False,
+        )
+        before = client.get("/partials/summary").text
+        assert "<dt>Access-restricted attempts</dt><dd>0</dd>" in before
+        assert '<strong class="state">RUNNING</strong>' in before
+
+        runtime.access_restriction_status = AccessRestrictionStatus(  # type: ignore[attr-defined]
+            attempts=3, halted=True
+        )
+        after = client.get("/partials/summary").text
+        assert "<dt>Access-restricted attempts</dt><dd>3</dd>" in after
+        assert '<strong class="state">HALTED</strong>' in after
+        # Successful-ID counts remain persisted unique Queue IDs only.
+        assert "<dt>Valid Queue IDs</dt><dd>0</dd>" in after
+        assert "sorry" not in after.casefold()
+
+
+def test_run_runtime_access_restriction_status_is_aggregate_and_safe(tmp_path: Path) -> None:
+    database = tmp_path / "status.sqlite3"
+    runtime = ApplicationRunRuntime(
+        settings=settings(database), repository=SQLiteSessionRepository(database)
+    )
+
+    assert runtime.access_restriction_status == AccessRestrictionStatus(0, False)
+
+    runtime._creator = cast(Any, SimpleNamespace(access_restricted_attempts=4))
+    runtime._creation = cast(
+        Any, SimpleNamespace(metrics=SimpleNamespace(access_restriction_halted=True))
+    )
+
+    assert runtime.access_restriction_status == AccessRestrictionStatus(4, True)
 
 
 def test_new_run_is_refused_when_legacy_sessions_have_no_target(tmp_path: Path) -> None:

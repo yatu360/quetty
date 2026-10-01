@@ -6613,3 +6613,147 @@ CHANGELOG_AI.md."
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Harden ACCESS_RESTRICTED_BEFORE_QUEUE: cleanup, pacing, halt, visibility
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Make the pre-Queue access-restriction outcome:
+- cancellation-safe;
+- bounded, so there is no retry storm;
+- visible in metrics, logs and the dashboard.
+
+The target must still count only persisted unique Queue IDs.
+
+### Changes Made
+
+- **Cleanup** (`QueueSessionCreator._access_restricted`): a restricted attempt now has its
+  own handler. The context is already closed by the attempt's `async with`. The handler:
+  - deletes any uncommitted state document under the work item's session ID, which is safe
+    because no Queue ID exists;
+  - writes the leaseless `FAILED` row;
+  - increments `creator.access_restricted_attempts`;
+  - records the permanent-failure and access-restriction counters;
+  - emits one sanitized `acquisition_access_restricted` WARNING event. Its fields are
+    `session_id`, `attempt`, `duration`, `status`, `classification` and `retryable=false`.
+- **Pacing and halt**: a new `AccessRestrictionPolicy` in `scheduler/creation.py`.
+  - It reuses `CreationRetryPolicy.delay` for bounded exponential backoff with jitter.
+  - `SessionCreationController` waits after each restricted outcome and starts no new work
+    item meanwhile. The wait races a graceful stop and is cancellation-safe.
+  - After `halt_after` restrictions in a row, the controller sets
+    `metrics.access_restriction_halted`, logs `acquisition_halted_access_restricted` at
+    ERROR, drains in-flight work and returns.
+  - Only a SUCCESS resets the streak.
+  - New metrics fields: `consecutive_access_restricted`, `access_restriction_backoffs`,
+    `access_restriction_backoff_seconds` and `access_restriction_halted`.
+  - `access_restricted` counting moved into `_track_access_restriction`.
+- **Config**: `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS` (5.0),
+  `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` (120.0) and `ACCESS_RESTRICTED_HALT_AFTER` (20,
+  minimum 1). Max cannot be below initial. They are wired through
+  `AccessRestrictionPolicy.from_settings` into `SessionCreationController.from_settings`
+  and the web `ApplicationRunRuntime`.
+- **Prometheus**: new unlabelled gauges `queue_creation_access_restricted_consecutive` and
+  `queue_creation_access_restricted_halted`. They sit beside the existing
+  `queue_creation_access_restricted_total`. No `reason`-labelled family was added; it would
+  duplicate the dedicated counter.
+- **Logging**: `classification`, `retryable` and `backoff_seconds` added to the approved
+  structured-log context fields.
+- **Dashboard**: `ApplicationRunRuntime.access_restriction_status` returns an aggregate
+  attempt count and the halted flag. `DashboardSummary.access_restricted_attempts` carries
+  the count, and the summary panel has an "Access-restricted attempts" row. Creation shows
+  `HALTED` when halted below target. Valid Queue IDs still come only from SQLite.
+- Docs: `.env.example`, `README.md` and `PROJECT_CONTEXT.md` (Target Acquisition Model).
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/scheduler/__init__.py`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/metrics/logging.py`
+- `src/queue_load_test/web/service.py`
+- `src/queue_load_test/web/templates/_summary.html`
+- `tests/unit/test_access_restriction.py`: the earlier controller tests now inject a no-op
+  sleep; 14 new tests.
+- `tests/unit/test_web_ui.py`: 2 new tests.
+- `.env.example`, `README.md`, `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- New deterministic tests:
+  - Policy and settings validation.
+  - A restriction streak followed by success: backoff delays `[5, 10, 20, 40, 5]` with a
+    reset after the success. The target counts only successes. The counter and gauges are
+    correct.
+  - A persistent restriction halts instead of spinning. Contexts stay within halt plus
+    workers, workers and queue depth stay bounded, there is exactly one ERROR halt event,
+    and the halted gauge reads 1.
+  - A graceful stop during a 1 h backoff returns within 1 s.
+  - Cancellation during backoff leaks no context, worker task or state.
+  - A stale uncommitted state file is removed. The FAILED row has no lease and is not
+    claimable by monitoring. The seeded success is untouched.
+  - Context release and state presence are checked after success, restriction, exception
+    and cancellation.
+  - The single sanitized log event contains no page text, URLs or storage-state keys.
+  - Restriction metrics have no labels, and no metric label carries a session ID, Queue ID
+    or URL.
+  - A restart after a halt resumes from 1 persisted success to 3 with only 2 contexts, and
+    the restricted rows stay FAILED.
+  - The dashboard summary shows the aggregate count and `HALTED`. The runtime status
+    property was tested separately.
+- Focused acquisition, runtime, metrics and web suites, plus the restriction integration
+  test: 257 passed.
+- `ruff check src tests`: PASS. `mypy src`: PASS (112 files).
+- `python -m pytest` (full): 991 passed, 1 failed, 4 deselected.
+  - The one failure is the known flaky
+    `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`.
+    It fails intermittently on the baseline too, as shown in the previous entry, and does
+    not reach the restriction code.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it or staging traffic. The defaults (5 s initial, 120 s max, halt after
+  20) are engineering choices, not values derived from staging behaviour.
+
+### Important Decisions
+
+- The policy sits at the controller level, not the creator level. The creator does not
+  retry a restriction within its work item, so pacing must happen between work items.
+  Operator Add/Replace call the creator directly and are not paced; each one is a single
+  explicit operator action.
+- The halt is per runtime and needs no new persisted state. Restarting the run is the
+  explicit operator resume, and a restart counts only persisted successful IDs.
+- Duplicates and non-restriction failures leave the streak unchanged, so an unrelated
+  failure cannot hide a restriction storm.
+- Nothing changes routing, proxy assignment or browser identity in response to a
+  restriction.
+
+### Known Issues
+
+- After a halt, operator Add/Replace still work, and `adjust_target` does not restart the
+  halted controller. Acquisition resumes only after a run restart.
+- The dashboard restriction count is in-memory for the current runtime and resets on
+  restart. Historical restricted rows stay visible as FAILED with
+  `access_restricted_before_queue`.
+- A restricted result arriving during an earlier result's backoff is processed after that
+  wait, so pacing is serial across workers.
+- The flaky `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`
+  noted in the previous entry is unchanged.
+
+### Follow-Up
+
+"Add an explicit operator 'Resume Acquisition' control for a runtime halted by
+`ACCESS_RESTRICTED_HALT_AFTER`. Resume the existing bounded `SessionCreationController`
+within the same runtime. Reset only its consecutive-restriction streak and halted flag.
+Keep persisted rows, Queue IDs and proxy assignments unchanged. Make it idempotent and
+safe against concurrent Stop & Reset, and show it only while halted. Do not change
+routing or browser identity. Add UI, runtime and controller tests for resume, repeated
+resume, shutdown during resume, and no target overshoot. Update CHANGELOG_AI.md."
+
+### Git State
+
+- Branch: main

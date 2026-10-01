@@ -899,6 +899,39 @@ attempts. There is no restriction-specific routing or egress change. A replaceme
 item gets its proxy assignment from the existing allocator, the same as after any other
 failure.
 
+The restricted path is cancellation-safe:
+- The attempt's `async with` closes the context.
+- `_access_restricted` deletes any uncommitted state document under that session ID.
+  That can only be uncommitted, because no Queue ID exists.
+- It writes a `FAILED` row without a lease, which monitoring never claims.
+- Existing successful rows are never touched.
+
+`SessionCreationController` paces restrictions with `AccessRestrictionPolicy`. Each
+consecutive restriction delays the next work item using `CreationRetryPolicy`'s bounded
+exponential backoff and jitter. The settings are `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS`
+(default 5) and `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` (default 120). The wait returns at
+once on a graceful stop. While it waits, no new work item starts, and workers and queues
+stay fixed and bounded.
+
+After `ACCESS_RESTRICTED_HALT_AFTER` consecutive restrictions (default 20), acquisition
+halts for the runtime:
+- in-flight work drains, and `metrics.access_restriction_halted` is set;
+- the gauge `queue_creation_access_restricted_halted` reads 1;
+- `acquisition_halted_access_restricted` is logged at ERROR;
+- the dashboard shows Creation `HALTED`.
+
+Only a successful Queue ID resets the streak; other failures neither reset nor extend it.
+Restarting the run resumes from persisted successful IDs only, and restricted `FAILED`
+rows are never counted or revived. Operator Add/Replace are not paced by this policy.
+
+Observability:
+- Low-cardinality, unlabelled metrics: `queue_creation_access_restricted_total` and
+  `queue_creation_access_restricted_consecutive`.
+- The dashboard shows "Access-restricted attempts", an in-runtime aggregate counted by the
+  creator across automatic and operator creation.
+- Each restricted attempt logs one sanitized `acquisition_access_restricted` event with
+  `session_id`, `attempt`, `duration`, `status`, `classification` and `retryable=false`.
+
 Manual Add and Replace call this same creator once from a fixed-size operator pool.
 Failed action attempts are removed rather than shown as phantom managed sessions.
 Replace deletes its leased old row only after the replacement has a valid persisted
