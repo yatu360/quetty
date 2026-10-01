@@ -17,6 +17,13 @@
         {% elif browser_backend == "chrome" %}(supported fallback)
         {% elif browser_backend == "camoufox" %}(retained experimental backend; not certified by Phase 7)
         {% endif %}</p>
+      {% if proxy_enabled %}
+      <p class="muted">Proxy: IPRoyal Residential<br>
+        Country: {{ proxy_country|upper }}<br>
+        Sticky lifetime: {{ proxy_lifetime }}</p>
+      {% else %}
+      <p class="muted">Proxy: Disabled</p>
+      {% endif %}
       {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
       <form method="post" action="/setup">
         <label for="target_url">Target URL</label>

@@ -16,6 +16,7 @@ from queue_load_test.models.progress import QueueExtractionDiagnostics, QueuePro
 from queue_load_test.models.run import (
     BrowserRuntimeState,
     MonitoringStrategy,
+    ProxyProvider,
     RunConfig,
     RunStatus,
     SessionSummary,
@@ -33,6 +34,7 @@ __all__ = [
     "MonitoringObservation",
     "MonitoringStrategy",
     "ObservationSource",
+    "ProxyProvider",
     "QueueExtractionDiagnostics",
     "QueuePageSignals",
     "QueueProgress",

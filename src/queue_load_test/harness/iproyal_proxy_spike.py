@@ -37,6 +37,7 @@ from queue_load_test.browser import BrowserManager, BrowserProxySettings, Patchr
 from queue_load_test.direct_replay.store import read_protected_json, write_protected_json
 from queue_load_test.harness.resource_benchmark import is_browser_main_process
 from queue_load_test.models import BrowserBackendName
+from queue_load_test.proxy import construct_effective_password as _construct_effective_password
 
 LIVE_GATE = "RUN_IPROYAL_PROXY_SPIKE"
 DEFAULT_REPORT_PATH = Path("test_spike_results.md")
@@ -335,7 +336,12 @@ def construct_effective_password(
     """Resolve IPRoyal authentication in memory without logging or persistence."""
 
     validate_provider_session_id(session_id)
-    return f"{base_password}_country-{country}_session-{session_id}_lifetime-{lifetime}"
+    return _construct_effective_password(
+        base_password,
+        country=country,
+        session_id=session_id,
+        lifetime=lifetime,
+    )
 
 
 def classify_affinity(previous_ip: str | None, current_ip: str | None) -> AffinityResult:

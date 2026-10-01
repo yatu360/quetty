@@ -183,6 +183,53 @@ Copy-Item .env.example .env
 The operator UI instead takes the actual target and requested count from its first-run
 setup and persists them as one immutable current run.
 
+### Residential proxy (IPRoyal) — Phase 9 foundation
+
+Production IPRoyal Residential configuration for **new** runs lives only in `.env`:
+
+```env
+IPROYAL_PROXY_ENABLED=true
+IPROYAL_PROXY_SERVER=http://YOUR_HOSTNAME:YOUR_PORT
+IPROYAL_PROXY_USERNAME=YOUR_USERNAME
+IPROYAL_PROXY_PASSWORD=YOUR_BASE_PASSWORD
+IPROYAL_PROXY_COUNTRY=gb
+IPROYAL_PROXY_LIFETIME=2h
+```
+
+When enabled, every field is required. The server must be a credential-free URL with an
+explicit port, the country a two-letter code, and the lifetime a positive duration such
+as `30m`, `2h`, or `1d`. The lifetime is never shortened or altered.
+`RUN_IPROYAL_PROXY_SPIKE` is a separate harness gate and never enables production
+proxying.
+
+- First-run setup persists non-secret run provenance: provider (`iproyal` or `none`),
+  country, and lifetime. Like the browser backend and monitoring strategy, it is
+  immutable. Changing `.env` never migrates an existing run, so use **Stop & Reset Run**
+  to change provider, country, or lifetime. Legacy runs migrate to `none` and are never
+  proxied retroactively.
+- Every new QueueSession in an IPRoyal run (setup, deficit refill, Add, Replace
+  candidate) gets its own random 8-character alphanumeric IPRoyal sticky-session ID.
+  The ID is persisted before the visitor's first navigation and is unique and immutable,
+  enforced by SQLite. Monitoring, restore, Refresh Now, Manual Open, retries, and
+  restarts reuse the persisted ID. Replace never reuses the old ID, and a failed Replace
+  leaves the old session and its ID untouched. Delete and Stop & Reset remove the local
+  assignments.
+- Queue ID remains the authoritative journey identity. The proxy session ID is routing
+  provenance only.
+- Credentials are environment-only. They are never persisted, logged, rendered, or
+  included in reprs. The effective provider password
+  (`{BASE}_country-{COUNTRY}_session-{ID}_lifetime-{LIFETIME}`) is constructed in memory
+  only.
+- Reopening an IPRoyal run without the credentials fails closed before any browser
+  starts. IPRoyal runs support Patchright (default) and Chrome. Camoufox is rejected at
+  setup and at restart.
+- The consistency checker reports, without repairing, any missing, malformed, duplicate,
+  or unexpected proxy session IDs and incomplete run provenance.
+
+Phase 9 Prompt 1 adds only this foundation. **Browser traffic is not yet routed through
+the proxy.** Routing every QueueSession operation through its persisted sticky session
+is Phase 9 Prompt 2.
+
 ## Local Operator UI
 
 Start the server after configuring bounded browser, database, and state settings:

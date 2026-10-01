@@ -28,6 +28,14 @@ class QueueIdConflictError(RepositoryError):
     """Raised when a non-null Queue ID is already persisted."""
 
 
+class ProxySessionIdConflictError(RepositoryError):
+    """Raised when an IPRoyal sticky-session identifier is already persisted."""
+
+
+class ProxySessionAssignmentError(RepositoryError):
+    """Raised when code attempts to mutate a persisted sticky-session assignment."""
+
+
 class LeaseOwnershipError(RepositoryError):
     """Raised when stale leased work attempts to overwrite a newer owner."""
 

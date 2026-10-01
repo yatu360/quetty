@@ -32,6 +32,7 @@ from queue_load_test.models import (
     BrowserBackendName,
     BrowserRuntimeState,
     MonitoringStrategy,
+    ProxyProvider,
     QueueStatus,
     RunConfig,
     SessionSummaryPage,
@@ -173,6 +174,9 @@ def create_app(
                 "browser_backend": settings.browser_backend.value,
                 "monitoring_strategies": tuple(MonitoringStrategy),
                 "selected_monitoring_strategy": settings.monitoring_strategy.value,
+                "proxy_enabled": settings.iproyal_proxy_enabled,
+                "proxy_country": settings.iproyal_proxy_country,
+                "proxy_lifetime": settings.iproyal_proxy_lifetime,
             },
         )
 
@@ -225,6 +229,29 @@ def create_app(
                     "browser_backend": settings.browser_backend.value,
                     "monitoring_strategies": tuple(MonitoringStrategy),
                     "selected_monitoring_strategy": raw_strategy,
+                },
+                status_code=422,
+            )
+        if (
+            settings.iproyal_proxy_enabled
+            and settings.browser_backend is BrowserBackendName.CAMOUFOX
+        ):
+            return templates.TemplateResponse(
+                request,
+                "setup.html",
+                {
+                    "error": (
+                        "IPRoyal production proxy support requires Patchright or Chrome; "
+                        "Camoufox is not certified for proxied runs."
+                    ),
+                    "target_url": raw_url,
+                    "requested_sessions": raw_count,
+                    "browser_backend": settings.browser_backend.value,
+                    "monitoring_strategies": tuple(MonitoringStrategy),
+                    "selected_monitoring_strategy": monitoring_strategy.value,
+                    "proxy_enabled": True,
+                    "proxy_country": settings.iproyal_proxy_country,
+                    "proxy_lifetime": settings.iproyal_proxy_lifetime,
                 },
                 status_code=422,
             )
@@ -296,6 +323,21 @@ def create_app(
                 CAMOUFOX_BROWSER_VERSION
                 if settings.browser_backend is BrowserBackendName.CAMOUFOX
                 else patchright_build
+            ),
+            proxy_provider=(
+                ProxyProvider.IPROYAL
+                if settings.iproyal_proxy_enabled
+                else ProxyProvider.NONE
+            ),
+            proxy_country=(
+                settings.iproyal_proxy_country
+                if settings.iproyal_proxy_enabled
+                else None
+            ),
+            proxy_lifetime=(
+                settings.iproyal_proxy_lifetime
+                if settings.iproyal_proxy_enabled
+                else None
             ),
         )
         try:

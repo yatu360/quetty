@@ -1514,20 +1514,53 @@ If production proxy work is explicitly authorised, the exact follow-up is:
 
 `Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`
 
+## Phase 9 — IPRoyal Per-Session Proxy (in progress)
+
+Prompt 1, the per-session proxy foundation, was implemented on 2026-10-01 with local
+evidence only. It enforces the invariant: one persisted QueueSession = one immutable
+IPRoyal sticky-session ID.
+
+- `src/queue_load_test/proxy/iproyal.py` validates and generates 8-character
+  alphanumeric session IDs (`secrets`), validates country and lifetime, and builds the
+  effective password `{BASE}_country-{C}_session-{ID}_lifetime-{L}` in memory only.
+  `IPRoyalCredentials` has a redacted repr.
+- Settings: `IPROYAL_PROXY_ENABLED/SERVER/USERNAME/PASSWORD/COUNTRY/LIFETIME`. When
+  enabled, all are required. Username and password are `SecretStr`.
+  `RUN_IPROYAL_PROXY_SPIKE` is not a Settings field and never enables production.
+- Schema (additive, migrated):
+  - `run_config.proxy_provider` (default `none`), plus `proxy_country` and
+    `proxy_lifetime`;
+  - `queue_sessions.proxy_session_id`, with a partial unique index and a SQLite trigger
+    that makes it immutable.
+  The repository also rejects changed assignments (`ProxySessionAssignmentError`) and
+  duplicates (`ProxySessionIdConflictError`).
+- `QueueSessionCreator(proxy_provider=IPROYAL)` reserves a CREATING row carrying a new
+  ID before the context is opened, regenerating on collision. Success and failure then
+  update that row, so setup, deficit refill, Add, and Replace candidates each get a new
+  ID. Monitoring, restore, retry, and the other operations only update rows and never
+  change the ID.
+- Setup records provenance from `.env` for new runs only. A proxied Camoufox setup is
+  rejected. `ApplicationRunRuntime.start_run` fails closed before any browser when an
+  IPRoyal run lacks credentials, has incomplete provenance, or uses Camoufox.
+- The setup page and dashboard summary show provider, country, and sticky lifetime
+  only.
+- `StateConsistencyChecker` reports these findings without repairing them:
+  `missing_proxy_session_id`, `malformed_proxy_session_id`,
+  `duplicate_proxy_session_id`, `unexpected_proxy_session_id`,
+  `session_proxy_without_run`, and `run_proxy_provenance_incomplete`.
+- **No browser traffic is routed through the proxy yet.**
+
+Known limitation: a process crash between reservation and completion leaves a CREATING
+row without a Queue ID that holds its (never reused) proxy ID. That row is not counted
+as a valid identity and is not monitored.
+
 ## Next Task
 
-Phase 8 is closed as **PARTIAL**. The next justified task is authorised Queue-it staging
-validation of Direct Monitoring Strategy, with deliberate confirmation:
+`Phase 9 Prompt 2 — Route every QueueSession operation through its persisted IPRoyal sticky-session identity.`
 
-- Prompt 2 discovery;
-- Prompt 3 replay;
-- Prompt 4 shadow comparison;
-- review of an `authorized_queue_it_staging` response schema;
-- `queue-load-test-phase8-monitoring-benchmark --mode staging`.
-
-Then revisit the Direct decision. Authorised Patchright staging validation also remains
-open. Do not begin Phase 9 without an explicit prompt. Never claim staging PASS without
-an authorised run.
+The Phase 8 follow-ups also remain open: authorised Queue-it staging validation of
+Direct Monitoring Strategy and authorised Patchright staging validation. Never claim
+staging PASS without an authorised run.
 
 ## Instructions for Future AI Sessions
 

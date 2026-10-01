@@ -34,6 +34,7 @@ from queue_load_test.models import (
     BrowserBackendName,
     DirectCapability,
     MonitoringStrategy,
+    ProxyProvider,
     RunConfig,
 )
 from queue_load_test.observation_equivalence import (
@@ -272,6 +273,19 @@ class ApplicationRunRuntime:
         async with self._lock:
             if self._task is not None:
                 return
+            if run.proxy_provider is ProxyProvider.IPROYAL:
+                if not run.proxy_country or not run.proxy_lifetime:
+                    raise ValueError(
+                        "Persisted IPRoyal run provenance is incomplete; use Stop & Reset Run"
+                    )
+                if run.browser_backend is BrowserBackendName.CAMOUFOX:
+                    raise ValueError(
+                        "Persisted IPRoyal runs require Patchright or Chrome; "
+                        "use Stop & Reset Run"
+                    )
+                # Account values remain environment-only. Resolve them before any
+                # browser manager starts so a missing restart credential fails closed.
+                self._base_settings.require_iproyal_credentials()
             if (
                 run.browser_backend is BrowserBackendName.CAMOUFOX
                 and run.browser_build is not None
@@ -331,6 +345,7 @@ class ApplicationRunRuntime:
                 state_directory=settings.state_directory,
                 mode=settings.session_mode,
                 browser_backend=run.browser_backend,
+                proxy_provider=run.proxy_provider,
                 observability=metrics,
             )
             population_adjustment = (
@@ -662,6 +677,9 @@ class DashboardSummary:
     browser_backend: str
     browser_build: str
     monitoring_strategy: str
+    proxy_provider: str
+    proxy_country: str | None
+    proxy_lifetime: str | None
     valid_managed_sessions: int
     remaining_to_initial_target: int
     creation: str
@@ -705,6 +723,9 @@ class DashboardService:
             browser_backend=run.browser_backend.value,
             browser_build=browser_build_label(run),
             monitoring_strategy=run.monitoring_strategy.label,
+            proxy_provider=run.proxy_provider.label,
+            proxy_country=(run.proxy_country.upper() if run.proxy_country else None),
+            proxy_lifetime=run.proxy_lifetime,
             valid_managed_sessions=recovery.valid_queue_ids,
             remaining_to_initial_target=max(
                 0, run.requested_sessions - recovery.valid_queue_ids

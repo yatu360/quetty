@@ -5901,3 +5901,92 @@ The historical Primed `SPIKE_PARTIAL` entry and evidence remain unchanged.
 `Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`
 
 Do not begin that production implementation without an explicit task.
+
+## 2026-10-01 — Phase 9 Prompt 1 — IPRoyal Per-Session Proxy Foundation
+
+### Agent / Model
+
+Codex (partial, ran out of tokens), completed by Claude Opus 5.5.
+
+### Goal
+
+Establish production IPRoyal configuration, immutable run proxy provenance, and a
+one-to-one persisted QueueSession → IPRoyal sticky-session assignment without changing
+runtime browser routing.
+
+### Changes Made
+
+- New `queue_load_test.proxy` module:
+  - session-ID generation (`secrets`) and validation (`[A-Za-z0-9]{8}`);
+  - country and lifetime validation;
+  - in-memory effective-password construction;
+  - redacted `IPRoyalCredentials`.
+- Typed `IPROYAL_PROXY_*` Settings:
+  - all fields are required when enabled;
+  - the server must be credential-free and include a port;
+  - the lifetime is never altered;
+  - the spike gate is independent.
+- Schema:
+  - `run_config.proxy_provider/proxy_country/proxy_lifetime`, with legacy rows set to
+    `none`;
+  - `queue_sessions.proxy_session_id`, with a partial unique index and an immutability
+    trigger;
+  - repository conflict and assignment errors.
+- The creator reserves a persisted assignment before the first navigation and
+  regenerates on collision. Add and Replace allocate new IDs through the creator. A
+  failed Replace leaves the old row untouched. Delete and Reset remove assignments.
+- Setup:
+  - persists provenance for new runs;
+  - rejects proxied Camoufox;
+  - shows Proxy, Country, and Sticky lifetime on the setup page and summary.
+- Startup fails closed without credentials before any browser starts.
+- Report-only proxy consistency findings.
+
+### Files Added
+
+- `src/queue_load_test/proxy/__init__.py`, `src/queue_load_test/proxy/iproyal.py`
+- `tests/unit/test_iproyal_proxy.py`
+
+### Files Modified
+
+- `.env.example`, `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`
+- `config.py`, `models/run.py`, `models/session.py`, `models/__init__.py`
+- `repository/base.py`, `repository/sqlite.py`, `repository/__init__.py`
+- `scheduler/creation.py`, `state/consistency.py`
+- `web/app.py`, `web/service.py`, `web/templates/setup.html`,
+  `web/templates/_summary.html`
+- `harness/iproyal_proxy_spike.py` (reuses the shared password helper)
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_iproyal_proxy.py`: 44 passed.
+- `python -m pytest`: 838 passed, 4 staging deselected (397.77 s).
+- `git diff --check`: PASS.
+- `ruff check src tests` and `mypy src` (strict): PASS.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it or proxy traffic is required or was made.
+
+### Important Decisions
+
+- The reservation is a CREATING row inserted before the browser context opens. This
+  makes the "persisted before first navigation" guarantee structural rather than
+  convention.
+- Immutability is enforced in both the repository and a SQLite trigger.
+- Seeded fake credentials are verified absent from SQLite, logs, dashboard HTML, reprs,
+  and validation errors.
+
+### Known Issues
+
+- A crash between reservation and completion leaves a CREATING row without a Queue ID
+  (not counted, not monitored). Its proxy ID is never reused.
+- No runtime routing yet. T+60/T+90/T+115 and full `2h` continuity remain NOT RUN.
+
+### Follow-Up
+
+`Phase 9 Prompt 2 — Route every QueueSession operation through its persisted IPRoyal sticky-session identity.`
+
+### Git State
+
+- Branch: main

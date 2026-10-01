@@ -25,13 +25,19 @@ from queue_load_test.metrics.logging import log_event
 from queue_load_test.metrics.prometheus import PrometheusMetrics
 from queue_load_test.models import (
     BrowserBackendName,
+    ProxyProvider,
     QueueProgress,
     QueueSession,
     QueueStatus,
     SessionMode,
 )
+from queue_load_test.proxy import generate_proxy_session_id, validate_proxy_session_id
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
-from queue_load_test.repository import QueueIdConflictError, SessionRepository
+from queue_load_test.repository import (
+    ProxySessionIdConflictError,
+    QueueIdConflictError,
+    SessionRepository,
+)
 from queue_load_test.state import BrowserState, StateStore, StateStoreError
 from queue_load_test.transfer import (
     QueueItTransferExtractor,
@@ -42,6 +48,7 @@ from queue_load_test.utils.asyncio_tools import await_bounded
 
 type Sleep = Callable[[float], Awaitable[None]]
 type Jitter = Callable[[float, float], float]
+type ProxySessionIdFactory = Callable[[], str]
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +179,8 @@ class QueueSessionCreator:
         state_directory: Path,
         mode: SessionMode,
         browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
+        proxy_provider: ProxyProvider = ProxyProvider.NONE,
+        proxy_session_id_factory: ProxySessionIdFactory = generate_proxy_session_id,
         live_extractor: QueueItLiveStateExtractor | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
         retry_policy: CreationRetryPolicy | None = None,
@@ -189,6 +198,8 @@ class QueueSessionCreator:
         self._state_directory = state_directory
         self._mode = SessionMode.parse(mode)
         self._browser_backend = BrowserBackendName.parse(browser_backend)
+        self._proxy_provider = ProxyProvider.parse(proxy_provider)
+        self._proxy_session_id_factory = proxy_session_id_factory
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
         self._transfer_extractor_factory = transfer_extractor_factory
         self._retry_policy = retry_policy or CreationRetryPolicy()
@@ -224,6 +235,7 @@ class QueueSessionCreator:
 
     async def _create(self, work_item: CreationWorkItem) -> CreationOutcome:
         started = time.perf_counter()
+        reserved_session = await self._reserve_proxy_assignment(work_item)
         temporary_failures = 0
         last_failure = "creation_failed"
         for attempt in range(1, self._retry_policy.max_attempts + 1):
@@ -242,13 +254,19 @@ class QueueSessionCreator:
                 # await_bounded re-cancels: Playwright can otherwise wait forever for a
                 # wedged browser to acknowledge the first cancellation.
                 return await await_bounded(
-                    self._attempt(work_item, attempt, started, temporary_failures),
+                    self._attempt(
+                        work_item,
+                        attempt,
+                        started,
+                        temporary_failures,
+                        reserved_session,
+                    ),
                     timeout=self._attempt_timeout_seconds,
                 )
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()
-                await self._persist_failed(work_item, attempt, exc.code)
+                await self._persist_failed(work_item, attempt, exc.code, reserved_session)
                 return CreationOutcome(
                     kind=CreationOutcomeKind.PERMANENT_FAILURE,
                     attempts=attempt,
@@ -275,7 +293,12 @@ class QueueSessionCreator:
                         self._observability.record_creation_retry()
                     await self._sleep(self._retry_policy.delay(attempt, self._jitter))
 
-        await self._persist_failed(work_item, self._retry_policy.max_attempts, last_failure)
+        await self._persist_failed(
+            work_item,
+            self._retry_policy.max_attempts,
+            last_failure,
+            reserved_session,
+        )
         return CreationOutcome(
             kind=CreationOutcomeKind.TEMPORARY_FAILURE,
             attempts=self._retry_policy.max_attempts,
@@ -290,6 +313,7 @@ class QueueSessionCreator:
         attempt: int,
         started: float,
         temporary_failures: int,
+        reserved_session: QueueSession | None,
     ) -> CreationOutcome:
         state_saved = False
         state_path = self._state_directory / f"{work_item.session_id}.json"
@@ -356,9 +380,18 @@ class QueueSessionCreator:
                 transfer_url=transfer.transfer_url,
                 mode=self._mode,
                 browser_backend=self._browser_backend,
+                proxy_session_id=(
+                    reserved_session.proxy_session_id
+                    if reserved_session is not None
+                    else None
+                ),
                 status=QueueStatus.PARKED,
                 state_path=state_path,
-                created_at=observed_at,
+                created_at=(
+                    reserved_session.created_at
+                    if reserved_session is not None
+                    else observed_at
+                ),
                 last_checked_at=observed_at,
                 last_queue_update=progress.last_updated_at,
                 last_progress_change_at=observed_at,
@@ -366,13 +399,21 @@ class QueueSessionCreator:
                 attempt_count=attempt,
             )
             try:
-                await self._repository.create(session, progress)
+                if reserved_session is None:
+                    await self._repository.create(session, progress)
+                else:
+                    await self._repository.update(session, progress)
             except QueueIdConflictError:
                 if state_saved:
                     await self._state_store.delete(work_item.session_id)
                 if self._observability is not None:
                     self._observability.record_creation_duplicate()
-                await self._persist_failed(work_item, attempt, "duplicate_queue_id")
+                await self._persist_failed(
+                    work_item,
+                    attempt,
+                    "duplicate_queue_id",
+                    reserved_session,
+                )
                 return CreationOutcome(
                     kind=CreationOutcomeKind.DUPLICATE,
                     attempts=attempt,
@@ -436,6 +477,7 @@ class QueueSessionCreator:
         work_item: CreationWorkItem,
         attempts: int,
         failure_code: str,
+        reserved_session: QueueSession | None = None,
     ) -> None:
         session = QueueSession(
             session_id=work_item.session_id,
@@ -443,12 +485,51 @@ class QueueSessionCreator:
             transfer_url="",
             mode=self._mode,
             browser_backend=self._browser_backend,
+            proxy_session_id=(
+                reserved_session.proxy_session_id if reserved_session is not None else None
+            ),
             status=QueueStatus.FAILED,
             state_path=self._state_directory / f"{work_item.session_id}.json",
             attempt_count=attempts,
             last_error=failure_code,
+            created_at=(
+                reserved_session.created_at
+                if reserved_session is not None
+                else datetime.now(UTC)
+            ),
         )
-        await self._repository.create(session)
+        if reserved_session is None:
+            await self._repository.create(session)
+        else:
+            await self._repository.update(session)
+
+    async def _reserve_proxy_assignment(
+        self,
+        work_item: CreationWorkItem,
+    ) -> QueueSession | None:
+        """Persist one immutable sticky ID before any external target navigation."""
+
+        if self._proxy_provider is ProxyProvider.NONE:
+            return None
+        for _ in range(100):
+            proxy_session_id = validate_proxy_session_id(
+                self._proxy_session_id_factory()
+            )
+            session = QueueSession(
+                session_id=work_item.session_id,
+                queue_id=None,
+                transfer_url="",
+                mode=self._mode,
+                browser_backend=self._browser_backend,
+                proxy_session_id=proxy_session_id,
+                status=QueueStatus.CREATING,
+                state_path=self._state_directory / f"{work_item.session_id}.json",
+            )
+            try:
+                return await self._repository.create(session)
+            except ProxySessionIdConflictError:
+                continue
+        raise RuntimeError("Unable to allocate a unique proxy session ID")
 
 
 class SessionCreationController:

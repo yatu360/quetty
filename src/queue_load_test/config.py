@@ -3,14 +3,44 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, HttpUrl, field_validator, model_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.run import MonitoringStrategy
 from queue_load_test.models.session import SessionMode
+from queue_load_test.proxy import (
+    IPRoyalCredentials,
+    IPRoyalProxyConfigurationError,
+    is_valid_proxy_country,
+    is_valid_proxy_lifetime,
+)
+
+_INVALID_PROXY_SERVER = (
+    "IPROYAL_PROXY_SERVER must be a credential-free proxy URL with an explicit port"
+)
+
+
+def _is_valid_proxy_server(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = urlsplit(value)
+        return (
+            parsed.scheme in {"http", "https", "socks5"}
+            and parsed.hostname is not None
+            and parsed.port is not None
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+        )
+    except ValueError:
+        return False
 
 
 class Settings(BaseSettings):
@@ -31,6 +61,20 @@ class Settings(BaseSettings):
     monitoring_strategy: MonitoringStrategy = Field(
         default=MonitoringStrategy.HEADED_WINDOW,
         alias="MONITORING_STRATEGY",
+    )
+    # Production IPRoyal account configuration. RUN_IPROYAL_PROXY_SPIKE is a
+    # separate harness gate and is intentionally not a Settings field.
+    iproyal_proxy_enabled: bool = Field(default=False, alias="IPROYAL_PROXY_ENABLED")
+    iproyal_proxy_server: str | None = Field(default=None, alias="IPROYAL_PROXY_SERVER")
+    iproyal_proxy_username: SecretStr | None = Field(
+        default=None, alias="IPROYAL_PROXY_USERNAME"
+    )
+    iproyal_proxy_password: SecretStr | None = Field(
+        default=None, alias="IPROYAL_PROXY_PASSWORD"
+    )
+    iproyal_proxy_country: str | None = Field(default=None, alias="IPROYAL_PROXY_COUNTRY")
+    iproyal_proxy_lifetime: str | None = Field(
+        default=None, alias="IPROYAL_PROXY_LIFETIME"
     )
     # Sensitive browser-network discovery is opt-in and writes only to a dedicated,
     # git-ignored local evidence directory. It never changes the monitoring path.
@@ -241,6 +285,28 @@ class Settings(BaseSettings):
             raise ValueError("STAGING_URL is required for this staging harness")
         return str(self.staging_url)
 
+    def require_iproyal_credentials(self) -> IPRoyalCredentials:
+        """Resolve account credentials without placing them in reprs or persistence."""
+
+        if (
+            not self.iproyal_proxy_server
+            or self.iproyal_proxy_username is None
+            or not self.iproyal_proxy_username.get_secret_value()
+            or self.iproyal_proxy_password is None
+            or not self.iproyal_proxy_password.get_secret_value()
+        ):
+            raise IPRoyalProxyConfigurationError(
+                "IPRoyal credentials are required for this persisted run; configure "
+                "IPROYAL_PROXY_SERVER, IPROYAL_PROXY_USERNAME, and IPROYAL_PROXY_PASSWORD"
+            )
+        if not _is_valid_proxy_server(self.iproyal_proxy_server):
+            raise IPRoyalProxyConfigurationError(_INVALID_PROXY_SERVER)
+        return IPRoyalCredentials(
+            server=self.iproyal_proxy_server,
+            username=self.iproyal_proxy_username.get_secret_value(),
+            base_password=self.iproyal_proxy_password.get_secret_value(),
+        )
+
     @field_validator("session_mode", mode="before")
     @classmethod
     def parse_session_mode(cls, value: object) -> SessionMode:
@@ -281,6 +347,37 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_capacity(self) -> "Settings":
+        if self.iproyal_proxy_enabled:
+            missing: list[str] = []
+            if not self.iproyal_proxy_server:
+                missing.append("IPROYAL_PROXY_SERVER")
+            if self.iproyal_proxy_username is None or not (
+                self.iproyal_proxy_username.get_secret_value()
+            ):
+                missing.append("IPROYAL_PROXY_USERNAME")
+            if self.iproyal_proxy_password is None or not (
+                self.iproyal_proxy_password.get_secret_value()
+            ):
+                missing.append("IPROYAL_PROXY_PASSWORD")
+            if self.iproyal_proxy_country is None or not self.iproyal_proxy_country.strip():
+                missing.append("IPROYAL_PROXY_COUNTRY")
+            if self.iproyal_proxy_lifetime is None or not self.iproyal_proxy_lifetime.strip():
+                missing.append("IPROYAL_PROXY_LIFETIME")
+            if missing:
+                raise ValueError(
+                    "IPROYAL_PROXY_ENABLED=true requires: " + ", ".join(missing)
+                )
+            # Formats are checked only for production use, so copied .env.example
+            # placeholders do not break proxy-disabled startup.
+            if not _is_valid_proxy_server(self.iproyal_proxy_server):
+                raise ValueError(_INVALID_PROXY_SERVER)
+            if not is_valid_proxy_country(self.iproyal_proxy_country):
+                raise ValueError("IPROYAL_PROXY_COUNTRY must be a two-letter country code")
+            if not is_valid_proxy_lifetime(self.iproyal_proxy_lifetime):
+                raise ValueError(
+                    "IPROYAL_PROXY_LIFETIME must be a positive duration such as 30m, 2h, or 1d"
+                )
+
         total_capacity = self.chrome_process_count * self.max_contexts_per_browser
         if self.max_active_contexts > total_capacity:
             raise ValueError(

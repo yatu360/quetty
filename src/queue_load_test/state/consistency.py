@@ -9,7 +9,15 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
-from queue_load_test.models import BrowserBackendName, QueueSession, QueueStatus, SessionMode
+from queue_load_test.models import (
+    BrowserBackendName,
+    ProxyProvider,
+    QueueSession,
+    QueueStatus,
+    RunConfig,
+    SessionMode,
+)
+from queue_load_test.proxy import is_valid_proxy_session_id
 from queue_load_test.repository.base import RecoverySummary, SessionRepository
 from queue_load_test.state.base import (
     StateCorruptError,
@@ -77,8 +85,7 @@ class StateConsistencyChecker:
             self._repository.list(),
             self._repository.get_active_run(),
         )
-        expected_backend = active_run.browser_backend if active_run is not None else None
-        return await asyncio.to_thread(self._check_filesystem, sessions, expected_backend)
+        return await asyncio.to_thread(self._check_filesystem, sessions, active_run)
 
     async def recovery_summary(self, *, now: datetime) -> RecoverySummary:
         """Add explicit filesystem findings to the aggregate database summary."""
@@ -98,8 +105,11 @@ class StateConsistencyChecker:
     def _check_filesystem(
         self,
         sessions: list[QueueSession],
-        expected_backend: BrowserBackendName | None,
+        active_run: RunConfig | None,
     ) -> StateConsistencyReport:
+        expected_backend: BrowserBackendName | None = (
+            active_run.browser_backend if active_run is not None else None
+        )
         directory = self._state_store.directory
         normalize = _PathNormalizer()
         paths_to_sessions: dict[Path, list[str]] = {}
@@ -107,6 +117,20 @@ class StateConsistencyChecker:
         required_paths: set[Path] = set()
         required_session_count = 0
         findings: list[StateConsistencyFinding] = []
+        proxy_ids: dict[str, list[QueueSession]] = {}
+
+        if (
+            active_run is not None
+            and active_run.proxy_provider is ProxyProvider.IPROYAL
+            and (not active_run.proxy_country or not active_run.proxy_lifetime)
+        ):
+            findings.append(
+                StateConsistencyFinding(
+                    kind="run_proxy_provenance_incomplete",
+                    state_path="",
+                    detail="IPRoyal run requires country and lifetime provenance",
+                )
+            )
 
         for session in sessions:
             normalized = normalize(session.state_path)
@@ -129,6 +153,43 @@ class StateConsistencyChecker:
                     )
                 )
 
+            if active_run is None:
+                if session.proxy_session_id is not None:
+                    findings.append(
+                        StateConsistencyFinding(
+                            kind="session_proxy_without_run",
+                            state_path=str(session.state_path),
+                            session_ids=(session.session_id,),
+                        )
+                    )
+            elif active_run.proxy_provider is ProxyProvider.IPROYAL:
+                if session.proxy_session_id is None:
+                    findings.append(
+                        StateConsistencyFinding(
+                            kind="missing_proxy_session_id",
+                            state_path=str(session.state_path),
+                            session_ids=(session.session_id,),
+                        )
+                    )
+                elif not is_valid_proxy_session_id(session.proxy_session_id):
+                    findings.append(
+                        StateConsistencyFinding(
+                            kind="malformed_proxy_session_id",
+                            state_path=str(session.state_path),
+                            session_ids=(session.session_id,),
+                        )
+                    )
+                else:
+                    proxy_ids.setdefault(session.proxy_session_id, []).append(session)
+            elif session.proxy_session_id is not None:
+                findings.append(
+                    StateConsistencyFinding(
+                        kind="unexpected_proxy_session_id",
+                        state_path=str(session.state_path),
+                        session_ids=(session.session_id,),
+                    )
+                )
+
             expected_path = self._state_store.path_for(session.session_id)
             if session.mode is SessionMode.HYBRID and normalized != normalize(expected_path):
                 findings.append(
@@ -137,6 +198,18 @@ class StateConsistencyChecker:
                         state_path=str(session.state_path),
                         session_ids=(session.session_id,),
                         detail=f"expected {expected_path}",
+                    )
+                )
+
+        for duplicate_sessions in proxy_ids.values():
+            if len(duplicate_sessions) > 1:
+                findings.append(
+                    StateConsistencyFinding(
+                        kind="duplicate_proxy_session_id",
+                        state_path="",
+                        session_ids=tuple(
+                            sorted(session.session_id for session in duplicate_sessions)
+                        ),
                     )
                 )
 

@@ -12,6 +12,7 @@ from queue_load_test.models import (
     BrowserBackendName,
     BrowserRuntimeState,
     MonitoringStrategy,
+    ProxyProvider,
     QueueProgress,
     QueueSession,
     QueueStatus,
@@ -33,6 +34,8 @@ from queue_load_test.repository.base import (
     ManualSessionBusyError,
     ManualSessionCapacityError,
     OwnershipRecovery,
+    ProxySessionAssignmentError,
+    ProxySessionIdConflictError,
     QueueIdConflictError,
     RecoverySummary,
     SessionNotFoundError,
@@ -43,7 +46,8 @@ from queue_load_test.utils.asyncio_tools import run_to_completion
 _T = TypeVar("_T")
 
 _SESSION_COLUMNS = """
-    session_id, queue_id, transfer_url, mode, browser_backend, status, state_path,
+    session_id, queue_id, transfer_url, mode, browser_backend, proxy_session_id,
+    status, state_path,
     created_at, last_checked_at, last_queue_update, last_progress_change_at,
     next_check_at, attempt_count, last_error, worker_id, lease_until,
     manual_owner_id, manual_lease_until
@@ -74,6 +78,19 @@ CREATE INDEX IF NOT EXISTS idx_queue_sessions_manual_lease
     ON queue_sessions (manual_lease_until)
     WHERE manual_owner_id IS NOT NULL
 """
+_PROXY_SESSION_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_sessions_proxy_session_id
+    ON queue_sessions (proxy_session_id)
+    WHERE proxy_session_id IS NOT NULL
+"""
+_PROXY_SESSION_IMMUTABILITY_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_queue_sessions_proxy_session_id_immutable
+BEFORE UPDATE OF proxy_session_id ON queue_sessions
+WHEN NOT (OLD.proxy_session_id IS NEW.proxy_session_id)
+BEGIN
+    SELECT RAISE(ABORT, 'proxy_session_id is immutable');
+END
+"""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS run_config (
@@ -83,6 +100,9 @@ CREATE TABLE IF NOT EXISTS run_config (
     browser_backend TEXT NOT NULL DEFAULT 'chrome',
     browser_build TEXT,
     monitoring_strategy TEXT NOT NULL DEFAULT 'headed_window',
+    proxy_provider TEXT NOT NULL DEFAULT 'none',
+    proxy_country TEXT,
+    proxy_lifetime TEXT,
     created_at TEXT NOT NULL,
     status TEXT NOT NULL,
     current_run INTEGER NOT NULL UNIQUE CHECK (current_run = 1)
@@ -99,6 +119,7 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     transfer_url TEXT NOT NULL,
     mode TEXT NOT NULL,
     browser_backend TEXT NOT NULL DEFAULT 'chrome',
+    proxy_session_id TEXT,
     status TEXT NOT NULL,
     state_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -198,6 +219,7 @@ def _session_values(session: QueueSession) -> tuple[object, ...]:
         session.transfer_url,
         session.mode.value,
         session.browser_backend.value,
+        session.proxy_session_id,
         session.status.value,
         str(session.state_path),
         _to_storage(session.created_at),
@@ -224,6 +246,7 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
         transfer_url=row["transfer_url"],
         mode=SessionMode.parse(row["mode"]),
         browser_backend=BrowserBackendName.parse(row["browser_backend"]),
+        proxy_session_id=row["proxy_session_id"],
         status=QueueStatus.parse(row["status"]),
         state_path=Path(row["state_path"]),
         created_at=created_at,
@@ -373,7 +396,8 @@ class SQLiteSessionRepository:
             row = self._connect().execute(
                 """
                 SELECT run_id, target_url, requested_sessions, browser_backend,
-                       browser_build, monitoring_strategy, created_at, status
+                       browser_build, monitoring_strategy, proxy_provider,
+                       proxy_country, proxy_lifetime, created_at, status
                 FROM run_config WHERE current_run = 1
                 """
             ).fetchone()
@@ -391,6 +415,9 @@ class SQLiteSessionRepository:
                 browser_build=(
                     str(row["browser_build"]) if row["browser_build"] is not None else None
                 ),
+                proxy_provider=ProxyProvider.parse(row["proxy_provider"]),
+                proxy_country=row["proxy_country"],
+                proxy_lifetime=row["proxy_lifetime"],
                 created_at=created_at,
                 status=RunStatus(str(row["status"])),
             )
@@ -414,8 +441,9 @@ class SQLiteSessionRepository:
                     """
                     INSERT INTO run_config (
                         run_id, target_url, requested_sessions, browser_backend,
-                        browser_build, monitoring_strategy, created_at, status, current_run
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        browser_build, monitoring_strategy, proxy_provider,
+                        proxy_country, proxy_lifetime, created_at, status, current_run
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         run.run_id,
@@ -424,6 +452,9 @@ class SQLiteSessionRepository:
                         run.browser_backend.value,
                         run.browser_build,
                         run.monitoring_strategy.value,
+                        run.proxy_provider.value,
+                        run.proxy_country,
+                        run.proxy_lifetime,
                         _to_storage(run.created_at),
                         run.status.value,
                     ),
@@ -947,6 +978,8 @@ class SQLiteSessionRepository:
             self._migrate_session_columns(connection)
             self._migrate_run_columns(connection)
             self._migrate_runtime_control_columns(connection)
+            connection.execute(_PROXY_SESSION_INDEX_SQL)
+            connection.execute(_PROXY_SESSION_IMMUTABILITY_SQL)
             self._ensure_due_index(connection)
             connection.execute(_MANUAL_LEASE_INDEX_SQL)
             connection.execute(_DASHBOARD_ORDER_INDEX_SQL)
@@ -975,6 +1008,8 @@ class SQLiteSessionRepository:
                 "ALTER TABLE queue_sessions ADD COLUMN "
                 "browser_backend TEXT NOT NULL DEFAULT 'chrome'"
             )
+        if "proxy_session_id" not in columns:
+            connection.execute("ALTER TABLE queue_sessions ADD COLUMN proxy_session_id TEXT")
 
     @staticmethod
     def _migrate_run_columns(connection: sqlite3.Connection) -> None:
@@ -996,6 +1031,15 @@ class SQLiteSessionRepository:
                 "ALTER TABLE run_config ADD COLUMN "
                 "monitoring_strategy TEXT NOT NULL DEFAULT 'headed_window'"
             )
+        if "proxy_provider" not in columns:
+            connection.execute(
+                "ALTER TABLE run_config ADD COLUMN "
+                "proxy_provider TEXT NOT NULL DEFAULT 'none'"
+            )
+        if "proxy_country" not in columns:
+            connection.execute("ALTER TABLE run_config ADD COLUMN proxy_country TEXT")
+        if "proxy_lifetime" not in columns:
+            connection.execute("ALTER TABLE run_config ADD COLUMN proxy_lifetime TEXT")
 
     @staticmethod
     def _migrate_runtime_control_columns(connection: sqlite3.Connection) -> None:
@@ -1072,7 +1116,7 @@ class SQLiteSessionRepository:
             try:
                 connection.execute(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _session_values(session),
                 )
                 if progress is not None:
@@ -1082,6 +1126,10 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 if "queue_sessions.queue_id" in str(exc):
                     raise QueueIdConflictError("Queue ID already exists") from exc
+                if "queue_sessions.proxy_session_id" in str(exc):
+                    raise ProxySessionIdConflictError(
+                        "Proxy session ID already exists"
+                    ) from exc
                 raise
             return session
 
@@ -1103,7 +1151,7 @@ class SQLiteSessionRepository:
             try:
                 connection.executemany(
                     f"INSERT INTO queue_sessions ({_SESSION_COLUMNS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (_session_values(session) for session, _ in rows),
                 )
                 for _, progress in rows:
@@ -1114,6 +1162,10 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 if "queue_sessions.queue_id" in str(exc):
                     raise QueueIdConflictError("Queue ID already exists") from exc
+                if "queue_sessions.proxy_session_id" in str(exc):
+                    raise ProxySessionIdConflictError(
+                        "Proxy session ID already exists"
+                    ) from exc
                 raise
             return len(rows)
 
@@ -1130,12 +1182,16 @@ class SQLiteSessionRepository:
         def operation() -> QueueSession:
             connection = self._connect()
             existing = connection.execute(
-                "SELECT status FROM queue_sessions WHERE session_id = ?",
+                "SELECT status, proxy_session_id FROM queue_sessions WHERE session_id = ?",
                 (session.session_id,),
             ).fetchone()
             if existing is None:
                 raise SessionNotFoundError(f"Session {session.session_id!r} does not exist")
             validate_transition(QueueStatus.parse(existing["status"]), session.status)
+            if existing["proxy_session_id"] != session.proxy_session_id:
+                raise ProxySessionAssignmentError(
+                    "Persisted proxy session assignment cannot be changed"
+                )
             try:
                 ownership_sql = " AND worker_id IS NULL"
                 ownership_parameters: tuple[object, ...] = ()
@@ -1160,7 +1216,11 @@ class SQLiteSessionRepository:
                     WHERE session_id = ?
                     """
                     + ownership_sql,
-                    values[1:7] + values[8:] + (session.session_id,) + ownership_parameters,
+                    values[1:5]
+                    + values[6:8]
+                    + values[9:]
+                    + (session.session_id,)
+                    + ownership_parameters,
                 )
                 if cursor.rowcount != 1:
                     connection.rollback()
@@ -1174,6 +1234,10 @@ class SQLiteSessionRepository:
                 connection.rollback()
                 if "queue_sessions.queue_id" in str(exc):
                     raise QueueIdConflictError("Queue ID already exists") from exc
+                if "proxy_session_id is immutable" in str(exc):
+                    raise ProxySessionAssignmentError(
+                        "Persisted proxy session assignment cannot be changed"
+                    ) from exc
                 raise
             return session
 

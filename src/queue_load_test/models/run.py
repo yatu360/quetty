@@ -49,6 +49,26 @@ class MonitoringStrategy(StrEnum):
         return "Direct Monitoring Strategy"
 
 
+class ProxyProvider(StrEnum):
+    """Immutable run-level proxy provenance."""
+
+    NONE = "none"
+    IPROYAL = "iproyal"
+
+    @classmethod
+    def parse(cls, value: str | ProxyProvider) -> ProxyProvider:
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(value.strip().lower())
+        except ValueError as exc:
+            raise ValueError("Unknown proxy provider; expected one of: none, iproyal") from exc
+
+    @property
+    def label(self) -> str:
+        return "None" if self is ProxyProvider.NONE else "IPRoyal Residential"
+
+
 @dataclass(frozen=True, slots=True)
 class RunConfig:
     run_id: str
@@ -60,6 +80,9 @@ class RunConfig:
     # Browser build provenance at run creation: pinned for Camoufox, observed installed
     # Chrome for Patchright, and NULL for standard Chrome and legacy runs.
     browser_build: str | None = None
+    proxy_provider: ProxyProvider = ProxyProvider.NONE
+    proxy_country: str | None = None
+    proxy_lifetime: str | None = None
     status: RunStatus = RunStatus.ACTIVE
 
 

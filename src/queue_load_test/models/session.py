@@ -68,6 +68,9 @@ class QueueSession:
     queue_id: str | None = field(default=None, repr=False)
     session_id: str = field(default_factory=lambda: str(uuid4()))
     browser_backend: BrowserBackendName = BrowserBackendName.CHROME
+    # Non-secret provider routing provenance. It is assigned once before an
+    # IPRoyal-enabled session's first target navigation and is immutable thereafter.
+    proxy_session_id: str | None = None
     status: QueueStatus = QueueStatus.NEW
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_checked_at: datetime | None = None

@@ -928,6 +928,36 @@ Evidence boundary for every Phase 8 prompt: Prompts 1–8 are local deterministi
 local simulator/browser evidence. Prompts 2–4 and 7 each have a gated authorised
 staging path that was **NOT RUN**.
 
+## Phase 9 — IPRoyal Residential Per-Session Proxy — **IN PROGRESS**
+
+Goal: route each persisted QueueSession through its own IPRoyal Residential sticky
+session while preserving the bounded parked-session architecture (no per-session
+browser, context, profile, worker, or permanent proxy connection). Queue ID remains
+authoritative. The provider session ID is routing provenance, and observed exit IP is
+diagnostic/continuity metadata only.
+
+Existing evidence: the isolated compatibility spike reported `SPIKE_PASS` for its tested
+scope (Patchright connectivity, GB exit, fresh-context, browser-restart, and
+application-restart affinity, T+5/T+30 disconnected affinity, three concurrent sessions,
+leakage, and cleanup). T+60, T+90, T+115, and full `2h` continuity are **NOT RUN**.
+
+1. **Per-Session Proxy Foundation** — **implemented 2026-10-01 (local only)**
+   - Typed, validated `IPROYAL_PROXY_*` Settings. The spike gate is independent.
+   - Immutable run provenance (`proxy_provider`, `proxy_country`, `proxy_lifetime`).
+     Legacy runs migrate to `none`.
+   - One persisted, unique, immutable 8-character `proxy_session_id` per new
+     QueueSession, written before first navigation. Add and Replace allocate new IDs,
+     and a failed Replace preserves the old assignment.
+   - In-memory effective-password helper, environment-only credentials, fail-closed
+     restart, Camoufox rejection, safe setup/summary provenance, and report-only
+     consistency checks.
+   - No runtime browser routing changed.
+2. **Route every QueueSession operation through its persisted sticky identity** —
+   not started.
+3. **Observed exit-IP continuity metadata and dashboard visibility** — not started.
+
+Phase 9 is not complete.
+
 ## Scaling Gates
 
 ### Phase 1 → Phase 2
