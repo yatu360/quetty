@@ -13,7 +13,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -50,6 +50,8 @@ from queue_load_test.web.service import (
 _WEB_ROOT = Path(__file__).parent
 _PAGE_SIZE = 50
 _SHUTTING_DOWN = "Application is shutting down; the action was not accepted."
+# The transfer URL is a bearer credential for the Queue-it journey: never cache it.
+_NO_STORE = {"Cache-Control": "no-store"}
 logger = logging.getLogger(__name__)
 
 
@@ -600,6 +602,34 @@ def create_app(
             runtime_state=runtime_state,
             error=None if closed else "Session is not open in a browser",
             message="Browser session closed" if closed else None,
+        )
+
+    @app.get("/sessions/{session_id}/transfer-url")
+    async def session_transfer_url(session_id: str) -> Response:
+        """Return one session's persisted transfer URL for an explicit Copy URL click.
+
+        A single repository read by the requested ID and nothing else: no mutation,
+        lease, manual ownership, browser, restore, monitoring, or Queue-it traffic.
+        The URL travels only in this response body (never a path, query, redirect,
+        log, or metric), so the polled dashboard projection stays URL-free. A deleted
+        or replaced session ID is simply not found; replacements have their own ID.
+        """
+
+        session = await repository.get(session_id)
+        if session is None:
+            return JSONResponse(
+                {"available": False, "error": "Session not found."},
+                status_code=404,
+                headers=_NO_STORE,
+            )
+        if not session.transfer_url.strip():
+            return JSONResponse(
+                {"available": False, "error": "No transfer URL is available for this session."},
+                status_code=404,
+                headers=_NO_STORE,
+            )
+        return JSONResponse(
+            {"available": True, "transfer_url": session.transfer_url}, headers=_NO_STORE
         )
 
     async def submit_operator_action(

@@ -1603,7 +1603,8 @@ class SQLiteSessionRepository:
                 SELECT s.session_id, s.queue_id, s.status, p.progress_percentage,
                        s.last_queue_update, s.last_checked_at, s.next_check_at,
                        s.worker_id, s.lease_until, s.manual_owner_id, s.manual_lease_until,
-                       s.proxy_ip, s.proxy_ip_checked_at, s.proxy_ip_changed_count
+                       s.proxy_ip, s.proxy_ip_checked_at, s.proxy_ip_changed_count,
+                       TRIM(COALESCE(s.transfer_url, '')) <> '' AS has_transfer_url
                 FROM queue_sessions AS s
                 LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
                 """
@@ -1623,6 +1624,7 @@ class SQLiteSessionRepository:
                     proxy_ip=row["proxy_ip"],
                     proxy_ip_checked_at=_from_storage(row["proxy_ip_checked_at"]),
                     proxy_ip_changed_count=int(row["proxy_ip_changed_count"] or 0),
+                    has_transfer_url=bool(row["has_transfer_url"]),
                     runtime_state=_row_runtime_state(row, now=now),
                 )
                 for row in rows

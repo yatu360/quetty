@@ -102,6 +102,8 @@ class SessionSummary:
     proxy_ip: str | None = None
     proxy_ip_checked_at: datetime | None = None
     proxy_ip_changed_count: int = 0
+    # Availability marker for the explicit Copy URL action; never the URL itself.
+    has_transfer_url: bool = False
 
 
 @dataclass(frozen=True, slots=True)

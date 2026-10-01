@@ -54,6 +54,15 @@
                   hx-confirm="Delete this managed session? This does not cancel anything at Queue-it."
                   {{ mutate | safe }}>Delete</button>
           {% endif %}
+          {#- Read-only in every runtime state. Only an availability flag is rendered;
+              dashboard.js fetches the URL on click and hands it to the clipboard. -#}
+          {% if session.has_transfer_url %}
+          <button type="button" class="copy-url" data-copy-session="{{ session.session_id }}"
+                  title="Copy transfer URL" aria-label="Copy transfer URL">Copy URL</button>
+          {% else %}
+          <button type="button" class="copy-url" disabled
+                  title="No transfer URL is available for this session">Copy URL</button>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}

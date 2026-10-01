@@ -6283,3 +6283,106 @@ was never finished.
   unrelated to this change: the test passed 2/2 on rerun, and this change runs only at
   `start_run` on rows that proxy-disabled runs never create.
 - Ruff and strict mypy: PASS.
+
+## 2026-10-01 — Dashboard Copy Transfer URL operator action
+
+### Agent / Model
+
+Claude Opus 5.5.
+
+### Goal
+
+Add a per-session **Copy URL** button to the operator dashboard. It copies the
+session's persisted Queue-it `transfer_url` to the clipboard. The URL is never rendered
+into the polled dashboard, and the operation is read-only.
+
+### Changes Made
+
+- `SessionSummary` gains only the boolean `has_transfer_url`. `list_session_summaries`
+  computes it in SQL as `TRIM(COALESCE(transfer_url, '')) <> ''`. The URL itself is
+  still never selected into the projection.
+- New `GET /sessions/{session_id}/transfer-url`:
+  - It does one `repository.get` by ID and returns JSON with `Cache-Control: no-store`.
+  - A missing session returns 404 "Session not found". A session with an empty URL
+    returns 404 "No transfer URL is available". No URL is invented.
+  - It does no writes and takes no leases or ownership. It makes no runtime, browser,
+    restore, or monitoring calls, and sends no Queue-it traffic.
+  - The URL appears only in the response body.
+- `_sessions.html` shows a Copy URL button (`title`/`aria-label` "Copy transfer URL")
+  in every runtime state. The button carries only `data-copy-session="<session_id>"`.
+  It is disabled when no URL exists.
+- `dashboard.js` has one delegated click listener. It fetches the endpoint and calls
+  `navigator.clipboard.writeText()`, then shows "Copied" or "Copy failed" for about
+  1.5 seconds. The feedback is keyed by session ID and re-applied after HTMX swaps.
+  The URL never enters the DOM, and error text is never shown. The existing
+  scroll-preservation and local-time scripts are unchanged.
+
+### Files Added
+
+- `tests/unit/test_dashboard_copy_url.py`
+- `tests/integration/test_dashboard_copy_url_browser.py`
+
+### Files Modified
+
+- `src/queue_load_test/models/run.py`
+- `src/queue_load_test/repository/sqlite.py`
+- `src/queue_load_test/web/app.py`
+- `src/queue_load_test/web/templates/_sessions.html`
+- `src/queue_load_test/web/static/dashboard.js`
+- `PROJECT_CONTEXT.md`
+
+### Tests Run
+
+- `python -m pytest tests/unit/test_dashboard_copy_url.py`: 7 passed. These tests
+  cover:
+  - the available and disabled button states;
+  - an exact URL from the endpoint;
+  - no fabricated URL;
+  - not-found for unknown, deleted, and replaced IDs;
+  - URL-free and state-path-free dashboard and partial HTML;
+  - read-only behaviour while paused, CHECKING, and OPEN_IN_CHROME. Mutating
+    repository methods were trapped, rows were compared byte-for-byte, and no runtime
+    calls were made;
+  - no URL in captured logs, `/metrics`, or unrelated action responses;
+  - a sanitized 503 on repository failure.
+- `python -m pytest tests/integration/test_dashboard_copy_url_browser.py
+  tests/integration/test_dashboard_scroll.py tests/integration/test_dashboard_local_time.py`:
+  7 passed. The Copy URL browser test uses the real app and `dashboard.js` with a
+  recorded clipboard. It shows that:
+  - the exact URL is copied after 2 and then 3 more HTMX replacements;
+  - each click makes exactly one fetch and one write;
+  - the label resets;
+  - "Copy failed" is shown with no URL in the DOM;
+  - the button is disabled for a session without a URL.
+- `ruff check src tests`: PASS. `mypy src`: PASS (111 files).
+- `python -m pytest`: 940 passed, 4 deselected.
+
+### Staging Tests
+
+- NOT RUN. This feature needs no Queue-it traffic, and no staging validation is claimed.
+
+### Important Decisions
+
+- Not-found and no-URL both return 404 with `available: false`, so the client handles
+  both the same way.
+- The `available` flag is a precomputed boolean, not inferred from other fields. A
+  CREATING reservation has an empty URL until Queue-it issues one.
+- There is no `<textarea>`/`execCommand` fallback. On a non-secure origin (a
+  non-localhost plain-HTTP `UI_HOST`), the button reports "Copy failed".
+- The integration test file name has a `_browser` suffix. Pytest's rootdir import mode
+  needs unique test basenames.
+
+### Known Issues
+
+- The UI has no authentication beyond binding to localhost, as before. The endpoint
+  relies on the same local-operator boundary and on the browser blocking cross-origin
+  reads (there is no CORS middleware).
+
+### Follow-Up
+
+None required. The open Phase 8 and Phase 9 follow-ups in `PROJECT_CONTEXT.md` are
+unchanged.
+
+### Git State
+
+- Branch: main

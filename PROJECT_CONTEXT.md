@@ -762,6 +762,8 @@ extraction diagnostics. All Queue-it layout fields can be `None`.
 `requested_sessions`, independent `browser_backend`/`browser_build` provenance,
 `monitoring_strategy`, `created_at`, and `ACTIVE` run status. `SessionSummary` is a
 safe dashboard projection and never contains transfer URLs or browser-state paths.
+Its only transfer-related field is the boolean `has_transfer_url`, which enables the
+per-session Copy URL button.
 
 Modes are `HYBRID` and `TRANSFER_ONLY`. Statuses are `NEW`, `CREATING`, `PRE_QUEUE`,
 `ACTIVE_QUEUE`, `PARKED`, `CHECKING`, `PAUSED`, `SERVICED_SOON`, `TURN_STARTED`,
@@ -1605,6 +1607,44 @@ manually owned rows.
     - `harness/phase9_iproyal_live.py`: gated real IPRoyal and ipify.
   - Phase 9 is ACCEPTED for application integration. Live provider continuity is
     claimed only for the measured intervals in `docs/phase9_iproyal_acceptance.md`.
+
+## Dashboard Copy URL Operator Action (2026-10-01)
+
+- Each dashboard session row has a **Copy URL** button (`title`/`aria-label`
+  "Copy transfer URL"). It is shown in every runtime state, including when monitoring
+  is paused, PARKED, CHECKING, or OPEN_IN_CHROME. It is disabled when the session has
+  no persisted transfer URL, for example a CREATING reservation.
+- `transfer_url` remains excluded from `SessionSummary`, the dashboard HTML, and HTMX
+  partials. It is also kept out of hidden inputs, `data-*` attributes, page script,
+  logs, metrics, exceptions, and result JSON. The projection adds only
+  `has_transfer_url`. The two-second polling path is URL-free.
+- The URL is fetched only after a deliberate click: `GET /sessions/{session_id}/transfer-url`.
+  - The endpoint does one `repository.get` by ID and returns JSON with
+    `Cache-Control: no-store`:
+    - `{"available": true, "transfer_url": ...}` when a URL exists;
+    - a 404 `{"available": false, "error": ...}` when the session is missing or has
+      no URL.
+  - The URL appears only in the response body, never in a path, query, or redirect.
+  - A deleted or replaced session ID is not found. A replacement has its own ID, so
+    the old ID never resolves to the replacement's URL.
+  - Repository failures use the generic sanitized failure middleware.
+- `dashboard.js` uses one delegated click listener, so it survives `#session-results`
+  replacement. It passes the response straight to `navigator.clipboard.writeText()`
+  and shows "Copied" or "Copy failed" for about 1.5 seconds. That feedback is keyed by
+  session ID and re-applied after HTMX swaps. The URL never enters the DOM, and the
+  error text never includes it.
+  - The Clipboard API requires a secure context. The default `UI_HOST=127.0.0.1`
+    qualifies. A non-localhost plain-HTTP host shows "Copy failed".
+- The operation is local and read-only:
+  - no repository write;
+  - no scheduler lease or manual ownership;
+  - no BrowserManager, restore, creation, monitoring, Direct Monitoring, or
+    Refresh Now;
+  - no Queue-it traffic.
+- Tests:
+  - `tests/unit/test_dashboard_copy_url.py`
+  - `tests/integration/test_dashboard_copy_url_browser.py` (real app, real
+    `dashboard.js`, a recorded clipboard, and repeated HTMX swaps).
 
 ## Next Task
 
