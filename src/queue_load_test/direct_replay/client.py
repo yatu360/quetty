@@ -69,7 +69,12 @@ class DirectStatusReplayClient:
         max_connections: int = 2,
         max_concurrency: int = 1,
         transport: httpx.AsyncBaseTransport | None = None,
+        proxy: httpx.Proxy | None = None,
     ) -> None:
+        if transport is not None and proxy is not None:
+            # httpx would silently ignore the proxy for a custom transport; refuse
+            # rather than risk an unproxied request.
+            raise ValueError("a replay client takes either a transport or a proxy")
         if timeout_seconds <= 0 or max_response_bytes < 1:
             raise ValueError("replay timeout and response bound must be positive")
         if max_connections < 1 or max_concurrency < 1:
@@ -92,6 +97,10 @@ class DirectStatusReplayClient:
             ),
             follow_redirects=False,
             transport=transport,
+            proxy=proxy,
+            # A proxied request is routed only by its explicit per-session proxy;
+            # proxy-disabled clients keep the previous environment behaviour.
+            trust_env=proxy is None,
         )
 
     async def __aenter__(self) -> Self:
@@ -115,6 +124,8 @@ class DirectStatusReplayClient:
                 content=self._recipe.body,
             ) as response:
                 result = await self._consume_response(response, profile, before)
+        except httpx.ProxyError:
+            result = _failure(profile, ReplayFailure.PROXY, "proxy request failed")
         except httpx.TimeoutException:
             result = _failure(profile, ReplayFailure.TIMEOUT, "request timed out")
         except httpx.RequestError:

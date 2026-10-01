@@ -5990,3 +5990,148 @@ runtime browser routing.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Phase 9 Prompt 2 — Route Every QueueSession Operation Through Its Persisted IPRoyal Sticky Session
+
+### Agent / Model
+
+Claude Opus 5.5.
+
+### Goal
+
+Route every outbound target operation that belongs to a QueueSession through that
+session's own persisted IPRoyal sticky-session ID, fail closed when it cannot be
+resolved, and keep the bounded temporary-context architecture.
+
+### Context-path audit
+
+Every QueueSession target path goes through three classes:
+
+- `QueueSessionCreator`: one context site, used for setup, deficit refill, Add, and the
+  Replace candidate.
+- `QueueSessionRestorer`: four context sites, used for automatic monitoring,
+  Refresh Now, and Manual Open:
+  - transfer and storage-state restore;
+  - open restore;
+  - no-ID open.
+- `DirectStatusChecker`: the httpx replay.
+
+Preflights load only local `data:`/blank pages and are not session traffic. The gated
+benchmark harnesses build their own components and remain proxy-disabled.
+
+### Changes Made
+
+- `proxy/resolver.py`:
+  - `resolve_proxy_for_session`;
+  - `SessionProxyResolver` (`for_run`, `resolve`, `record_attempt`,
+    `record_failure`);
+  - `resolve_session_proxy`, so an assigned session can never go unproxied;
+  - `ProxyFailure`, `ProxyPurpose`, and `ProxyDiagnostics` (safe metadata);
+  - `ResolvedSessionProxy`, with a redacted repr;
+  - `classify_proxy_error` and `ProxyAuthWatch`.
+- Creator: each attempt re-resolves the reserved assignment, so retries reuse it.
+  - A resolution failure is a permanent creation failure, with no context and no
+    navigation.
+  - Proxy navigation errors are transient (`proxy_auth_failed` /
+    `proxy_connect_failed`) and retried through the same ID.
+  - Constructing an IPRoyal creator without a resolver raises.
+- Restorer: the public entries resolve once, fail closed with `RestoreFailure.PROXY_*`,
+  and thread the proxy into all four context sites.
+  - Proxy failures are transient, so monitoring records CONNECTION_LOST and the Queue
+    ID is unchanged.
+  - A 407, observed as a response status, is classified as `PROXY_AUTH_FAILED`.
+- Direct:
+  - `DirectStatusReplayClient(proxy=httpx.Proxy(server, auth=(user, password)))`. It
+    refuses a proxy together with a custom transport, and sets `trust_env=False` only
+    when proxied.
+  - Checker: resolution failure gives `PROXY_UNAVAILABLE` and `httpx.ProxyError` gives
+    `PROXY_FAILED`. Both fall back only to the proxied browser monitor and do not
+    count against the recipe.
+- `ApplicationRunRuntime.start_run` builds one resolver per run and passes it to:
+  - the creator;
+  - the monitoring restorer;
+  - the headed Manual Open restorer;
+  - the Direct checker.
+- Metrics: `proxy_provider_info{provider}`, `proxied_attempts_total{purpose}`, and
+  `proxy_failures_total{purpose,reason}`. `FORBIDDEN_LABEL_NAMES` now includes
+  `proxy_session_id` and `ip`.
+- Proxy-disabled call shapes are unchanged: no `proxy=` keyword is passed.
+
+### Files Added
+
+- `src/queue_load_test/proxy/resolver.py`
+- `src/queue_load_test/harness/local_auth_proxy.py`
+- `tests/unit/test_iproyal_resolver.py`
+- `tests/unit/test_iproyal_direct.py`
+- `tests/integration/test_iproyal_proxy_routing.py`
+
+### Files Modified
+
+- `proxy/__init__.py`, `browser/backend.py` (docstring)
+- `scheduler/creation.py`, `transfer/restoration.py`
+- `direct_monitor/checker.py`, `direct_monitor/models.py`
+- `direct_replay/client.py`, `direct_replay/models.py`, `models/direct_monitoring.py`
+- `metrics/prometheus.py`, `web/service.py`
+- `tests/unit/test_iproyal_proxy.py`
+- `README.md`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`
+
+### Tests Run
+
+- Real Patchright and Chrome (`test_iproyal_proxy_routing.py`, 16 passed), using a
+  local Basic-auth proxy and the local simulator. One QueueSession kept one sticky ID
+  through all of:
+  - acquisition and park;
+  - two automatic checks;
+  - Pause/Resume and Refresh Now;
+  - Manual Open and Close;
+  - a browser-process restart and a restore;
+  - an application/repository restart (credentials re-read from Settings) and a
+    restore.
+  Further results:
+  - Three concurrent sessions in one browser process used three IDs.
+  - Add and Replace used new IDs, and a failed Replace preserved the old one.
+  - No-ID Manual Open adoption kept its ID.
+  - Rejected auth gave `PROXY_AUTH_FAILED` and an unreachable proxy gave
+    `PROXY_CONNECT_FAILED`. Neither sent any target request, and the Queue ID was
+    unchanged.
+  - Every simulator request arrived through the proxy.
+- Direct (`test_iproyal_direct.py`, 8 passed):
+  - per-session proxies, including a real httpx request through the local proxy;
+  - an unresolvable proxy falls back only to the proxied browser;
+  - both paths failing fails closed;
+  - no unproxied Direct request.
+- Resolver and wiring (`test_iproyal_resolver.py`, 27 passed).
+- `python -m pytest`: 889 passed, 4 staging deselected (423.51 s), comprising 819 unit
+  and 70 integration tests. These include the existing Patchright, Chrome, Direct, and
+  Phase 5 workflows, which are proxy-disabled regressions.
+- `ruff check src tests`, `mypy src` (strict), and `git diff --check`: PASS.
+
+### Staging Tests
+
+- NOT RUN. No IPRoyal, Queue-it, or internet traffic. Local Direct results make no
+  Queue-it claim.
+
+### Important Decisions
+
+- Chromium never proxies loopback by default. The real-browser tests add the
+  `<-loopback>` bypass rule in a test-only backend wrapper, and production sends
+  exactly `server`/`username`/`password`.
+- Chromium surfaces a rejected proxy login as a generic
+  `ERR_HTTP_RESPONSE_CODE_FAILURE`. The 407 is therefore read from the page response
+  event, and only its status is kept.
+- A creation-time resolution failure is permanent for that new candidate. Startup
+  already refuses an IPRoyal run without credentials, so this cannot spin in practice.
+
+### Known Issues
+
+- The orphaned CREATING reservation noted in Prompt 1 remains.
+- Exit-IP observation and dashboard integration are Prompt 3.
+- T+60/T+90/T+115 and the full `2h` continuity remain NOT RUN.
+
+### Follow-Up
+
+`Phase 9 Prompt 3 — Proxy IP observation, dashboard integration, and final Phase 9 acceptance.`
+
+### Git State
+
+- Branch: main

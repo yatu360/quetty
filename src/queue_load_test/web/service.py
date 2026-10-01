@@ -43,6 +43,7 @@ from queue_load_test.observation_equivalence import (
     DirectSchemaError,
     load_direct_response_schema,
 )
+from queue_load_test.proxy import SessionProxyResolver
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import DirectMonitorMetadataRepository, SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
@@ -129,6 +130,7 @@ def _direct_handler_for_run(
     target_url: str,
     metadata: DirectMonitorMetadataRepository | None = None,
     observability: PrometheusMetrics | None = None,
+    proxy_resolver: SessionProxyResolver | None = None,
 ) -> DirectMonitoringHandler | None:
     if run.monitoring_strategy is not MonitoringStrategy.DIRECT:
         return None
@@ -161,6 +163,7 @@ def _direct_handler_for_run(
             timeout_seconds=settings.direct_monitor_timeout_seconds,
             max_response_bytes=settings.direct_monitor_max_response_bytes,
             failure_threshold=settings.direct_monitor_failure_threshold,
+            proxy_resolver=proxy_resolver,
         ),
         store=store,
         harvester=harvester,
@@ -312,6 +315,10 @@ class ApplicationRunRuntime:
                 }
             )
             metrics = PrometheusMetrics()
+            metrics.set_proxy_provider(run.proxy_provider.value)
+            # The single authority for every per-session proxy in this run: acquisition,
+            # restore, monitoring, Refresh Now, Manual Open, and Direct requests.
+            proxy_resolver = SessionProxyResolver.for_run(run, self._base_settings, observer=metrics)
             state_store = FileSystemStateStore(settings.state_directory)
             shared_capacity = BrowserContextCapacity(settings.max_active_contexts)
             browser_manager = BrowserManager.from_settings(
@@ -345,7 +352,7 @@ class ApplicationRunRuntime:
                 state_directory=settings.state_directory,
                 mode=settings.session_mode,
                 browser_backend=run.browser_backend,
-                proxy_provider=run.proxy_provider,
+                proxy_resolver=proxy_resolver,
                 observability=metrics,
             )
             population_adjustment = (
@@ -370,6 +377,7 @@ class ApplicationRunRuntime:
                 observability=metrics,
                 browser_backend=run.browser_backend,
                 status_discovery_factory=status_discovery,
+                proxy_resolver=proxy_resolver,
             )
             monitor = QueueSessionMonitor(
                 repository=self._repository,
@@ -386,6 +394,7 @@ class ApplicationRunRuntime:
                 target_url=target_url,
                 metadata=_metadata_repository(self._repository),
                 observability=metrics,
+                proxy_resolver=proxy_resolver,
             )
             metrics.set_monitoring_strategy(run.monitoring_strategy.value)
             automatic_monitor = _automatic_monitor_for_strategy(
@@ -415,6 +424,7 @@ class ApplicationRunRuntime:
                 admission_wait_timeout_ms=settings.admission_wait_seconds * 1_000,
                 observability=metrics,
                 browser_backend=run.browser_backend,
+                proxy_resolver=proxy_resolver,
             )
             manual_sessions = ManualChromeSessionManager(
                 repository=self._repository,

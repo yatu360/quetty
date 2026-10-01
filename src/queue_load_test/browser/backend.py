@@ -25,8 +25,8 @@ type BrowserControllerStarter = Callable[[], Awaitable[BrowserController]]
 class BrowserProxySettings(TypedDict):
     """Per-context proxy values accepted by the browser APIs.
 
-    Normal Quetty paths never supply these values. The optional seam exists for the
-    isolated Primed compatibility spike, where credentials remain in memory only.
+    Supplied only by the per-session proxy resolver (``queue_load_test.proxy``) and
+    the isolated IPRoyal spike. Credentials stay in memory and are never persisted.
     """
 
     server: str

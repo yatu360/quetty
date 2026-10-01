@@ -31,7 +31,16 @@ from queue_load_test.models import (
     QueueStatus,
     SessionMode,
 )
-from queue_load_test.proxy import generate_proxy_session_id, validate_proxy_session_id
+from queue_load_test.proxy import (
+    ProxyAuthWatch,
+    ProxyFailure,
+    ProxyResolutionError,
+    SessionProxyResolver,
+    classify_proxy_error,
+    generate_proxy_session_id,
+    resolve_session_proxy,
+    validate_proxy_session_id,
+)
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import (
     ProxySessionIdConflictError,
@@ -180,6 +189,7 @@ class QueueSessionCreator:
         mode: SessionMode,
         browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
         proxy_provider: ProxyProvider = ProxyProvider.NONE,
+        proxy_resolver: SessionProxyResolver | None = None,
         proxy_session_id_factory: ProxySessionIdFactory = generate_proxy_session_id,
         live_extractor: QueueItLiveStateExtractor | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
@@ -199,6 +209,17 @@ class QueueSessionCreator:
         self._mode = SessionMode.parse(mode)
         self._browser_backend = BrowserBackendName.parse(browser_backend)
         self._proxy_provider = ProxyProvider.parse(proxy_provider)
+        if proxy_resolver is not None:
+            if (
+                self._proxy_provider is not ProxyProvider.NONE
+                and self._proxy_provider is not proxy_resolver.provider
+            ):
+                raise ValueError("proxy_provider contradicts the session proxy resolver")
+            self._proxy_provider = proxy_resolver.provider
+        if self._proxy_provider is not ProxyProvider.NONE and proxy_resolver is None:
+            # Fail closed at construction: a proxied run can never acquire unproxied.
+            raise ValueError("A proxied run requires a session proxy resolver")
+        self._proxy_resolver = proxy_resolver
         self._proxy_session_id_factory = proxy_session_id_factory
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
         self._transfer_extractor_factory = transfer_extractor_factory
@@ -317,8 +338,28 @@ class QueueSessionCreator:
     ) -> CreationOutcome:
         state_saved = False
         state_path = self._state_directory / f"{work_item.session_id}.json"
-        async with self._browser_manager.context() as context:
+        # Every attempt (including retries) re-resolves the same persisted assignment
+        # before any context exists; a resolution failure makes no target request.
+        try:
+            proxy = (
+                resolve_session_proxy(self._proxy_resolver, reserved_session)
+                if reserved_session is not None
+                else None
+            )
+        except ProxyResolutionError as exc:
+            raise PermanentCreationError(exc.failure.value.lower()) from None
+        if self._proxy_provider is not ProxyProvider.NONE and proxy is None:
+            raise PermanentCreationError("proxy_config_missing")
+        if proxy is not None and self._proxy_resolver is not None:
+            self._proxy_resolver.record_attempt()
+        context_scope = (
+            self._browser_manager.context(proxy=proxy.browser_proxy())
+            if proxy is not None
+            else self._browser_manager.context()
+        )
+        async with context_scope as context:
             page = await context.new_page()
+            auth_watch = ProxyAuthWatch.attach(page) if proxy is not None else None
             navigation_started = time.perf_counter()
             try:
                 response = await page.goto(
@@ -332,9 +373,17 @@ class QueueSessionCreator:
                 if self._observability is not None:
                     self._observability.record_navigation_failure(timed_out=True)
                 raise
-            except BROWSER_ERROR_TYPES:
+            except BROWSER_ERROR_TYPES as exc:
                 if self._observability is not None:
                     self._observability.record_navigation_failure()
+                proxy_failure = (
+                    classify_proxy_error(exc, auth_watch) if proxy is not None else None
+                )
+                if proxy_failure is not None:
+                    assert self._proxy_resolver is not None
+                    self._proxy_resolver.record_failure(proxy_failure)
+                    # Retry later through the same sticky session; never rotate it.
+                    raise TransientCreationError(proxy_failure.value.lower()) from None
                 raise
             finally:
                 if self._observability is not None:
@@ -344,6 +393,10 @@ class QueueSessionCreator:
             if response is not None:
                 if response.status >= 400 and self._observability is not None:
                     self._observability.record_navigation_failure()
+                if response.status == 407 and proxy is not None:
+                    assert self._proxy_resolver is not None
+                    self._proxy_resolver.record_failure(ProxyFailure.PROXY_AUTH_FAILED)
+                    raise TransientCreationError("proxy_auth_failed")
                 if response.status >= 500 or response.status in {408, 429}:
                     raise TransientCreationError("temporary_http_response")
                 if response.status >= 400:

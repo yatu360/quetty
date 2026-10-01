@@ -14,6 +14,7 @@ from queue_load_test.models import (
     QueueSession,
     QueueStatus,
 )
+from queue_load_test.proxy import ProxyFailure, ProxyPurpose
 from queue_load_test.repository import PROGRESS_BUCKETS, RecoverySummary
 
 _DURATION_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
@@ -27,7 +28,9 @@ REPOSITORY_ERROR_OPERATIONS: tuple[str, ...] = (
 )
 """Fixed label values for repository errors; unknown operations collapse to ``other``."""
 
-FORBIDDEN_LABEL_NAMES = frozenset({"queue_id", "session_id", "transfer_url", "state_path"})
+FORBIDDEN_LABEL_NAMES = frozenset(
+    {"queue_id", "session_id", "transfer_url", "state_path", "proxy_session_id", "ip"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +388,26 @@ class PrometheusMetrics:
             "Claimable due sessions found at startup.",
             registry=self.registry,
         )
+        # Per-session IPRoyal proxy (Phase 9). Labels are closed enums only; never a
+        # provider session ID, QueueSession ID, Queue ID, or IP address.
+        self.proxy_provider_info = Gauge(
+            "proxy_provider_info",
+            "Constant 1 labelled with the current run's persisted proxy provider.",
+            labelnames=("provider",),
+            registry=self.registry,
+        )
+        self.proxied_attempts_total = Counter(
+            "proxied_attempts_total",
+            "Proxied browser contexts or Direct requests opened, by purpose.",
+            labelnames=("purpose",),
+            registry=self.registry,
+        )
+        self.proxy_failures_total = Counter(
+            "proxy_failures_total",
+            "Per-session proxy failures by purpose and sanitized reason.",
+            labelnames=("purpose", "reason"),
+            registry=self.registry,
+        )
         # Direct Monitoring Strategy (Phase 8). Labels are closed enums only:
         # never a session, Queue ID, URL, or any recipe material.
         self.monitoring_strategy_info = Gauge(
@@ -732,6 +755,18 @@ class PrometheusMetrics:
             checks_per_second=count / elapsed,
             average_check_duration_seconds=duration / count if count else 0.0,
         )
+
+    def set_proxy_provider(self, provider: str) -> None:
+        self.proxy_provider_info.clear()
+        self.proxy_provider_info.labels(provider=provider).set(1)
+
+    def record_proxy_attempt(self, purpose: ProxyPurpose) -> None:
+        self.proxied_attempts_total.labels(purpose=ProxyPurpose(purpose).value).inc()
+
+    def record_proxy_failure(self, purpose: ProxyPurpose, failure: ProxyFailure) -> None:
+        self.proxy_failures_total.labels(
+            purpose=ProxyPurpose(purpose).value, reason=ProxyFailure(failure).value
+        ).inc()
 
     def set_monitoring_strategy(self, strategy: str) -> None:
         self.monitoring_strategy_info.clear()

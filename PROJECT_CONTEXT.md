@@ -1548,7 +1548,27 @@ IPRoyal sticky-session ID.
   `missing_proxy_session_id`, `malformed_proxy_session_id`,
   `duplicate_proxy_session_id`, `unexpected_proxy_session_id`,
   `session_proxy_without_run`, and `run_proxy_provenance_incomplete`.
-- **No browser traffic is routed through the proxy yet.**
+- Prompt 2 (2026-10-01, local only) routes every QueueSession operation through
+  that session's own persisted sticky session.
+  - `proxy/resolver.py`: `resolve_proxy_for_session(run, session, credentials)`,
+    `SessionProxyResolver` (bound once per run in `ApplicationRunRuntime.start_run`),
+    `resolve_session_proxy` (an assigned session without a resolver fails closed),
+    `ProxyFailure`, `classify_proxy_error`, and `ProxyAuthWatch` (a 407 on the page
+    becomes `PROXY_AUTH_FAILED`).
+  - Creator: each attempt re-resolves the reserved row's ID and opens
+    `context(proxy=...)`.
+  - Restorer: `restore`, `restore_with_method`, and `restore_open` resolve once, fail
+    closed with `RestoreFailure.PROXY_*` before any context, and thread the proxy into
+    the transfer, storage-state, open, and no-ID context sites.
+  - Direct: `DirectStatusChecker` uses `httpx.Proxy` with an auth tuple. The proxy and
+    a custom transport are mutually exclusive, and `trust_env=False` applies only when
+    proxied. `DirectFallbackReason.PROXY_UNAVAILABLE`/`PROXY_FAILED` fall back to the
+    proxied browser without degrading the recipe.
+  - Proxy-disabled calls are byte-identical: no `proxy=` keyword is passed.
+  - Test seams: `harness/local_auth_proxy.py` is a local Basic-auth forward proxy that
+    records each request's sticky-session ID, forwards to loopback only, and refuses
+    CONNECT. `tests/integration/test_iproyal_proxy_routing.py` adds a test-only
+    `<-loopback>` bypass rule so Chromium proxies the local simulator.
 
 Known limitation: a process crash between reservation and completion leaves a CREATING
 row without a Queue ID that holds its (never reused) proxy ID. That row is not counted
@@ -1556,7 +1576,7 @@ as a valid identity and is not monitored.
 
 ## Next Task
 
-`Phase 9 Prompt 2 — Route every QueueSession operation through its persisted IPRoyal sticky-session identity.`
+`Phase 9 Prompt 3 — Proxy IP observation, dashboard integration, and final Phase 9 acceptance.`
 
 The Phase 8 follow-ups also remain open: authorised Queue-it staging validation of
 Direct Monitoring Strategy and authorised Patchright staging validation. Never claim

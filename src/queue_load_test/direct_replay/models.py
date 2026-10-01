@@ -23,6 +23,7 @@ class ReplayFailure(StrEnum):
     SCHEMA = "schema"
     STATE = "state"
     IDENTITY = "identity"
+    PROXY = "proxy"
 
 
 class ValueStability(StrEnum):

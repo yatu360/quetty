@@ -16,6 +16,7 @@ import httpx
 from queue_load_test.direct_monitor.harvest import LOCAL_SIMULATOR_SCOPE, is_loopback_url
 from queue_load_test.direct_monitor.models import (
     HARD_FAILURES,
+    PROXY_FAILURES,
     DirectAttempt,
     DirectCapability,
     DirectFallbackReason,
@@ -49,11 +50,19 @@ from queue_load_test.observation_equivalence import (
     DirectObservationFailure,
     DirectResponseParser,
 )
+from queue_load_test.proxy import (
+    ProxyFailure,
+    ProxyPurpose,
+    ProxyResolutionError,
+    SessionProxyResolver,
+    resolve_session_proxy,
+)
 from queue_load_test.state import BrowserState, StateStoreError
 
 logger = logging.getLogger(__name__)
 
 type Clock = Callable[[], datetime]
+type ProxiedTransportFactory = Callable[[httpx.Proxy], httpx.AsyncBaseTransport]
 
 # Only in-queue states are persisted from a direct response. Admission, expiry,
 # connection loss, and unknown lifecycle always go to the browser monitor, so a
@@ -76,6 +85,7 @@ _REPLAY_FAILURES = {
     ReplayFailure.REDIRECT: DirectFallbackReason.UNEXPECTED_REDIRECT,
     ReplayFailure.STATE: DirectFallbackReason.REJECTED_SESSION_STATE,
     ReplayFailure.IDENTITY: DirectFallbackReason.IDENTITY_MISMATCH,
+    ReplayFailure.PROXY: DirectFallbackReason.PROXY_FAILED,
 }
 _PARSE_FAILURES = {
     DirectObservationFailure.SCHEMA: DirectFallbackReason.SCHEMA_INCOMPATIBLE,
@@ -105,7 +115,13 @@ class DirectStatusChecker:
         failure_threshold: int = 3,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Clock | None = None,
+        proxy_resolver: SessionProxyResolver | None = None,
+        proxied_transport_factory: ProxiedTransportFactory | None = None,
     ) -> None:
+        """``proxied_transport_factory`` is a local-test seam only: it receives the
+        session's structured proxy and must route through it. An unproxied
+        ``transport`` is never used for a session that has a proxy."""
+
         if timeout_seconds <= 0 or max_response_bytes < 1 or failure_threshold < 1:
             raise ValueError("direct check bounds must be positive")
         self._store = store
@@ -117,6 +133,8 @@ class DirectStatusChecker:
         self._failure_threshold = failure_threshold
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._proxy_resolver = proxy_resolver
+        self._proxied_transport_factory = proxied_transport_factory
 
     @property
     def enabled(self) -> bool:
@@ -150,7 +168,8 @@ class DirectStatusChecker:
         reason, observation = await self._replay(session, queue_id, record, parser)
         elapsed = time.perf_counter() - started
         if reason is not None:
-            await self._record_failure(record, reason)
+            if reason not in PROXY_FAILURES:
+                await self._record_failure(record, reason)
             return DirectAttempt(
                 fallback_reason=reason,
                 rejected_observation=observation,
@@ -184,9 +203,26 @@ class DirectStatusChecker:
             or (recipe.source_scope == LOCAL_SIMULATOR_SCOPE and not is_loopback_url(recipe.url))
         ):
             return DirectFallbackReason.RECIPE_UNCERTAIN, None
+        try:
+            resolved = resolve_session_proxy(
+                self._proxy_resolver, session, purpose=ProxyPurpose.DIRECT
+            )
+        except ProxyResolutionError:
+            # Fail closed: no unproxied direct request; the proxied browser monitor
+            # (which resolves the same assignment) is the only fallback.
+            return DirectFallbackReason.PROXY_UNAVAILABLE, None
         cookies = await self._cookies(session.session_id, recipe.fingerprint)
         if cookies is None:
             return DirectFallbackReason.MISSING_VISITOR_STATE, None
+        transport = self._transport
+        proxy: httpx.Proxy | None = None
+        if resolved is not None:
+            proxy = httpx.Proxy(resolved.server, auth=(resolved.username, resolved.password))
+            transport = None
+            if self._proxied_transport_factory is not None:
+                transport, proxy = self._proxied_transport_factory(proxy), None
+            if self._proxy_resolver is not None:
+                self._proxy_resolver.record_attempt(purpose=ProxyPurpose.DIRECT)
         try:
             async with DirectStatusReplayClient(
                 recipe=recipe,
@@ -196,7 +232,8 @@ class DirectStatusChecker:
                 max_response_bytes=self._max_response_bytes,
                 max_connections=1,
                 max_concurrency=1,
-                transport=self._transport,
+                transport=transport,
+                proxy=proxy,
             ) as client:
                 result = await client.replay(HeaderProfile.FULL_DERIVED)
         except asyncio.CancelledError:
@@ -213,6 +250,10 @@ class DirectStatusChecker:
             )
             return DirectFallbackReason.UNCERTAIN, None
         if not result.succeeded or result.response_json is None:
+            if result.failure is ReplayFailure.PROXY and self._proxy_resolver is not None:
+                self._proxy_resolver.record_failure(
+                    ProxyFailure.PROXY_CONNECT_FAILED, purpose=ProxyPurpose.DIRECT
+                )
             return _replay_reason(result), None
         try:
             observation = parser.parse(

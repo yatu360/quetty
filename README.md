@@ -226,9 +226,50 @@ proxying.
 - The consistency checker reports, without repairing, any missing, malformed, duplicate,
   or unexpected proxy session IDs and incomplete run provenance.
 
-Phase 9 Prompt 1 adds only this foundation. **Browser traffic is not yet routed through
-the proxy.** Routing every QueueSession operation through its persisted sticky session
-is Phase 9 Prompt 2.
+**Per-session routing (Phase 9 Prompt 2).** In an IPRoyal run, every outbound target
+operation belonging to a QueueSession goes through that session's own persisted sticky
+session. `SessionProxyResolver` (`queue_load_test.proxy`) is the single authority. It
+combines the persisted run provider, country, and lifetime, the session's
+`proxy_session_id`, and the environment credentials into structured per-context proxy
+settings (`server`/`username`/`password`; never an authenticated URL). The protected
+paths are:
+
+- initial acquisition at setup, startup deficit refill, Add, and the Replace candidate.
+  The first navigation is already proxied.
+- automatic Headed Window monitoring. Transfer and storage-state restores each run in a
+  fresh temporary context.
+- Refresh Now, including while monitoring is paused.
+- Manual Open, including the no-Queue-ID window and its later adoption.
+- Direct Monitoring requests (httpx, structured `httpx.Proxy` auth), when Phase 8
+  evidence gates allow them at all.
+- retries, browser-process restarts, and application restarts. These reconstruct the
+  same authentication from the same persisted ID and never rotate it.
+
+Contexts stay temporary and share the bounded browser pool. Different sessions'
+proxies coexist in one browser process.
+
+**Fail closed.** If a session's proxy cannot be resolved, no context is opened and no
+target request is sent, and the failure is classified as one of:
+
+- `PROXY_CONFIG_MISSING`
+- `PROXY_ASSIGNMENT_MISSING`
+- `PROXY_ASSIGNMENT_INVALID`
+- `PROXY_UNSUPPORTED_BACKEND`
+
+Proxied navigation errors are classified as `PROXY_AUTH_FAILED` or
+`PROXY_CONNECT_FAILED`. These are transport failures and never lifecycle statuses. The
+Queue ID and assignment are never changed: monitoring records CONNECTION_LOST and
+retries later through the same sticky session. Direct falls back only to the proxied
+browser monitor, never to an unproxied request, and proxy faults do not count against
+a Direct recipe.
+
+**Metrics** carry only closed labels: `proxy_provider_info{provider}`,
+`proxied_attempts_total{purpose}`, and `proxy_failures_total{purpose,reason}`. There
+is no session, Queue ID, provider session ID, or IP label.
+
+Gated benchmark harnesses that build their own creator or restorer remain
+proxy-disabled. Observed exit-IP continuity and dashboard visibility are Phase 9
+Prompt 3.
 
 ## Local Operator UI
 

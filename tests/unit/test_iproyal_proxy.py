@@ -28,6 +28,7 @@ from queue_load_test.models import (
 from queue_load_test.proxy import (
     IPRoyalCredentials,
     IPRoyalProxyConfigurationError,
+    SessionProxyResolver,
     construct_effective_password,
     generate_proxy_session_id,
     is_valid_proxy_session_id,
@@ -59,6 +60,9 @@ FAKE_SERVER = "http://proxy.fake-iproyal.test:12321"
 FAKE_USERNAME = "FAKEUSER_zq81Lk"
 FAKE_PASSWORD = "FAKEPASS_x7Rm2Qv9"
 SECRETS = (FAKE_USERNAME, FAKE_PASSWORD)
+FAKE_CREDENTIALS = IPRoyalCredentials(
+    server=FAKE_SERVER, username=FAKE_USERNAME, base_password=FAKE_PASSWORD
+)
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
 
 
@@ -411,6 +415,7 @@ class _BrowserManager:
         self.repository = repository
         self.fail = fail
         self.assignments_at_navigation: list[dict[str, str | None]] = []
+        self.context_proxies: list[object] = []
 
     async def on_navigation(self) -> None:
         sessions = await self.repository.list()
@@ -422,7 +427,8 @@ class _BrowserManager:
         del context, responsive
 
     @asynccontextmanager
-    async def context(self) -> AsyncIterator[_Context]:
+    async def context(self, **options: Any) -> AsyncIterator[_Context]:
+        self.context_proxies.append(options.get("proxy"))
         yield _Context(self)
 
 
@@ -466,7 +472,11 @@ def creator_for(
         state_directory=state_store.directory,
         mode=SessionMode.TRANSFER_ONLY,
         browser_backend=BrowserBackendName.PATCHRIGHT,
-        proxy_provider=provider,
+        proxy_resolver=(
+            SessionProxyResolver(iproyal_run(), FAKE_CREDENTIALS)
+            if provider is ProxyProvider.IPROYAL
+            else None
+        ),
         live_extractor=cast(Any, _Live()),
         transfer_extractor_factory=lambda _: _Transfer(),
         retry_policy=CreationRetryPolicy(max_attempts=1),

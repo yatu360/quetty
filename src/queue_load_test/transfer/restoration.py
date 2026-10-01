@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
 from playwright.async_api import BrowserContext, Page
@@ -24,6 +24,15 @@ from queue_load_test.models import (
     QueueSession,
     SessionMode,
     evaluate_queue_status,
+)
+from queue_load_test.proxy import (
+    ProxyAuthWatch,
+    ProxyFailure,
+    ProxyResolutionError,
+    ResolvedSessionProxy,
+    SessionProxyResolver,
+    classify_proxy_error,
+    resolve_session_proxy,
 )
 from queue_load_test.queue_monitor import (
     AdmissionDetector,
@@ -80,6 +89,14 @@ class RestoreFailure(StrEnum):
     INVALID_TRANSFER_URL = "INVALID_TRANSFER_URL"
     SESSION_EXPIRED = "SESSION_EXPIRED"
     EVENT_CLOSED = "EVENT_CLOSED"
+    # Transport failures of a session's persisted proxy (Phase 9). Transient: they
+    # never change the Queue ID and are retried later through the same sticky session.
+    PROXY_CONFIG_MISSING = ProxyFailure.PROXY_CONFIG_MISSING.value
+    PROXY_ASSIGNMENT_MISSING = ProxyFailure.PROXY_ASSIGNMENT_MISSING.value
+    PROXY_ASSIGNMENT_INVALID = ProxyFailure.PROXY_ASSIGNMENT_INVALID.value
+    PROXY_AUTH_FAILED = ProxyFailure.PROXY_AUTH_FAILED.value
+    PROXY_CONNECT_FAILED = ProxyFailure.PROXY_CONNECT_FAILED.value
+    PROXY_UNSUPPORTED_BACKEND = ProxyFailure.PROXY_UNSUPPORTED_BACKEND.value
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +190,7 @@ class QueueSessionRestorer:
         attempt_timeout_seconds: float | None = None,
         browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
         status_discovery_factory: StatusDiscoveryFactoryProtocol | None = None,
+        proxy_resolver: SessionProxyResolver | None = None,
     ) -> None:
         if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
             raise ValueError("attempt_timeout_seconds must be positive")
@@ -201,6 +219,7 @@ class QueueSessionRestorer:
         self._observability = observability
         self._browser_backend = BrowserBackendName.parse(browser_backend)
         self._status_discovery_factory = status_discovery_factory
+        self._proxy_resolver = proxy_resolver
         # Bound the whole attempt: some Playwright calls (for example new_page after
         # the Chrome process is killed) never settle and have no timeout of their own.
         self._attempt_timeout_seconds = attempt_timeout_seconds or (
@@ -235,8 +254,14 @@ class QueueSessionRestorer:
 
     async def restore(self, session: QueueSession) -> SessionRestoreResult:
         started = time.perf_counter()
-        result = self._backend_mismatch_result(session) or await self._restore(session)
-        if result.failure is RestoreFailure.BACKEND_MISMATCH:
+        result = self._backend_mismatch_result(session)
+        if result is None:
+            proxy, result = self._resolve_proxy(session)
+            if result is None:
+                result = await self._restore(session, proxy=proxy)
+            else:
+                await self._record(session, result)
+        elif result.failure is RestoreFailure.BACKEND_MISMATCH:
             await self._record(session, result)
         self._observe_restore_result(session, result, time.perf_counter() - started)
         return result
@@ -251,8 +276,11 @@ class QueueSessionRestorer:
         method = RestoreMethod(method)
         started = time.perf_counter()
         result = self._backend_mismatch_result(session, method=method)
+        proxy: ResolvedSessionProxy | None = None
         if result is None:
-            result = await self._restore_with_method(session, method)
+            proxy, result = self._resolve_proxy(session, method=method)
+        if result is None:
+            result = await self._restore_with_method(session, method, proxy=proxy)
         else:
             await self._record(session, result)
         self._observe_restore_result(session, result, time.perf_counter() - started)
@@ -268,8 +296,15 @@ class QueueSessionRestorer:
             self._observe_restore_result(session, mismatch, time.perf_counter() - started)
             return OpenedSessionRestore(mismatch)
         expected_queue_id = session.queue_id
+        proxy, proxy_failure = self._resolve_proxy(session)
+        if proxy_failure is not None:
+            # Fail closed before any context: no unproxied window is ever opened.
+            if expected_queue_id is not None:
+                await self._record(session, proxy_failure)
+            self._observe_restore_result(session, proxy_failure, time.perf_counter() - started)
+            return OpenedSessionRestore(proxy_failure)
         if expected_queue_id is None:
-            return await self._open_unidentified(session)
+            return await self._open_unidentified(session, proxy=proxy)
         if not session.transfer_url.strip():
             opened = OpenedSessionRestore(
                 self._result(
@@ -296,6 +331,7 @@ class QueueSessionRestorer:
             transfer = await self._open_browser_attempt(
                 session,
                 method=RestoreMethod.TRANSFER,
+                proxy=proxy,
             )
             attempts = [transfer.result.attempts[-1]]
             if (
@@ -324,6 +360,7 @@ class QueueSessionRestorer:
                         session,
                         method=RestoreMethod.STORAGE_STATE,
                         storage_state=state,
+                        proxy=proxy,
                     )
                     attempts.append(state_opened.result.attempts[-1])
                     opened = replace(
@@ -334,7 +371,12 @@ class QueueSessionRestorer:
         self._observe_restore_result(session, opened.result, time.perf_counter() - started)
         return opened
 
-    async def _open_unidentified(self, session: QueueSession) -> OpenedSessionRestore:
+    async def _open_unidentified(
+        self,
+        session: QueueSession,
+        *,
+        proxy: ResolvedSessionProxy | None,
+    ) -> OpenedSessionRestore:
         """Open a window for a session that never acquired a Queue ID.
 
         There is no identity to verify, so nothing is recorded: the persisted
@@ -359,10 +401,16 @@ class QueueSessionRestorer:
         if session.mode is SessionMode.HYBRID:
             storage_state, _ = await self._load_storage_state(session)
 
+        auth_watch: ProxyAuthWatch | None = None
+
         async def navigate() -> tuple[OwnedBrowserContext, Page]:
-            owned = await self._browser_manager.create_context(storage_state=storage_state)
+            nonlocal auth_watch
+            owned = await self._browser_manager.create_context(
+                storage_state=storage_state, **self._proxy_options(proxy)
+            )
             try:
                 page = await owned.context.new_page()
+                auth_watch = self._watch_proxy_auth(page, proxy)
                 await page.goto(
                     navigation_url,
                     wait_until="domcontentloaded",
@@ -382,13 +430,14 @@ class QueueSessionRestorer:
             )
         except (asyncio.CancelledError, BrowserCapacityError):
             raise
-        except Exception:  # noqa: BLE001 - browser adapter boundary, includes timeouts
+        except Exception as exc:  # noqa: BLE001 - browser adapter boundary, includes timeouts
             return OpenedSessionRestore(
                 self._result(
                     RestoreAttempt(
                         method=RestoreMethod.TRANSFER,
                         success=False,
-                        failure=RestoreFailure.NAVIGATION_FAILED,
+                        failure=self._proxy_navigation_failure(proxy, exc, auth_watch)
+                        or RestoreFailure.NAVIGATION_FAILED,
                     ),
                     None,
                 )
@@ -547,6 +596,8 @@ class QueueSessionRestorer:
         self,
         session: QueueSession,
         method: RestoreMethod,
+        *,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> SessionRestoreResult:
         expected_queue_id = session.queue_id
         if expected_queue_id is None:
@@ -573,14 +624,22 @@ class QueueSessionRestorer:
                     session,
                     method=method,
                     refresh_state=False,
+                    proxy=proxy,
                 )
         else:
-            attempt = await self._storage_state_attempt(session, refresh_state=False)
+            attempt = await self._storage_state_attempt(
+                session, refresh_state=False, proxy=proxy
+            )
         result = self._result(attempt, expected_queue_id)
         await self._record(session, result)
         return result
 
-    async def _restore(self, session: QueueSession) -> SessionRestoreResult:
+    async def _restore(
+        self,
+        session: QueueSession,
+        *,
+        proxy: ResolvedSessionProxy | None = None,
+    ) -> SessionRestoreResult:
         """Restore one session, preserving its persisted Queue-it identity."""
 
         expected_queue_id = session.queue_id
@@ -622,6 +681,7 @@ class QueueSessionRestorer:
         transfer_attempt = await self._browser_attempt(
             session,
             method=RestoreMethod.TRANSFER,
+            proxy=proxy,
         )
         attempts.append(transfer_attempt)
         # A verified transfer whose only fault was saving refreshed state must not
@@ -636,7 +696,7 @@ class QueueSessionRestorer:
             await self._record(session, result)
             return result
 
-        state_attempt = await self._storage_state_attempt(session)
+        state_attempt = await self._storage_state_attempt(session, proxy=proxy)
         attempts.append(state_attempt)
         result = self._result(state_attempt, expected_queue_id, attempts)
         await self._record(session, result)
@@ -647,6 +707,7 @@ class QueueSessionRestorer:
         session: QueueSession,
         *,
         refresh_state: bool = True,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> RestoreAttempt:
         state, failure = await self._load_storage_state(session)
         if failure is not None:
@@ -656,6 +717,7 @@ class QueueSessionRestorer:
             method=RestoreMethod.STORAGE_STATE,
             storage_state=cast(ContextStorageState, state),
             refresh_state=refresh_state,
+            proxy=proxy,
         )
 
     async def _load_storage_state(
@@ -699,6 +761,7 @@ class QueueSessionRestorer:
         method: RestoreMethod,
         storage_state: ContextStorageState | None = None,
         refresh_state: bool = True,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> RestoreAttempt:
         try:
             return await await_bounded(
@@ -707,6 +770,7 @@ class QueueSessionRestorer:
                     method=method,
                     storage_state=storage_state,
                     refresh_state=refresh_state,
+                    proxy=proxy,
                 ),
                 timeout=self._attempt_timeout_seconds,
             )
@@ -735,6 +799,7 @@ class QueueSessionRestorer:
         *,
         method: RestoreMethod,
         storage_state: ContextStorageState | None = None,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> OpenedSessionRestore:
         async def discard(opened: OpenedSessionRestore) -> None:
             if opened.owned_context is not None:
@@ -746,6 +811,7 @@ class QueueSessionRestorer:
                     session,
                     method=method,
                     storage_state=storage_state,
+                    proxy=proxy,
                 ),
                 timeout=self._attempt_timeout_seconds,
                 discard=discard,
@@ -767,12 +833,16 @@ class QueueSessionRestorer:
         *,
         method: RestoreMethod,
         storage_state: ContextStorageState | None,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> OpenedSessionRestore:
         owned: OwnedBrowserContext | None = None
         try:
-            owned = await self._browser_manager.create_context(storage_state=storage_state)
+            owned = await self._browser_manager.create_context(
+                storage_state=storage_state, **self._proxy_options(proxy)
+            )
             context = owned.context
             page = await context.new_page()
+            auth_watch = self._watch_proxy_auth(page, proxy)
             navigation_url = (
                 self._storage_navigation_url or session.transfer_url
                 if method is RestoreMethod.STORAGE_STATE
@@ -796,17 +866,23 @@ class QueueSessionRestorer:
                     else RestoreFailure.NAVIGATION_FAILED
                 )
                 attempt = RestoreAttempt(method=method, success=False, failure=failure)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 if self._observability is not None:
                     self._observability.record_navigation_failure()
-                failure = (
+                failure = self._proxy_navigation_failure(proxy, exc, auth_watch) or (
                     RestoreFailure.STATE_CONTEXT_FAILED
                     if method is RestoreMethod.STORAGE_STATE
                     else RestoreFailure.NAVIGATION_FAILED
                 )
                 attempt = RestoreAttempt(method=method, success=False, failure=failure)
             else:
-                if response is not None and response.status == 410:
+                if response is not None and response.status == 407 and proxy is not None:
+                    attempt = RestoreAttempt(
+                        method=method,
+                        success=False,
+                        failure=self._record_proxy_failure(ProxyFailure.PROXY_AUTH_FAILED),
+                    )
+                elif response is not None and response.status == 410:
                     attempt = RestoreAttempt(
                         method=method,
                         success=False,
@@ -892,9 +968,12 @@ class QueueSessionRestorer:
         method: RestoreMethod,
         storage_state: ContextStorageState | None,
         refresh_state: bool,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> RestoreAttempt:
         try:
-            async with self._browser_manager.context(storage_state=storage_state) as context:
+            async with self._browser_manager.context(
+                storage_state=storage_state, **self._proxy_options(proxy)
+            ) as context:
                 page = await context.new_page()
                 factory = self._status_discovery_factory
                 if factory is None:
@@ -904,6 +983,7 @@ class QueueSessionRestorer:
                         session,
                         method=method,
                         refresh_state=refresh_state,
+                        proxy=proxy,
                     )
                 observation = factory.create(
                     page=page,
@@ -919,6 +999,7 @@ class QueueSessionRestorer:
                         session,
                         method=method,
                         refresh_state=refresh_state,
+                        proxy=proxy,
                     )
         # This is the browser adapter boundary: third-party context/page
         # implementations can surface more than Playwright's public errors.
@@ -945,9 +1026,11 @@ class QueueSessionRestorer:
         *,
         method: RestoreMethod,
         refresh_state: bool,
+        proxy: ResolvedSessionProxy | None = None,
     ) -> RestoreAttempt:
         """Run the existing browser restore path, optionally surrounded by observation."""
 
+        auth_watch = self._watch_proxy_auth(page, proxy)
         navigation_url = (
             self._storage_navigation_url or session.transfer_url
             if method is RestoreMethod.STORAGE_STATE
@@ -971,10 +1054,10 @@ class QueueSessionRestorer:
                 else RestoreFailure.NAVIGATION_FAILED
             )
             return RestoreAttempt(method=method, success=False, failure=failure)
-        except Exception:  # noqa: BLE001 - browser adapter boundary
+        except Exception as exc:  # noqa: BLE001 - browser adapter boundary
             if self._observability is not None:
                 self._observability.record_navigation_failure()
-            failure = (
+            failure = self._proxy_navigation_failure(proxy, exc, auth_watch) or (
                 RestoreFailure.STATE_CONTEXT_FAILED
                 if method is RestoreMethod.STORAGE_STATE
                 else RestoreFailure.NAVIGATION_FAILED
@@ -985,6 +1068,14 @@ class QueueSessionRestorer:
                 self._observability.record_navigation_duration(
                     time.perf_counter() - navigation_started
                 )
+        if response is not None and response.status == 407 and proxy is not None:
+            if self._observability is not None:
+                self._observability.record_navigation_failure()
+            return RestoreAttempt(
+                method=method,
+                success=False,
+                failure=self._record_proxy_failure(ProxyFailure.PROXY_AUTH_FAILED),
+            )
         if response is not None and response.status == 410:
             if self._observability is not None:
                 self._observability.record_navigation_failure()
@@ -1165,6 +1256,55 @@ class QueueSessionRestorer:
                     failure=failure,
                 )
             await self._sleep(self._observation_interval_seconds)
+
+    def _resolve_proxy(
+        self,
+        session: QueueSession,
+        *,
+        method: RestoreMethod = RestoreMethod.TRANSFER,
+    ) -> tuple[ResolvedSessionProxy | None, SessionRestoreResult | None]:
+        """Resolve the session's persisted sticky session, or a fail-closed result."""
+
+        try:
+            return resolve_session_proxy(self._proxy_resolver, session), None
+        except ProxyResolutionError as exc:
+            attempt = RestoreAttempt(
+                method=method, success=False, failure=RestoreFailure(exc.failure.value)
+            )
+            return None, self._result(attempt, session.queue_id)
+
+    def _proxy_options(self, proxy: ResolvedSessionProxy | None) -> dict[str, Any]:
+        """Context options for one proxied context; empty (unchanged call) when unproxied."""
+
+        if proxy is None:
+            return {}
+        if self._proxy_resolver is not None:
+            self._proxy_resolver.record_attempt()
+        return {"proxy": proxy.browser_proxy()}
+
+    def _record_proxy_failure(self, failure: ProxyFailure) -> RestoreFailure:
+        if self._proxy_resolver is not None:
+            self._proxy_resolver.record_failure(failure)
+        return RestoreFailure(failure.value)
+
+    @staticmethod
+    def _watch_proxy_auth(
+        page: Page, proxy: ResolvedSessionProxy | None
+    ) -> ProxyAuthWatch | None:
+        return ProxyAuthWatch.attach(page) if proxy is not None else None
+
+    def _proxy_navigation_failure(
+        self,
+        proxy: ResolvedSessionProxy | None,
+        exc: BaseException,
+        watch: ProxyAuthWatch | None = None,
+    ) -> RestoreFailure | None:
+        """Classify a proxied navigation error; its text is never logged or kept."""
+
+        if proxy is None:
+            return None
+        failure = classify_proxy_error(exc, watch)
+        return self._record_proxy_failure(failure) if failure is not None else None
 
     async def _record(
         self,

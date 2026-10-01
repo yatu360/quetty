@@ -953,7 +953,17 @@ leakage, and cleanup). T+60, T+90, T+115, and full `2h` continuity are **NOT RUN
      consistency checks.
    - No runtime browser routing changed.
 2. **Route every QueueSession operation through its persisted sticky identity** —
-   not started.
+   **implemented 2026-10-01 (local only)**
+   - Central `SessionProxyResolver` / `resolve_proxy_for_session`, wired once per run
+     into the creator, both restorers (monitoring and headed Manual Open), and the
+     Direct checker.
+   - Every acquisition, restore, monitoring check, Refresh Now, Manual Open (including
+     no-ID adoption), Direct request, retry, browser restart, and application restart
+     uses the same persisted ID.
+   - Fail closed with classified `PROXY_*` failures and zero target traffic. There is
+     no unproxied fallback. Direct falls back only to the proxied browser.
+   - Real Patchright and Chrome contexts were verified against a local authenticating
+     proxy and the local simulator. No IPRoyal or Queue-it traffic was involved.
 3. **Observed exit-IP continuity metadata and dashboard visibility** — not started.
 
 Phase 9 is not complete.

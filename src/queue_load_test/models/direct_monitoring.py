@@ -19,6 +19,8 @@ class DirectFallbackReason(StrEnum):
     SCHEMA_UNAVAILABLE = "schema_unavailable"
     DISCOVERY_REQUIRED = "discovery_required"
     DIRECT_UNAVAILABLE = "direct_unavailable"
+    # The session's persisted IPRoyal proxy could not be resolved: nothing was sent.
+    PROXY_UNAVAILABLE = "proxy_unavailable"
     # Transport.
     NETWORK = "network"
     TIMEOUT = "timeout"
@@ -26,6 +28,8 @@ class DirectFallbackReason(StrEnum):
     UNEXPECTED_REDIRECT = "unexpected_redirect"
     UNEXPECTED_CONTENT_TYPE = "unexpected_content_type"
     MALFORMED_RESPONSE = "malformed_response"
+    # The proxied request failed at the proxy; this says nothing about the recipe.
+    PROXY_FAILED = "proxy_failed"
     # Visitor state and identity.
     SCHEMA_INCOMPATIBLE = "schema_incompatible"
     MISSING_VISITOR_STATE = "missing_visitor_state"

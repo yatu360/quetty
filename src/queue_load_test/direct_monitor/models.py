@@ -12,6 +12,7 @@ from queue_load_test.models import (
 
 __all__ = [
     "HARD_FAILURES",
+    "PROXY_FAILURES",
     "SOFT_FAILURES",
     "DirectAttempt",
     "DirectCapability",
@@ -19,6 +20,11 @@ __all__ = [
 ]
 
 
+# Proxy faults are transport faults of the session's sticky IPRoyal session. They
+# never count against the recipe; the proxied browser monitor is the only fallback.
+PROXY_FAILURES = frozenset(
+    {DirectFallbackReason.PROXY_UNAVAILABLE, DirectFallbackReason.PROXY_FAILED}
+)
 # A browser fallback is needed and the stored recipe/state is no longer trusted:
 # only a newly observed legitimate browser request may make the session capable.
 HARD_FAILURES = frozenset(
