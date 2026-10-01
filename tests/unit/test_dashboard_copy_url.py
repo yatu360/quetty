@@ -1,6 +1,7 @@
 """The per-session Copy URL action: explicit, read-only, and URL-free elsewhere."""
 
 import asyncio
+import hashlib
 import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,7 @@ from queue_load_test.models import (
 )
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.web import create_app
+from queue_load_test.web.app import static_url_builder
 
 # Synthetic only; never a real Queue-it identity.
 TRANSFER_URL = "https://queue.synthetic.invalid/?c=fake&e=copy-url&q=fake-queue-0001&t=fake-token"
@@ -292,3 +294,30 @@ def test_failure_while_copying_returns_a_generic_url_free_response(
     assert response.status_code == 503
     assert TRANSFER_URL not in response.text
     assert TRANSFER_URL not in caplog.text
+
+
+def test_pages_reference_content_versioned_static_assets(tmp_path: Path) -> None:
+    database = tmp_path / "static.sqlite3"
+    _seed(database)
+    client, _, _ = _client(database)
+    static = Path(create_app.__code__.co_filename).parent / "static"
+    with client:
+        dashboard = client.get("/dashboard").text
+        for name in ("dashboard.js", "htmx.min.js", "app.css"):
+            version = hashlib.sha256((static / name).read_bytes()).hexdigest()[:12]
+            url = f"/static/{name}?v={version}"
+            # A changed file gets a new URL, so a cached old script cannot shadow it.
+            assert url in dashboard
+            served = client.get(url)
+            assert served.status_code == 200
+            assert served.content == (static / name).read_bytes()
+
+
+def test_static_url_changes_when_file_content_changes(tmp_path: Path) -> None:
+    (tmp_path / "dashboard.js").write_text("old", encoding="utf-8")
+    before = static_url_builder(tmp_path)("dashboard.js")
+    (tmp_path / "dashboard.js").write_text("new", encoding="utf-8")
+    after = static_url_builder(tmp_path)("dashboard.js")
+    assert before != after
+    assert before.startswith("/static/dashboard.js?v=")
+    assert static_url_builder(tmp_path)("missing.js") == "/static/missing.js"

@@ -1641,6 +1641,12 @@ manually owned rows.
   - no BrowserManager, restore, creation, monitoring, Direct Monitoring, or
     Refresh Now;
   - no Queue-it traffic.
+- Static assets are content-versioned. The page and setup templates link to
+  `static_url(name)`, which gives `/static/<name>?v=<sha256 prefix>`. Hashes are
+  computed once in `create_app`. `StaticFiles` sends no Cache-Control header, so Chrome
+  reused a pre-feature `dashboard.js` from its heuristic cache. The Copy URL button
+  rendered, but clicks did nothing and sent no request. A changed file now always gets
+  a new URL.
 - Tests:
   - `tests/unit/test_dashboard_copy_url.py`
   - `tests/integration/test_dashboard_copy_url_browser.py` (real app, real

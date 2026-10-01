@@ -6386,3 +6386,74 @@ unchanged.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Version static asset URLs so a cached dashboard.js cannot shadow updates
+
+### Agent / Model
+
+Claude Opus 5.5.
+
+### Goal
+
+Fix the operator report that Copy URL did nothing in Chrome on macOS, even after a
+browser restart.
+
+### Changes Made
+
+- Diagnosis, all read-only:
+  - The live server rendered enabled buttons, the endpoint returned the URL, and a
+    fresh headed Chrome copied it to the macOS clipboard (`pbpaste` showed 100
+    characters).
+  - No `transfer-url` request reached the server from the operator's tab.
+  - The operator's Chrome profile cache held a `dashboard.js` fetched at 08:18 local
+    time. Its `Last-Modified` was 2026-09-29 and its ETag (`9fdd14…`) was older than
+    the current one (`4ed2d3…`). It had no Copy URL code.
+  - `StaticFiles` sends no Cache-Control header, so Chrome's heuristic freshness kept
+    reusing it. A browser restart does not clear the disk cache.
+- `web/app.py`: new `static_url_builder(directory)`. It is registered as the Jinja
+  global `static_url` and maps a file name to `/static/<name>?v=<12-char sha256>`.
+  Hashes are computed once when the app is built.
+- `dashboard.html` and `setup.html` reference `app.css`, `htmx.min.js`, and
+  `dashboard.js` through `static_url`.
+
+### Files Modified
+
+- `src/queue_load_test/web/app.py`
+- `src/queue_load_test/web/templates/dashboard.html`
+- `src/queue_load_test/web/templates/setup.html`
+- `tests/unit/test_dashboard_copy_url.py`
+- `PROJECT_CONTEXT.md`
+
+### Tests Run
+
+- Focused UI tests: 78 passed. This run covered:
+  - `tests/unit/test_dashboard_copy_url.py`, with 2 new tests:
+    - versioned URLs are rendered and served;
+    - the version changes with file content.
+  - `test_web_ui.py`, `test_ui_reliability.py`, and `test_phase5_ui_benchmark.py`;
+  - the Copy URL browser, scroll, and local-time integration tests.
+- `ruff check src tests`: PASS. `mypy src`: PASS.
+- `python -m pytest`: 942 passed, 4 deselected.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- A query-string version was chosen over Cache-Control headers. Every changed file gets
+  a new URL, and route and static mount behaviour is unchanged.
+
+### Known Issues
+
+- The running `queue-load-test-ui` must be restarted to pick up `static_url`. After
+  that, a normal page reload requests the new `dashboard.js?v=…` URL, which was never
+  cached, so no hard reload is needed.
+
+### Follow-Up
+
+None.
+
+### Git State
+
+- Branch: main

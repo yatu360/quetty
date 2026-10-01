@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -82,6 +83,7 @@ def create_app(
     dashboard = DashboardService(repository, run_runtime)
     templates = Jinja2Templates(directory=_WEB_ROOT / "templates")
     templates.env.filters["local_time"] = local_time_markup
+    templates.env.globals["static_url"] = static_url_builder(_WEB_ROOT / "static")
     lifecycle = {"accepting": False, "resetting": False, "stopping": False}
 
     @asynccontextmanager
@@ -727,6 +729,28 @@ def _failure_response(request: Request, message: str, *, status_code: int = 503)
         status_code=status_code,
         headers={"HX-Retarget": target, "HX-Reswap": "innerHTML"},
     )
+
+
+def static_url_builder(directory: Path) -> Callable[[str], str]:
+    """Build ``static_url(name)``: ``/static/<name>?v=<content hash>``.
+
+    StaticFiles sends no Cache-Control, so browsers may reuse a cached script for hours
+    by heuristic. A content-derived query changes the URL whenever the file changes,
+    so an updated ``dashboard.js`` is never shadowed by a stale copy. Hashes are taken
+    once, when the app is built; static files only change with a deploy and restart.
+    """
+
+    versions = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+        for path in directory.iterdir()
+        if path.is_file()
+    }
+
+    def static_url(name: str) -> str:
+        version = versions.get(name)
+        return f"/static/{name}?v={version}" if version else f"/static/{name}"
+
+    return static_url
 
 
 def local_time_markup(value: datetime | None) -> Markup:
