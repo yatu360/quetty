@@ -61,6 +61,8 @@ queue-load-test-phase8-equivalence = "queue_load_test.harness.phase8_observation
 queue-load-test-phase8-direct-runtime = "queue_load_test.harness.phase8_direct_runtime:main"
 queue-load-test-phase8-monitoring-benchmark = "queue_load_test.harness.phase8_monitoring_benchmark:main"
 queue-load-test-iproyal-proxy-spike = "queue_load_test.harness.iproyal_proxy_spike:main"
+queue-load-test-phase9-acceptance = "queue_load_test.harness.phase9_acceptance:main"
+queue-load-test-phase9-iproyal-live = "queue_load_test.harness.phase9_iproyal_live:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/queue_load_test"]

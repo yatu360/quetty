@@ -1,0 +1,45 @@
+{
+  "kind": "live_iproyal_continuity",
+  "generated_at": "2026-10-01T04:57:46+00:00",
+  "configuration": {
+    "provider": "iproyal",
+    "country": "gb",
+    "lifetime": "2h",
+    "browser_backend": "patchright",
+    "ip_endpoint": "https://api.ipify.org/?format=json",
+    "sessions": 3
+  },
+  "evidence_boundary": "Real IPRoyal Residential and ipify only; no Queue-it traffic. Only the intervals listed under continuity were measured.",
+  "outcome": "COMPLETED",
+  "duration_seconds": 1808.4,
+  "distinct_provider_session_ids": 3,
+  "per_session": [
+    {
+      "browser_and_observer_same_exit": "CHANGED",
+      "observed": true
+    },
+    {
+      "browser_and_observer_same_exit": "SAME",
+      "observed": true
+    },
+    {
+      "browser_and_observer_same_exit": "SAME",
+      "observed": true
+    }
+  ],
+  "distinct_exit_ips_observed": 3,
+  "persisted_provider_id_unchanged": true,
+  "persisted_ip_recorded": true,
+  "continuity": {
+    "fresh_context": "SAME",
+    "browser_process_restart": "SAME",
+    "python_application_restart": "SAME",
+    "T+5m_disconnected": "SAME",
+    "T+30m_disconnected": "SAME"
+  },
+  "intervals_not_run": [
+    "T+60m",
+    "T+90m",
+    "T+115m"
+  ]
+}

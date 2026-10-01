@@ -36,6 +36,14 @@ class ProxySessionAssignmentError(RepositoryError):
     """Raised when code attempts to mutate a persisted sticky-session assignment."""
 
 
+@dataclass(frozen=True, slots=True)
+class ProxyIpRecord:
+    """Classification of one persisted proxy-exit observation (no IP values)."""
+
+    baseline: bool
+    changed: bool
+
+
 class LeaseOwnershipError(RepositoryError):
     """Raised when stale leased work attempts to overwrite a newer owner."""
 

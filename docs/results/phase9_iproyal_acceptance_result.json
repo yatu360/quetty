@@ -1,0 +1,439 @@
+{
+  "phase": 9,
+  "kind": "local_application_acceptance",
+  "evidence_boundary": "Local stand-ins only (LocalAuthProxy for IPRoyal and ipify, LocalQueueSimulator for the target). Not IPRoyal, ipify, or Queue-it evidence.",
+  "generated_at": "2026-10-01T05:09:05+00:00",
+  "backends": {
+    "patchright": {
+      "browser_backend": "patchright",
+      "configuration": {
+        "provider": "iproyal",
+        "country": "gb",
+        "lifetime": "2h",
+        "browser_backend": "patchright",
+        "monitoring_strategy": "headed_window",
+        "session_count": 3
+      },
+      "duration_seconds": 59.1,
+      "unique_provider_ids_assigned": 7,
+      "ip_lookups": 72,
+      "ip_lookups_without_sticky_session": 0,
+      "proxied_target_requests": 79,
+      "checks": [
+        {
+          "name": "A_three_sessions_three_distinct_provider_ids",
+          "passed": true,
+          "detail": {
+            "sessions": 3,
+            "distinct_provider_ids": 3
+          }
+        },
+        {
+          "name": "A_initial_acquisition_proxied_with_each_sessions_own_id",
+          "passed": true,
+          "detail": {
+            "proxied_requests": 8,
+            "simulator_requests": 8
+          }
+        },
+        {
+          "name": "A_initial_ip_observation_through_each_sessions_own_id",
+          "passed": true,
+          "detail": {
+            "lookups": 5
+          }
+        },
+        {
+          "name": "A_dashboard_shows_all_three_with_proxy_ip_columns",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "B_automatic_check_1_reuses_provider_id_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "advanced": true,
+            "same_provider_id": true,
+            "same_queue_id": true,
+            "lookup_through_same_id": true,
+            "ip_checked_not_before_queue_checked": true
+          }
+        },
+        {
+          "name": "B_automatic_check_2_reuses_provider_id_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "advanced": true,
+            "same_provider_id": true,
+            "same_queue_id": true,
+            "lookup_through_same_id": true,
+            "ip_checked_not_before_queue_checked": true
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_http_500",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_timeout",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_malformed",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_invalid_ip",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_ip_checked_advances_again_after_ipify_recovers",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "L_ip_change_recorded_without_rotation_or_replace",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "D_refresh_while_paused_reuses_id_and_observes_ip_once",
+          "passed": true,
+          "detail": {
+            "lookups_added": 1
+          }
+        },
+        {
+          "name": "D_refresh_while_active_reuses_id_and_observes_ip_once",
+          "passed": true,
+          "detail": {
+            "lookups_added": 1
+          }
+        },
+        {
+          "name": "E_manual_open_uses_existing_id_and_observes_ip_once_at_close",
+          "passed": true,
+          "detail": {
+            "lookups_while_open": 0
+          }
+        },
+        {
+          "name": "E_later_automatic_monitoring_keeps_the_same_id",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "F_browser_kill_restores_with_same_ids_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "killed_processes": 2
+          }
+        },
+        {
+          "name": "H_add_new_session_new_provider_id_with_baseline_ip",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "I_replace_creates_new_provider_id_and_new_ip_baseline",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "I_failed_replace_preserves_original_identity_and_ip_metadata",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "J_delete_removes_row_assignment_and_ip_metadata_only",
+          "passed": true,
+          "detail": {
+            "gone": true,
+            "state_file_removed": true,
+            "others_unchanged": true
+          }
+        },
+        {
+          "name": "security_dashboard_and_metrics_during_run",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "G_restart_without_credentials_fails_closed_with_zero_traffic",
+          "passed": true,
+          "detail": {
+            "failure": "IPRoyalProxyConfigurationError"
+          }
+        },
+        {
+          "name": "G_application_restart_reuses_persisted_ids_for_check_and_ip",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_dashboard_and_metrics_after_restart",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "K_reset_removes_everything_and_new_run_gets_new_provider_ids",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_no_credentials_in_sqlite",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_no_credentials_or_ips_in_logs",
+          "passed": true,
+          "detail": {
+            "log_records": 277
+          }
+        },
+        {
+          "name": "resources_return_to_baseline",
+          "passed": true,
+          "detail": {
+            "browser_processes_after": 0
+          }
+        },
+        {
+          "name": "all_target_traffic_proxied",
+          "passed": true,
+          "detail": {}
+        }
+      ],
+      "passed": true
+    },
+    "chrome": {
+      "browser_backend": "chrome",
+      "configuration": {
+        "provider": "iproyal",
+        "country": "gb",
+        "lifetime": "2h",
+        "browser_backend": "chrome",
+        "monitoring_strategy": "headed_window",
+        "session_count": 3
+      },
+      "duration_seconds": 58.1,
+      "unique_provider_ids_assigned": 7,
+      "ip_lookups": 75,
+      "ip_lookups_without_sticky_session": 0,
+      "proxied_target_requests": 90,
+      "checks": [
+        {
+          "name": "A_three_sessions_three_distinct_provider_ids",
+          "passed": true,
+          "detail": {
+            "sessions": 3,
+            "distinct_provider_ids": 3
+          }
+        },
+        {
+          "name": "A_initial_acquisition_proxied_with_each_sessions_own_id",
+          "passed": true,
+          "detail": {
+            "proxied_requests": 10,
+            "simulator_requests": 10
+          }
+        },
+        {
+          "name": "A_initial_ip_observation_through_each_sessions_own_id",
+          "passed": true,
+          "detail": {
+            "lookups": 5
+          }
+        },
+        {
+          "name": "A_dashboard_shows_all_three_with_proxy_ip_columns",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "B_automatic_check_1_reuses_provider_id_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "advanced": true,
+            "same_provider_id": true,
+            "same_queue_id": true,
+            "lookup_through_same_id": true,
+            "ip_checked_not_before_queue_checked": true
+          }
+        },
+        {
+          "name": "B_automatic_check_2_reuses_provider_id_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "advanced": true,
+            "same_provider_id": true,
+            "same_queue_id": true,
+            "lookup_through_same_id": true,
+            "ip_checked_not_before_queue_checked": true
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_http_500",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_timeout",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_malformed",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_queue_check_survives_ipify_invalid_ip",
+          "passed": true,
+          "detail": {
+            "status": "ACTIVE_QUEUE"
+          }
+        },
+        {
+          "name": "C_ip_checked_advances_again_after_ipify_recovers",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "L_ip_change_recorded_without_rotation_or_replace",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "D_refresh_while_paused_reuses_id_and_observes_ip_once",
+          "passed": true,
+          "detail": {
+            "lookups_added": 1
+          }
+        },
+        {
+          "name": "D_refresh_while_active_reuses_id_and_observes_ip_once",
+          "passed": true,
+          "detail": {
+            "lookups_added": 1
+          }
+        },
+        {
+          "name": "E_manual_open_uses_existing_id_and_observes_ip_once_at_close",
+          "passed": true,
+          "detail": {
+            "lookups_while_open": 0
+          }
+        },
+        {
+          "name": "E_later_automatic_monitoring_keeps_the_same_id",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "F_browser_kill_restores_with_same_ids_and_observes_ip",
+          "passed": true,
+          "detail": {
+            "killed_processes": 2
+          }
+        },
+        {
+          "name": "H_add_new_session_new_provider_id_with_baseline_ip",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "I_replace_creates_new_provider_id_and_new_ip_baseline",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "I_failed_replace_preserves_original_identity_and_ip_metadata",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "J_delete_removes_row_assignment_and_ip_metadata_only",
+          "passed": true,
+          "detail": {
+            "gone": true,
+            "state_file_removed": true,
+            "others_unchanged": true
+          }
+        },
+        {
+          "name": "security_dashboard_and_metrics_during_run",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "G_restart_without_credentials_fails_closed_with_zero_traffic",
+          "passed": true,
+          "detail": {
+            "failure": "IPRoyalProxyConfigurationError"
+          }
+        },
+        {
+          "name": "G_application_restart_reuses_persisted_ids_for_check_and_ip",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_dashboard_and_metrics_after_restart",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "K_reset_removes_everything_and_new_run_gets_new_provider_ids",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_no_credentials_in_sqlite",
+          "passed": true,
+          "detail": {}
+        },
+        {
+          "name": "security_no_credentials_or_ips_in_logs",
+          "passed": true,
+          "detail": {
+            "log_records": 285
+          }
+        },
+        {
+          "name": "resources_return_to_baseline",
+          "passed": true,
+          "detail": {
+            "browser_processes_after": 0
+          }
+        },
+        {
+          "name": "all_target_traffic_proxied",
+          "passed": true,
+          "detail": {}
+        }
+      ],
+      "passed": true
+    }
+  },
+  "passed": true
+}

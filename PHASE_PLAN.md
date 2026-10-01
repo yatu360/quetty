@@ -928,7 +928,7 @@ Evidence boundary for every Phase 8 prompt: Prompts 1–8 are local deterministi
 local simulator/browser evidence. Prompts 2–4 and 7 each have a gated authorised
 staging path that was **NOT RUN**.
 
-## Phase 9 — IPRoyal Residential Per-Session Proxy — **IN PROGRESS**
+## Phase 9 — IPRoyal Residential Per-Session Proxy — **ACCEPTED (application integration, 2026-10-01)**
 
 Goal: route each persisted QueueSession through its own IPRoyal Residential sticky
 session while preserving the bounded parked-session architecture (no per-session
@@ -964,9 +964,22 @@ leakage, and cleanup). T+60, T+90, T+115, and full `2h` continuity are **NOT RUN
      no unproxied fallback. Direct falls back only to the proxied browser.
    - Real Patchright and Chrome contexts were verified against a local authenticating
      proxy and the local simulator. No IPRoyal or Queue-it traffic was involved.
-3. **Observed exit-IP continuity metadata and dashboard visibility** — not started.
+3. **Proxy IP observation, dashboard integration, recovery, and acceptance** —
+   **completed 2026-10-01** (`docs/phase9_iproyal_acceptance.md`).
+   - `ProxyIpObserver` makes one bounded ipify request through the session's own
+     sticky session. `ProxyIpTracker` does compare-and-record and logs
+     `PROXY_IP_CHANGED`.
+   - Lookups happen after creation and after every successful queue check (automatic,
+     Refresh, Direct, Direct fallback). Manual Open makes one lookup, at close.
+   - Persisted `proxy_ip`, `proxy_ip_checked_at`, `proxy_ip_changed_count`, and
+     `proxy_ip_changed_at` are written only by `record_proxy_ip`.
+   - The dashboard has Proxy IP, Queue Checked, and IP Checked columns.
+   - Local application acceptance passed 30/30 on Patchright and 30/30 on Chrome.
+     Live IPRoyal continuity is reported only for the measured intervals.
 
-Phase 9 is not complete.
+**Phase 9 status: ACCEPTED for application integration (local evidence).** Provider
+duration evidence is reported separately: only the live intervals actually measured
+(see the acceptance doc) are claimed. The full configured `2h` lifetime is not proven.
 
 ## Scaling Gates
 

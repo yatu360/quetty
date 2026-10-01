@@ -282,7 +282,11 @@ class ManualChromeSessionManager:
                         context=record.owned_context.context,
                         page=record.page,
                     )
-                    await self._monitor.apply_restore_result(session, result)
+                    outcome, _ = await self._monitor.apply_restore_result(session, result)
+                    if outcome.success:
+                        # Manual Open policy: one exit-IP lookup at the final close
+                        # inspection, never polling while the window stays open.
+                        await self._monitor.observe_proxy_ip(session)
         except Exception as exc:  # noqa: BLE001 - preserve state and release ownership
             logger.warning(
                 "Final manual browser inspection failed for %s: %s",

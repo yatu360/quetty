@@ -1,5 +1,13 @@
 """Production proxy identity helpers."""
 
+from queue_load_test.proxy.ip_observer import (
+    DEFAULT_PROXY_IP_ENDPOINT,
+    ProxyIpFailure,
+    ProxyIpObservation,
+    ProxyIpObserver,
+    ProxyIpParseError,
+    parse_proxy_ip_response,
+)
 from queue_load_test.proxy.iproyal import (
     IPRoyalCredentials,
     IPRoyalProxyConfigurationError,
@@ -27,12 +35,17 @@ from queue_load_test.proxy.resolver import (
 )
 
 __all__ = [
+    "DEFAULT_PROXY_IP_ENDPOINT",
     "SUPPORTED_PROXY_BACKENDS",
     "IPRoyalCredentials",
     "IPRoyalProxyConfigurationError",
     "ProxyAuthWatch",
     "ProxyDiagnostics",
     "ProxyFailure",
+    "ProxyIpFailure",
+    "ProxyIpObservation",
+    "ProxyIpObserver",
+    "ProxyIpParseError",
     "ProxyObserver",
     "ProxyPurpose",
     "ProxyResolutionError",
@@ -45,6 +58,7 @@ __all__ = [
     "is_valid_proxy_country",
     "is_valid_proxy_lifetime",
     "is_valid_proxy_session_id",
+    "parse_proxy_ip_response",
     "resolve_proxy_for_session",
     "resolve_session_proxy",
     "validate_proxy_session_id",

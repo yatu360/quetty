@@ -6135,3 +6135,105 @@ benchmark harnesses build their own components and remain proxy-disabled.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Phase 9 Prompt 3 — Proxy IP Observation, Dashboard Integration, Recovery and Acceptance
+
+### Agent / Model
+
+Claude Opus 5.5.
+
+### Goal
+
+Observe each QueueSession's proxy exit IP through its own sticky session after
+creation and after every successful queue check, and show it on the dashboard. Then
+run the complete Phase 9 acceptance.
+
+### Changes Made
+
+- `proxy/ip_observer.py` (`ProxyIpObserver`, `parse_proxy_ip_response`,
+  `ProxyIpFailure`):
+  - one httpx request with a shared deadline, a connect timeout, and a 1 KiB cap;
+  - no redirects, `trust_env=False`, and only a resolved session proxy;
+  - accepts IPv4 or IPv6 values that `ipaddress` parses.
+- `proxy/ip_tracker.py` (`ProxyIpTracker`):
+  - never raises;
+  - an unresolvable proxy means no lookup;
+  - does compare-and-record and logs `PROXY_IP_CHANGED` without the IP.
+  `ProxyPurpose.IP_OBSERVATION` was added.
+- Hooks:
+  - the creator, after a SUCCESS outcome;
+  - `QueueSessionMonitor._timed_check`, after a successful check. This covers
+    automatic, Refresh, Direct success, and Direct fallback, once per logical check.
+  - Manual Open, once at a successful final close inspection.
+- Schema: `queue_sessions.proxy_ip`, `proxy_ip_checked_at`, `proxy_ip_changed_count`,
+  `proxy_ip_changed_at` (migrated, NULL/0 for legacy rows). They are read with every
+  row but written only by `record_proxy_ip`, so stale updates cannot overwrite them.
+- Dashboard: Proxy IP (with a `changed ×N` badge), Queue Checked (renamed from "Last
+  checked"), and IP Checked, from the existing paginated projection.
+- Settings: `PROXY_IP_ENDPOINT` (credential-free http(s)), `PROXY_IP_TIMEOUT_SECONDS`,
+  `PROXY_IP_CONNECT_TIMEOUT_SECONDS`.
+- Metric: `proxy_ip_observations_total{result}`.
+- `LocalAuthProxy`: host aliases and a fake per-sticky-session ipify with
+  failure/change modes. `LocalQueueSimulator`: `advertised_host`.
+- New harnesses:
+  - `queue-load-test-phase9-acceptance` (real app stack, Patchright and Chrome);
+  - `queue-load-test-phase9-iproyal-live` (gated: `RUN_PHASE9_IPROYAL_LIVE=1` plus
+    `--confirm-live-iproyal`).
+
+### Files Added
+
+- `src/queue_load_test/proxy/ip_observer.py`, `src/queue_load_test/proxy/ip_tracker.py`
+- `src/queue_load_test/harness/phase9_acceptance.py`,
+  `src/queue_load_test/harness/phase9_iproyal_live.py`
+- `tests/unit/test_proxy_ip_observation.py`, `tests/unit/test_phase9_live_gate.py`,
+  `tests/integration/test_phase9_acceptance.py`
+- `docs/phase9_iproyal_acceptance.md`, `docs/results/phase9_iproyal_acceptance_result.json`,
+  `docs/results/phase9_iproyal_live_result.json`
+
+### Tests Run
+
+- `python -m pytest`: 930 passed, 4 staging deselected (520.87 s).
+- `queue-load-test-phase9-acceptance`: Patchright 30/30 and Chrome 30/30 PASS. The local
+  run passed twice in a row before the committed run.
+- `ruff check src tests`, `mypy src` (strict), and `git diff --check`: PASS.
+
+### Live Tests
+
+- Real IPRoyal and ipify, gated, 4 runs; no Queue-it traffic:
+  - fresh context, browser restart, and Python restart: SAME ×4 each;
+  - T+5 and T+30 disconnected: SAME;
+  - T+60/T+90/T+115 and the full `2h`: NOT RUN.
+- Same-session browser vs observer exit: 11 of 12 pairs SAME. One pair differed at the
+  start of a new sticky session, which is provider behaviour. It is documented as a
+  caveat on what the dashboard IP means; it is not a routing fault.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- One hook point in `_timed_check` (after the check's own metrics are recorded)
+  ensures at most one lookup per logical check, without double-counting Direct
+  fallback.
+- Manual Open makes one lookup at close and never polls.
+- IPs are kept out of logs, metrics, and result JSON. The local dashboard shows the
+  full IP as requested.
+- Phase 9 is ACCEPTED for application integration. Provider-duration evidence is
+  bounded to 30 minutes.
+
+### Known Issues
+
+- The orphaned CREATING reservation row from Prompt 1 remains.
+- Benchmark harnesses are proxy-disabled.
+- Continuity beyond 30 minutes is not evidenced.
+
+### Follow-Up
+
+Optional: live T+60/T+90/T+115 checkpoints if a 2-hour operating window is required
+(`queue-load-test-phase9-iproyal-live --checkpoints 5,30,60,90,115`). Otherwise, the
+Phase 8 authorised Queue-it staging validation.
+
+### Git State
+
+- Branch: main

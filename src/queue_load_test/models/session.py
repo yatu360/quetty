@@ -83,6 +83,13 @@ class QueueSession:
     lease_until: datetime | None = None
     manual_owner_id: str | None = None
     manual_lease_until: datetime | None = None
+    # Diagnostic proxy-exit metadata (Phase 9). Written only by the repository's
+    # dedicated ``record_proxy_ip``; ordinary updates never overwrite it. It is never
+    # the routing identity (``proxy_session_id``) nor the journey identity (Queue ID).
+    proxy_ip: str | None = field(default=None, repr=False)
+    proxy_ip_checked_at: datetime | None = None
+    proxy_ip_changed_count: int = 0
+    proxy_ip_changed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         self.mode = SessionMode.parse(self.mode)

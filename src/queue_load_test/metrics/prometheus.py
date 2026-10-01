@@ -402,6 +402,12 @@ class PrometheusMetrics:
             labelnames=("purpose",),
             registry=self.registry,
         )
+        self.proxy_ip_observations_total = Counter(
+            "proxy_ip_observations_total",
+            "Post-check proxy-exit IP observations by sanitized result (never the IP).",
+            labelnames=("result",),
+            registry=self.registry,
+        )
         self.proxy_failures_total = Counter(
             "proxy_failures_total",
             "Per-session proxy failures by purpose and sanitized reason.",
@@ -759,6 +765,9 @@ class PrometheusMetrics:
     def set_proxy_provider(self, provider: str) -> None:
         self.proxy_provider_info.clear()
         self.proxy_provider_info.labels(provider=provider).set(1)
+
+    def record_proxy_ip_observation(self, result: str) -> None:
+        self.proxy_ip_observations_total.labels(result=result).inc()
 
     def record_proxy_attempt(self, purpose: ProxyPurpose) -> None:
         self.proxied_attempts_total.labels(purpose=ProxyPurpose(purpose).value).inc()

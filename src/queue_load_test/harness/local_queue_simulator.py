@@ -80,12 +80,17 @@ class LocalQueueSimulator:
     page_requests: Counter[str] = field(default_factory=Counter)
     browser_status_requests: Counter[str] = field(default_factory=Counter)
     direct_status_requests: Counter[str] = field(default_factory=Counter)
+    # Hostname used in every URL the simulator builds. The default is loopback; a
+    # non-loopback alias (resolved only by ``LocalAuthProxy``) lets an unmodified
+    # browser reach the simulator *through* a proxy, since Chromium never proxies
+    # loopback destinations. The server itself always binds 127.0.0.1.
+    advertised_host: str = "127.0.0.1"
     _server: asyncio.Server | None = None
     port: int = 0
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        return f"http://{self.advertised_host}:{self.port}"
 
     @property
     def queue_url(self) -> str:

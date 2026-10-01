@@ -13,6 +13,7 @@ from queue_load_test.models.browser import BrowserBackendName
 from queue_load_test.models.run import MonitoringStrategy
 from queue_load_test.models.session import SessionMode
 from queue_load_test.proxy import (
+    DEFAULT_PROXY_IP_ENDPOINT,
     IPRoyalCredentials,
     IPRoyalProxyConfigurationError,
     is_valid_proxy_country,
@@ -75,6 +76,17 @@ class Settings(BaseSettings):
     iproyal_proxy_country: str | None = Field(default=None, alias="IPROYAL_PROXY_COUNTRY")
     iproyal_proxy_lifetime: str | None = Field(
         default=None, alias="IPROYAL_PROXY_LIFETIME"
+    )
+    # Post-check proxy-exit observation (Phase 9). Always sent through the observed
+    # session's own sticky proxy; deliberately short because it is diagnostic only.
+    proxy_ip_endpoint: str = Field(
+        default=DEFAULT_PROXY_IP_ENDPOINT, alias="PROXY_IP_ENDPOINT"
+    )
+    proxy_ip_timeout_seconds: float = Field(
+        default=5.0, gt=0, le=30, alias="PROXY_IP_TIMEOUT_SECONDS"
+    )
+    proxy_ip_connect_timeout_seconds: float = Field(
+        default=3.0, gt=0, le=30, alias="PROXY_IP_CONNECT_TIMEOUT_SECONDS"
     )
     # Sensitive browser-network discovery is opt-in and writes only to a dedicated,
     # git-ignored local evidence directory. It never changes the monitoring path.
@@ -306,6 +318,23 @@ class Settings(BaseSettings):
             username=self.iproyal_proxy_username.get_secret_value(),
             base_password=self.iproyal_proxy_password.get_secret_value(),
         )
+
+    @field_validator("proxy_ip_endpoint")
+    @classmethod
+    def validate_proxy_ip_endpoint(cls, value: str) -> str:
+        try:
+            parsed = urlsplit(value)
+            valid = (
+                parsed.scheme in {"http", "https"}
+                and parsed.hostname is not None
+                and parsed.username is None
+                and parsed.password is None
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError("PROXY_IP_ENDPOINT must be a credential-free http(s) URL")
+        return value
 
     @field_validator("session_mode", mode="before")
     @classmethod

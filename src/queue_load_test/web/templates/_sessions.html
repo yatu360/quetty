@@ -16,7 +16,8 @@
   <table>
     <thead><tr>
       <th>session_id</th><th>queue_id</th><th>Queue-it status</th><th>Progress</th>
-      <th>Last Queue-it update</th><th>Last checked</th><th>Next check</th>
+      <th>Proxy IP</th><th>Last Queue-it update</th><th>Queue Checked</th><th>IP Checked</th>
+      <th>Next check</th>
       <th>Browser/runtime</th><th>Actions</th>
     </tr></thead>
     <tbody>
@@ -29,8 +30,11 @@
         <td class="mono">{{ session.queue_id or "—" }}</td>
         <td><span class="badge">{{ session.status.value }}</span></td>
         <td>{% if session.progress_percentage is not none %}{{ "%.1f" | format(session.progress_percentage) }}%{% else %}—{% endif %}</td>
+        {#- Persisted values only: rendering never triggers an IP lookup or browser work. -#}
+        <td class="mono proxy-ip">{{ session.proxy_ip or "—" }}{% if session.proxy_ip_changed_count %} <span class="badge" title="PROXY_IP_CHANGED: the exit IP changed {{ session.proxy_ip_changed_count }} time(s); the provider session and Queue ID did not">changed ×{{ session.proxy_ip_changed_count }}</span>{% endif %}</td>
         <td>{{ session.last_queue_update | local_time }}</td>
         <td>{{ session.last_checked_at | local_time }}</td>
+        <td>{{ session.proxy_ip_checked_at | local_time }}</td>
         <td>{{ session.next_check_at | local_time }}</td>
         <td>{% if session.runtime_state.value == "OPEN_IN_CHROME" %}OPEN IN BROWSER{% else %}{{ session.runtime_state.value }}{% endif %}</td>
         <td>

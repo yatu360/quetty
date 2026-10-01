@@ -47,6 +47,7 @@ class ProxyFailure(StrEnum):
 class ProxyPurpose(StrEnum):
     BROWSER = "browser"
     DIRECT = "direct"
+    IP_OBSERVATION = "ip_observation"
 
 
 class ProxyResolutionError(RuntimeError):

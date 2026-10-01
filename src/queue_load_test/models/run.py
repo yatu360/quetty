@@ -98,6 +98,10 @@ class SessionSummary:
     last_checked_at: datetime | None
     next_check_at: datetime | None
     runtime_state: BrowserRuntimeState
+    # Latest successful proxy-exit observation; local operator display only.
+    proxy_ip: str | None = None
+    proxy_ip_checked_at: datetime | None = None
+    proxy_ip_changed_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

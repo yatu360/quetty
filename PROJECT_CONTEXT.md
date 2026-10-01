@@ -1514,7 +1514,7 @@ If production proxy work is explicitly authorised, the exact follow-up is:
 
 `Design and implement persisted per-session IPRoyal Residential proxy assignments in Quetty using the proven UK sticky-session reconstruction mechanism, while keeping Queue ID authoritative and validating proxy-IP continuity on every restore.`
 
-## Phase 9 — IPRoyal Per-Session Proxy (in progress)
+## Phase 9 — IPRoyal Per-Session Proxy (accepted for application integration)
 
 Prompt 1, the per-session proxy foundation, was implemented on 2026-10-01 with local
 evidence only. It enforces the invariant: one persisted QueueSession = one immutable
@@ -1574,9 +1574,41 @@ Known limitation: a process crash between reservation and completion leaves a CR
 row without a Queue ID that holds its (never reused) proxy ID. That row is not counted
 as a valid identity and is not monitored.
 
+- Prompt 3 (2026-10-01) adds proxy-IP observation and runs the final acceptance.
+  - `proxy/ip_observer.py`: `ProxyIpObserver` makes one bounded httpx request to
+    `PROXY_IP_ENDPOINT` (default ipify) through a resolved session proxy only.
+    `parse_proxy_ip_response` uses `ipaddress`.
+  - `proxy/ip_tracker.py`: `ProxyIpTracker.observe_after_check` never raises. It
+    produces `BASELINE`/`UNCHANGED`/`CHANGED`/`FAILED`, logs `PROXY_IP_CHANGED`, and
+    writes `proxy_ip_observations_total{result}`.
+  - Hooks:
+    - `QueueSessionCreator`, after a successful outcome;
+    - `QueueSessionMonitor._timed_check`, after a successful check (this covers
+      automatic, Refresh, Direct, and Direct fallback once each);
+    - `ManualChromeSessionManager._finalize`, at close.
+  - Schema: `proxy_ip`, `proxy_ip_checked_at`, `proxy_ip_changed_count`,
+    `proxy_ip_changed_at`. They are SELECT-only in normal row I/O and written solely by
+    `SQLiteSessionRepository.record_proxy_ip`.
+  - The dashboard projection and `_sessions.html` gain Proxy IP, Queue Checked, and
+    IP Checked.
+  - Harnesses:
+    - `harness/phase9_acceptance.py`: real app stack; `LocalAuthProxy` now also has
+      host aliases and a fake per-sticky-session ipify, and `LocalQueueSimulator`
+      has `advertised_host`.
+    - `harness/phase9_iproyal_live.py`: gated real IPRoyal and ipify.
+  - Phase 9 is ACCEPTED for application integration. Live provider continuity is
+    claimed only for the measured intervals in `docs/phase9_iproyal_acceptance.md`.
+
 ## Next Task
 
-`Phase 9 Prompt 3 — Proxy IP observation, dashboard integration, and final Phase 9 acceptance.`
+No Phase 9 prompt remains. Open follow-ups:
+
+- optional live provider checkpoints beyond 30 minutes (T+60/T+90/T+115) if a 2-hour
+  operating window is required;
+- the Phase 8 authorised Queue-it staging validation of Direct Monitoring;
+- authorised Patchright staging validation.
+
+Never claim staging PASS without an authorised run.
 
 The Phase 8 follow-ups also remain open: authorised Queue-it staging validation of
 Direct Monitoring Strategy and authorised Patchright staging validation. Never claim

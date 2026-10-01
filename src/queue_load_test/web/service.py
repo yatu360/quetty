@@ -43,7 +43,8 @@ from queue_load_test.observation_equivalence import (
     DirectSchemaError,
     load_direct_response_schema,
 )
-from queue_load_test.proxy import SessionProxyResolver
+from queue_load_test.proxy import ProxyIpObserver, SessionProxyResolver
+from queue_load_test.proxy.ip_tracker import ProxyIpStore, ProxyIpTracker
 from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import DirectMonitorMetadataRepository, SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
@@ -319,6 +320,22 @@ class ApplicationRunRuntime:
             # The single authority for every per-session proxy in this run: acquisition,
             # restore, monitoring, Refresh Now, Manual Open, and Direct requests.
             proxy_resolver = SessionProxyResolver.for_run(run, self._base_settings, observer=metrics)
+            proxy_ip_tracker = (
+                ProxyIpTracker(
+                    resolver=proxy_resolver,
+                    observer=ProxyIpObserver(
+                        endpoint=self._base_settings.proxy_ip_endpoint,
+                        timeout_seconds=self._base_settings.proxy_ip_timeout_seconds,
+                        connect_timeout_seconds=(
+                            self._base_settings.proxy_ip_connect_timeout_seconds
+                        ),
+                    ),
+                    store=cast(ProxyIpStore, self._repository),
+                    observability=metrics,
+                )
+                if proxy_resolver.enabled and hasattr(self._repository, "record_proxy_ip")
+                else None
+            )
             state_store = FileSystemStateStore(settings.state_directory)
             shared_capacity = BrowserContextCapacity(settings.max_active_contexts)
             browser_manager = BrowserManager.from_settings(
@@ -353,6 +370,7 @@ class ApplicationRunRuntime:
                 mode=settings.session_mode,
                 browser_backend=run.browser_backend,
                 proxy_resolver=proxy_resolver,
+                proxy_ip_tracker=proxy_ip_tracker,
                 observability=metrics,
             )
             population_adjustment = (
@@ -385,6 +403,7 @@ class ApplicationRunRuntime:
                 polling_policy=PollingPolicy.from_settings(settings),
                 retry_policy=MonitoringRetryPolicy.from_settings(settings),
                 observability=metrics,
+                proxy_ip_tracker=proxy_ip_tracker,
             )
             direct_handler = _direct_handler_for_run(
                 run,

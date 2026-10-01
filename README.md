@@ -268,8 +268,66 @@ a Direct recipe.
 is no session, Queue ID, provider session ID, or IP label.
 
 Gated benchmark harnesses that build their own creator or restorer remain
-proxy-disabled. Observed exit-IP continuity and dashboard visibility are Phase 9
-Prompt 3.
+proxy-disabled.
+
+**Proxy-IP observation (Phase 9 Prompt 3).** Identity has three layers. The Queue ID is
+the Queue-it journey identity. The IPRoyal session ID is the immutable routing identity.
+The observed exit IP is diagnostic continuity metadata only.
+
+```text
+New QueueSession -> unique immutable 8-char IPRoyal ID persisted
+  -> temporary proxied context/request -> Queue ID/status persisted
+  -> ipify via the SAME sticky session -> proxy_ip + proxy_ip_checked_at -> park
+Later: same ID -> new disposable context/request -> queue check
+  -> same-session ipify -> Queue Checked and IP Checked updated independently -> park
+```
+
+- `ProxyIpObserver` sends exactly one bounded httpx request to `PROXY_IP_ENDPOINT`
+  (default `https://api.ipify.org/?format=json`) through the session's own resolved
+  proxy:
+  - there is a shared deadline (`PROXY_IP_TIMEOUT_SECONDS`) plus a connect timeout;
+  - responses are capped at 1 KiB, and redirects, environment proxies, and non-200
+    responses are rejected;
+  - the body must be JSON whose `ip` value Python's `ipaddress` accepts.
+  There is no code path that queries ipify directly, and no browser context is
+  opened for it.
+- When IP observation happens:
+  - after each successful creation (setup, deficit refill, Add, or Replace
+    candidate), once the Queue ID is persisted and the creation context has closed;
+  - after every successful queue-status check, exactly once per logical check. This
+    covers automatic checks, Refresh Now (including while paused), Direct success, and
+    Direct's browser fallback.
+  - **Manual Open policy:** once, at the final close inspection, and only when that
+    inspection succeeds. An open window is never polled.
+  - Failed queue checks make no lookup. Dashboard rendering never makes one; it reads
+    persisted values only.
+- An ipify failure never fails or alters a successful queue check. The last IP and its
+  `proxy_ip_checked_at` are retained, and only a sanitized
+  `proxy_ip_observations_total{result}` outcome and a `proxy_ip_observation_failed`
+  event are recorded.
+- `last_checked_at` (Queue Checked) and `proxy_ip_checked_at` (IP Checked) are
+  separate columns.
+- When the exit IP changes, the new value is stored, `proxy_ip_changed_count` and
+  `proxy_ip_changed_at` are updated, and a `PROXY_IP_CHANGED` event is logged (without
+  the IP). The provider session ID and Queue ID never change, and nothing is replaced
+  or rotated.
+- The IP columns are written only by `record_proxy_ip`, so ordinary updates from a
+  stale in-memory row can never overwrite them. Delete and Stop & Reset remove them
+  with the row.
+- The dashboard row shows Session ID, Queue ID, status, Progress, **Proxy IP** (with a
+  `changed ×N` badge), Last Queue-it update, **Queue Checked**, **IP Checked**, Next
+  check, runtime, and actions, from the same single paginated query. IPs are never
+  metrics labels and never appear in logs or result JSON.
+
+Acceptance commands:
+
+- `queue-load-test-phase9-acceptance` runs the full operator stack on Patchright and
+  Chrome against local stand-ins for IPRoyal, ipify, and the target.
+- `RUN_PHASE9_IPROYAL_LIVE=1 queue-load-test-phase9-iproyal-live --confirm-live-iproyal
+  [--checkpoints 5,30]` is the gated real-IPRoyal continuity check (ipify only, never
+  Queue-it).
+
+See `docs/phase9_iproyal_acceptance.md`.
 
 ## Local Operator UI
 

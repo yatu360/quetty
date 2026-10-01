@@ -34,6 +34,7 @@ from queue_load_test.repository.base import (
     ManualSessionBusyError,
     ManualSessionCapacityError,
     OwnershipRecovery,
+    ProxyIpRecord,
     ProxySessionAssignmentError,
     ProxySessionIdConflictError,
     QueueIdConflictError,
@@ -45,6 +46,8 @@ from queue_load_test.utils.asyncio_tools import run_to_completion
 
 _T = TypeVar("_T")
 
+# Proxy-exit metadata is read with every row but written only by record_proxy_ip.
+_PROXY_IP_COLUMNS = "proxy_ip, proxy_ip_checked_at, proxy_ip_changed_count, proxy_ip_changed_at"
 _SESSION_COLUMNS = """
     session_id, queue_id, transfer_url, mode, browser_backend, proxy_session_id,
     status, state_path,
@@ -52,6 +55,8 @@ _SESSION_COLUMNS = """
     next_check_at, attempt_count, last_error, worker_id, lease_until,
     manual_owner_id, manual_lease_until
 """
+_SESSION_SELECT_COLUMNS = _SESSION_COLUMNS.rstrip() + ",\n    " + _PROXY_IP_COLUMNS
+
 
 _NON_MONITORABLE_STATUSES_SQL = "'ADMITTED', 'EXPIRED', 'FAILED', 'NEW', 'CREATING'"
 _DUE_TIME_SQL = "COALESCE(next_check_at, created_at)"
@@ -120,6 +125,10 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     mode TEXT NOT NULL,
     browser_backend TEXT NOT NULL DEFAULT 'chrome',
     proxy_session_id TEXT,
+    proxy_ip TEXT,
+    proxy_ip_checked_at TEXT,
+    proxy_ip_changed_count INTEGER NOT NULL DEFAULT 0,
+    proxy_ip_changed_at TEXT,
     status TEXT NOT NULL,
     state_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -260,6 +269,10 @@ def _row_to_session(row: sqlite3.Row) -> QueueSession:
         lease_until=_from_storage(row["lease_until"]),
         manual_owner_id=row["manual_owner_id"],
         manual_lease_until=_from_storage(row["manual_lease_until"]),
+        proxy_ip=row["proxy_ip"],
+        proxy_ip_checked_at=_from_storage(row["proxy_ip_checked_at"]),
+        proxy_ip_changed_count=int(row["proxy_ip_changed_count"] or 0),
+        proxy_ip_changed_at=_from_storage(row["proxy_ip_changed_at"]),
     )
 
 
@@ -574,7 +587,7 @@ class SQLiteSessionRepository:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 row = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions WHERE session_id = ?",
                     (session_id,),
                 ).fetchone()
                 if row is None:
@@ -599,7 +612,7 @@ class SQLiteSessionRepository:
                 if cursor.rowcount != 1:
                     raise ManualSessionBusyError("Session browser ownership changed")
                 claimed = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions WHERE session_id = ?",
                     (session_id,),
                 ).fetchone()
                 connection.commit()
@@ -809,7 +822,7 @@ class SQLiteSessionRepository:
                     (now_storage,),
                 )
                 row = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions WHERE session_id = ?",
                     (session_id,),
                 ).fetchone()
                 if row is None:
@@ -846,7 +859,7 @@ class SQLiteSessionRepository:
                 if cursor.rowcount != 1:
                     raise ManualSessionBusyError("Session browser ownership changed")
                 claimed = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions WHERE session_id = ?",
                     (session_id,),
                 ).fetchone()
                 connection.commit()
@@ -1010,6 +1023,16 @@ class SQLiteSessionRepository:
             )
         if "proxy_session_id" not in columns:
             connection.execute("ALTER TABLE queue_sessions ADD COLUMN proxy_session_id TEXT")
+        for column, definition in (
+            ("proxy_ip", "TEXT"),
+            ("proxy_ip_checked_at", "TEXT"),
+            ("proxy_ip_changed_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("proxy_ip_changed_at", "TEXT"),
+        ):
+            if column not in columns:
+                connection.execute(
+                    f"ALTER TABLE queue_sessions ADD COLUMN {column} {definition}"
+                )
 
     @staticmethod
     def _migrate_run_columns(connection: sqlite3.Connection) -> None:
@@ -1248,7 +1271,7 @@ class SQLiteSessionRepository:
             row = (
                 self._connect()
                 .execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions WHERE session_id = ?",
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions WHERE session_id = ?",
                     (session_id,),
                 )
                 .fetchone()
@@ -1262,12 +1285,12 @@ class SQLiteSessionRepository:
             connection = self._connect()
             if status is None:
                 rows = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions ORDER BY created_at, session_id"
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions ORDER BY created_at, session_id"
                 ).fetchall()
             else:
                 parsed_status = QueueStatus.parse(status)
                 rows = connection.execute(
-                    f"SELECT {_SESSION_COLUMNS} FROM queue_sessions "
+                    f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions "
                     "WHERE status = ? ORDER BY created_at, session_id",
                     (parsed_status.value,),
                 ).fetchall()
@@ -1432,6 +1455,47 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def record_proxy_ip(
+        self, session_id: str, *, ip: str, observed_at: datetime
+    ) -> ProxyIpRecord | None:
+        """Compare-and-record one successful proxy-exit observation atomically.
+
+        Only the proxy-IP columns change; lifecycle, Queue ID, leases, and the
+        immutable ``proxy_session_id`` are untouched. Returns ``None`` when the row
+        no longer exists (for example it was deleted while the check ran).
+        """
+
+        def operation() -> ProxyIpRecord | None:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT proxy_ip FROM queue_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    connection.rollback()
+                    return None
+                previous = row["proxy_ip"]
+                changed = previous is not None and previous != ip
+                observed = _to_storage(observed_at)
+                connection.execute(
+                    """
+                    UPDATE queue_sessions
+                    SET proxy_ip = ?, proxy_ip_checked_at = ?,
+                        proxy_ip_changed_count = proxy_ip_changed_count + ?,
+                        proxy_ip_changed_at = CASE WHEN ? THEN ? ELSE proxy_ip_changed_at END
+                    WHERE session_id = ?
+                    """,
+                    (ip, observed, int(changed), int(changed), observed, session_id),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return ProxyIpRecord(baseline=previous is None, changed=changed)
+
+        return await self._run(operation)
+
     async def get_progress(self, session_id: str) -> QueueProgress | None:
         def operation() -> QueueProgress | None:
             row = (
@@ -1501,7 +1565,8 @@ class SQLiteSessionRepository:
                 """
                 SELECT s.session_id, s.queue_id, s.status, p.progress_percentage,
                        s.last_queue_update, s.last_checked_at, s.next_check_at,
-                       s.worker_id, s.lease_until, s.manual_owner_id, s.manual_lease_until
+                       s.worker_id, s.lease_until, s.manual_owner_id, s.manual_lease_until,
+                       s.proxy_ip, s.proxy_ip_checked_at, s.proxy_ip_changed_count
                 FROM queue_sessions AS s
                 LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
                 """
@@ -1518,6 +1583,9 @@ class SQLiteSessionRepository:
                     last_queue_update=_from_storage(row["last_queue_update"]),
                     last_checked_at=_from_storage(row["last_checked_at"]),
                     next_check_at=_from_storage(row["next_check_at"]),
+                    proxy_ip=row["proxy_ip"],
+                    proxy_ip_checked_at=_from_storage(row["proxy_ip_checked_at"]),
+                    proxy_ip_changed_count=int(row["proxy_ip_changed_count"] or 0),
                     runtime_state=_row_runtime_state(row, now=now),
                 )
                 for row in rows
@@ -1597,7 +1665,7 @@ class SQLiteSessionRepository:
                     return ClaimedSessions()
                 rows = connection.execute(
                     f"""
-                    SELECT {_SESSION_COLUMNS}
+                    SELECT {_SESSION_SELECT_COLUMNS}
                     FROM queue_sessions
                     WHERE {_DUE_FILTER_SQL}
                     ORDER BY {_DUE_ORDER_SQL}
@@ -1622,7 +1690,7 @@ class SQLiteSessionRepository:
                         (worker_id, lease_storage, *session_ids),
                     )
                     rows = connection.execute(
-                        f"SELECT {_SESSION_COLUMNS} FROM queue_sessions "
+                        f"SELECT {_SESSION_SELECT_COLUMNS} FROM queue_sessions "
                         f"WHERE session_id IN ({placeholders}) "
                         f"ORDER BY {_DUE_ORDER_SQL}",
                         session_ids,

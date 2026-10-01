@@ -41,6 +41,7 @@ from queue_load_test.proxy import (
     resolve_session_proxy,
     validate_proxy_session_id,
 )
+from queue_load_test.proxy.ip_tracker import ProxyIpTracker
 from queue_load_test.queue_monitor import QueueItLiveStateExtractor
 from queue_load_test.repository import (
     ProxySessionIdConflictError,
@@ -190,6 +191,7 @@ class QueueSessionCreator:
         browser_backend: BrowserBackendName = BrowserBackendName.CHROME,
         proxy_provider: ProxyProvider = ProxyProvider.NONE,
         proxy_resolver: SessionProxyResolver | None = None,
+        proxy_ip_tracker: ProxyIpTracker | None = None,
         proxy_session_id_factory: ProxySessionIdFactory = generate_proxy_session_id,
         live_extractor: QueueItLiveStateExtractor | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
@@ -220,6 +222,7 @@ class QueueSessionCreator:
             # Fail closed at construction: a proxied run can never acquire unproxied.
             raise ValueError("A proxied run requires a session proxy resolver")
         self._proxy_resolver = proxy_resolver
+        self._proxy_ip_tracker = proxy_ip_tracker
         self._proxy_session_id_factory = proxy_session_id_factory
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
         self._transfer_extractor_factory = transfer_extractor_factory
@@ -274,7 +277,7 @@ class QueueSessionCreator:
                 # the builtin TimeoutError is an OSError and is retried as transient.
                 # await_bounded re-cancels: Playwright can otherwise wait forever for a
                 # wedged browser to acknowledge the first cancellation.
-                return await await_bounded(
+                outcome = await await_bounded(
                     self._attempt(
                         work_item,
                         attempt,
@@ -284,6 +287,15 @@ class QueueSessionCreator:
                     ),
                     timeout=self._attempt_timeout_seconds,
                 )
+                if (
+                    outcome.kind is CreationOutcomeKind.SUCCESS
+                    and outcome.session is not None
+                    and self._proxy_ip_tracker is not None
+                ):
+                    # Baseline exit IP after the Queue ID is persisted and the
+                    # creation context has closed; diagnostic only.
+                    await self._proxy_ip_tracker.observe_after_check(outcome.session)
+                return outcome
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()

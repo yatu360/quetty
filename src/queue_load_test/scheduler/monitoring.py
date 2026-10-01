@@ -22,6 +22,7 @@ from queue_load_test.models import (
     QueueStatus,
     evaluate_monitoring_observation,
 )
+from queue_load_test.proxy.ip_tracker import ProxyIpTracker
 from queue_load_test.repository import ClaimedSessions, SessionRepository
 from queue_load_test.transfer import RestoreFailure, SessionRestoreResult
 
@@ -236,9 +237,11 @@ class QueueSessionMonitor:
         jitter: Jitter = random.uniform,
         sleep: Sleep = asyncio.sleep,
         observability: PrometheusMetrics | None = None,
+        proxy_ip_tracker: ProxyIpTracker | None = None,
     ) -> None:
         self._repository = repository
         self._restorer = restorer
+        self._proxy_ip_tracker = proxy_ip_tracker
         self._polling_policy = polling_policy
         self._retry_policy = retry_policy or MonitoringRetryPolicy()
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -317,7 +320,20 @@ class QueueSessionMonitor:
             error_type=session.last_error,
             operation=operation,
         )
+        if outcome.success:
+            # Exactly one post-check exit-IP lookup per logical check (automatic,
+            # Refresh Now, Direct success, or Direct's browser fallback), through the
+            # session's own sticky session. Outside the check's duration and never able
+            # to fail the already-persisted queue result.
+            await self.observe_proxy_ip(session)
         return outcome
+
+    async def observe_proxy_ip(self, session: QueueSession) -> None:
+        """Record the session's current proxy-exit IP; diagnostic and never raising."""
+
+        tracker = self._proxy_ip_tracker
+        if tracker is not None:
+            await tracker.observe_after_check(session)
 
     async def _check(
         self,
