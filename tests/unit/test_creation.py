@@ -620,13 +620,26 @@ class FakeResponse:
         self.status = status
 
 
+class FakeBodyLocator:
+    def __init__(self, page: "FakePage") -> None:
+        self._page = page
+        self.first = self
+
+    async def inner_text(self, **_: object) -> str:
+        return self._page.body_text
+
+
 class FakePage:
-    def __init__(self, status: int) -> None:
+    def __init__(self, status: int, body_text: str = "Queue-it waiting room") -> None:
         self.url = "https://queue.staging.test/journey"
         self.status = status
+        self.body_text = body_text
 
     async def goto(self, *_: object, **__: object) -> FakeResponse:
         return FakeResponse(self.status)
+
+    def locator(self, _selector: str) -> FakeBodyLocator:
+        return FakeBodyLocator(self)
 
 
 class FakeContext:

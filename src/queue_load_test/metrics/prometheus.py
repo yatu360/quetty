@@ -90,6 +90,11 @@ class PrometheusMetrics:
             "Permanent creation failures that are not retried.",
             registry=self.registry,
         )
+        self.queue_creation_access_restricted_total = Counter(
+            "queue_creation_access_restricted_total",
+            "Creation attempts that rendered the access-restriction page before a Queue ID.",
+            registry=self.registry,
+        )
         self.state_persistence_failures_total = Counter(
             "state_persistence_failures_total",
             "Browser storage-state writes that failed during session creation.",
@@ -537,6 +542,9 @@ class PrometheusMetrics:
 
     def record_creation_permanent_failure(self) -> None:
         self.queue_creation_permanent_failures_total.inc()
+
+    def record_creation_access_restricted(self) -> None:
+        self.queue_creation_access_restricted_total.inc()
 
     def record_state_persistence_failure(self) -> None:
         self.state_persistence_failures_total.inc()

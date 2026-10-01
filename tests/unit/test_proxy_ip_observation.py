@@ -694,6 +694,12 @@ async def test_real_creator_records_a_baseline_only_after_success(tmp_path: Path
         async def goto(self, *_: Any, **__: Any) -> Any:
             return SimpleNamespace(status=self.status)
 
+        def locator(self, _selector: str) -> Any:
+            async def inner_text(**_: Any) -> str:
+                return "Queue-it waiting room"
+
+            return SimpleNamespace(first=SimpleNamespace(inner_text=inner_text))
+
     class Context:
         def __init__(self, status: int) -> None:
             self.status = status

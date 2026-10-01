@@ -1,6 +1,8 @@
 """Bounded asynchronous session creation."""
 
 from queue_load_test.scheduler.creation import (
+    AccessRestrictedError,
+    AcquisitionFailure,
     CreationMetrics,
     CreationOutcome,
     CreationOutcomeKind,
@@ -26,6 +28,8 @@ from queue_load_test.scheduler.monitoring import (
 )
 
 __all__ = [
+    "AccessRestrictedError",
+    "AcquisitionFailure",
     "CreationMetrics",
     "CreationOutcome",
     "CreationOutcomeKind",

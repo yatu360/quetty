@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+  <head><title>Access restricted</title></head>
+  <body>
+    <main id="content"></main>
+    <script>
+      // Rendered after load so only a rendered-DOM read can classify the page.
+      document.getElementById("content").innerHTML =
+        "<h1>We are sorry, your access has been restricted</h1>" +
+        "<p>Reference: synthetic-fixture</p>";
+    </script>
+  </body>
+</html>

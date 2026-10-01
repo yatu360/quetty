@@ -6457,3 +6457,159 @@ None.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Acquisition-time detection of the pre-Queue access-restriction page
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Treat the "We are sorry, your access has been restricted" page, shown before any Queue
+ID exists, as a typed failed acquisition attempt. It must never become a QueueSession,
+count toward `TARGET_QUEUE_IDS`, or reach monitoring. The bounded controller then
+replaces it.
+
+### Changes Made
+
+- New `queue_monitor/restriction.py`:
+  - `normalize_page_text`: NFKC, casefold, punctuation and whitespace folded.
+  - `is_access_restricted_text`: pure whole-phrase containment match against
+    `ACCESS_RESTRICTED_PHRASES`.
+  - `RenderedAccessRestrictionDetector`: reads `body` `inner_text()`, the rendered and
+    visible text, not the raw HTTP body. It returns `False` on any browser error, so an
+    unreadable page is never classified as restricted.
+- `scheduler/creation.py`:
+  - New `AcquisitionFailure(StrEnum)` with `ACCESS_RESTRICTED_BEFORE_QUEUE`. Its `.code`
+    is `access_restricted_before_queue`, following the `ProxyFailure` value/lower-code
+    convention.
+  - New `AccessRestrictedError(PermanentCreationError)`.
+  - `QueueSessionCreator` takes an injectable `restriction_detector`, defaulting to the
+    rendered detector. It checks:
+    - on a 4xx response, before `permanent_http_response` or `temporary_http_response`
+      is raised (407 proxy-auth handling is unchanged);
+    - at the start of every `_wait_for_live_queue` poll, before live extraction or
+      transfer extraction.
+  - A match ends the work item without in-item retries. The existing `async with`
+    closes the context, no state has been saved, and `_persist_failed` writes or updates
+    a `FAILED` row with `queue_id=None` and `last_error=access_restricted_before_queue`.
+    The outcome is `PERMANENT_FAILURE`.
+  - `CreationMetrics.access_restricted` counts these outcomes, alongside
+    `permanent_failures`.
+- `metrics/prometheus.py`: new counter `queue_creation_access_restricted_total` and
+  `record_creation_access_restricted()`.
+- Exports added to `queue_monitor/__init__.py` and `scheduler/__init__.py`.
+- `PROJECT_CONTEXT.md`: Target Acquisition Model now describes the behaviour.
+
+### Files Added
+
+- `src/queue_load_test/queue_monitor/restriction.py`
+- `tests/unit/test_access_restriction.py`
+- `tests/integration/test_access_restriction_page.py`
+- `tests/fixtures/queue_it/access_restricted.html` (synthetic, JS-rendered)
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/scheduler/__init__.py`
+- `src/queue_load_test/queue_monitor/__init__.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- Fake pages gained a `locator("body")` text stub so they go through the real default
+  detector. Assertions are unchanged.
+  - `tests/unit/test_creation.py`
+  - `tests/unit/test_iproyal_proxy.py`
+  - `tests/unit/test_proxy_ip_observation.py`
+- `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `tests/unit/test_access_restriction.py`: 31 passed. Coverage:
+  - Detector: case, whitespace, NBSP and punctuation variants are detected. Generic
+    error texts, near-miss phrases, and every Queue-it fixture are not. An unreadable
+    page is not restricted.
+  - Restriction before a Queue ID gives `PERMANENT_FAILURE` with the typed code and 1
+    attempt. The live extractor is never called. The context is closed. The row is
+    `FAILED` with no Queue ID. The successful and lost counts stay 0. No state file is
+    written. Metrics are counted.
+  - A restriction page with a 403 is classified from the rendered page. A plain 403
+    keeps `permanent_http_response`.
+  - A restriction rendered after a loading shell is caught on a later poll.
+  - An ordinary queue page succeeds.
+  - A generic navigation error still retries as transient, and on exhaustion stays
+    `transient_browser_error`.
+  - Cancelling during detection leaves no open context and no state.
+  - Controller, through the real creator:
+    - With 2 seeded, target 6, 3 workers and 3 restricted attempts: it reaches exactly
+      6, uses 7 contexts all closed, has at most 3 active, and leaves the seeded rows
+      untouched.
+    - With 4 seeded, target 5 and 5 restricted attempts: no overshoot, and at most 1 in
+      flight.
+    - Duplicates and restrictions are counted separately, and only the successes keep
+      state.
+    - Controller cancellation during restricted attempts leaks no context.
+- `tests/integration/test_access_restriction_page.py`: 3 passed with real Chrome and
+  127.0.0.1 only.
+  - A JS-rendered restriction is detected.
+  - Queue-it fixtures and `display:none` restriction text are not detected.
+  - The end-to-end creator sees a local 403 restriction page and reports
+    `access_restricted_before_queue` with 1 attempt, `active_context_count == 0`, no
+    state, and a FAILED row.
+- Acquisition, creator and proxy suites (`test_creation`, `test_iproyal_proxy`,
+  `test_proxy_ip_observation`, `test_orphaned_reservations`): 101 passed.
+- `ruff check src tests`: PASS. `mypy src`: PASS (112 files).
+- `python -m pytest` (full): 975 passed, 1 failed, 4 deselected.
+  - The failure is `test_operator_fencing.py::test_chrome_loss_while_open_is_detected_without_relaunch`.
+    It is intermittent and already flaky before this change: it failed 2 of 6 runs with
+    these changes stashed. It uses its own fake creator and does not reach the
+    restriction code. Re-running it alone passed.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it or staging traffic. Detection matches only the known phrase the
+  operator supplied. It has not been checked against a real restriction page.
+
+### Important Decisions
+
+- The detector inspects the rendered DOM text, so script-injected content is seen and
+  hidden text is ignored. It matches a whole normalised phrase, so generic errors such
+  as "Access denied" or "403 Forbidden" are not classified.
+- A restriction is not retried inside the work item. A retry would only repeat the same
+  request through the same sticky assignment. The work item ends, and the existing
+  controller schedules replacement work because the successful count did not advance.
+- No mechanism for routing, rotating or evading the restriction was added. With IPRoyal,
+  the failed row keeps its own sticky ID. A replacement work item gets its assignment
+  from the existing allocator, the same as after any other failure.
+- `PERMANENT_FAILURE` was reused instead of adding a new `CreationOutcomeKind`. This
+  keeps every existing consumer working: operator Add/Replace, harness reports and
+  dashboard. The typed code and the new counter distinguish the case.
+- Generic navigation exceptions are never inspected for restriction. No rendered page
+  exists then.
+
+### Known Issues
+
+- Only the one known English phrase is detected. Other wordings fall through to the
+  existing `queue_page_not_ready` or `permanent_http_response` paths.
+- If every attempt is restricted, the controller keeps replacing attempts at worker
+  concurrency with no restriction-specific backoff or pause. Each one leaves a `FAILED`
+  row. Any persistent permanent failure already behaves this way.
+- `test_chrome_loss_while_open_is_detected_without_relaunch` is flaky; this change did not
+  cause it, and it was not fixed here.
+- Acquisition does one extra `body` `inner_text()` read per live-queue poll, with a 2 s
+  locator timeout. Monitoring does not use the detector.
+
+### Follow-Up
+
+"Add an operator-visible safeguard for repeated pre-Queue access restrictions. When the
+share of `access_restricted_before_queue` outcomes among recent creation attempts
+crosses a configurable threshold (for example 5 consecutive, or more than 50% of the
+last 20), pause new acquisition work items using the existing bounded controller. Keep
+in-flight work and persisted identities untouched. Surface the pause and the restriction
+count on the dashboard and in `/metrics`, and require an explicit operator resume. Do not
+change routing, proxy assignment or browser identity in response to a restriction. Add
+unit tests for the threshold, pause, resume, no-overshoot and shutdown paths. Update
+CHANGELOG_AI.md."
+
+### Git State
+
+- Branch: main

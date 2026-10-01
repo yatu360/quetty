@@ -42,7 +42,11 @@ from queue_load_test.proxy import (
     validate_proxy_session_id,
 )
 from queue_load_test.proxy.ip_tracker import ProxyIpTracker
-from queue_load_test.queue_monitor import QueueItLiveStateExtractor
+from queue_load_test.queue_monitor import (
+    AccessRestrictionDetector,
+    QueueItLiveStateExtractor,
+    RenderedAccessRestrictionDetector,
+)
 from queue_load_test.repository import (
     ProxySessionIdConflictError,
     QueueIdConflictError,
@@ -70,6 +74,16 @@ class CreationOutcomeKind(StrEnum):
     PERMANENT_FAILURE = "PERMANENT_FAILURE"
 
 
+class AcquisitionFailure(StrEnum):
+    """Typed acquisition failures with a dedicated detector; never a Queue status."""
+
+    ACCESS_RESTRICTED_BEFORE_QUEUE = "ACCESS_RESTRICTED_BEFORE_QUEUE"
+
+    @property
+    def code(self) -> str:
+        return self.value.lower()
+
+
 class TransientCreationError(RuntimeError):
     """A sanitized failure that can reasonably succeed on retry."""
 
@@ -84,6 +98,17 @@ class PermanentCreationError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class AccessRestrictedError(PermanentCreationError):
+    """The rendered page is the access-restriction page; no Queue ID was acquired.
+
+    Not retried within the work item: the attempt ends, its context is discarded and
+    the bounded controller schedules ordinary replacement work.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.code)
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +180,7 @@ class CreationMetrics:
     temporary_failures: int = 0
     temporary_failure_outcomes: int = 0
     permanent_failures: int = 0
+    access_restricted: int = 0
     retries: int = 0
     currently_creating: int = 0
     maximum_concurrent_creating: int = 0
@@ -194,6 +220,7 @@ class QueueSessionCreator:
         proxy_ip_tracker: ProxyIpTracker | None = None,
         proxy_session_id_factory: ProxySessionIdFactory = generate_proxy_session_id,
         live_extractor: QueueItLiveStateExtractor | None = None,
+        restriction_detector: AccessRestrictionDetector | None = None,
         transfer_extractor_factory: TransferExtractorFactory = QueueItTransferExtractor,
         retry_policy: CreationRetryPolicy | None = None,
         navigation_timeout_ms: float = 30_000,
@@ -225,6 +252,7 @@ class QueueSessionCreator:
         self._proxy_ip_tracker = proxy_ip_tracker
         self._proxy_session_id_factory = proxy_session_id_factory
         self._live_extractor = live_extractor or QueueItLiveStateExtractor()
+        self._restriction_detector = restriction_detector or RenderedAccessRestrictionDetector()
         self._transfer_extractor_factory = transfer_extractor_factory
         self._retry_policy = retry_policy or CreationRetryPolicy()
         self._navigation_timeout_ms = navigation_timeout_ms
@@ -299,6 +327,8 @@ class QueueSessionCreator:
             except PermanentCreationError as exc:
                 if self._observability is not None:
                     self._observability.record_creation_permanent_failure()
+                    if isinstance(exc, AccessRestrictedError):
+                        self._observability.record_creation_access_restricted()
                 await self._persist_failed(work_item, attempt, exc.code, reserved_session)
                 return CreationOutcome(
                     kind=CreationOutcomeKind.PERMANENT_FAILURE,
@@ -409,6 +439,10 @@ class QueueSessionCreator:
                     assert self._proxy_resolver is not None
                     self._proxy_resolver.record_failure(ProxyFailure.PROXY_AUTH_FAILED)
                     raise TransientCreationError("proxy_auth_failed")
+                if response.status >= 400:
+                    # A restriction page may arrive with an error status; classify it
+                    # from the rendered page rather than the status code alone.
+                    await self._raise_if_access_restricted(page)
                 if response.status >= 500 or response.status in {408, 429}:
                     raise TransientCreationError("temporary_http_response")
                 if response.status >= 400:
@@ -517,6 +551,9 @@ class QueueSessionCreator:
         deadline = asyncio.get_running_loop().time() + self._live_page_timeout_seconds
         last_transfer_failure: TransferFailure | None = None
         while True:
+            # Checked before every observation so a restriction page rendered after
+            # navigation is never mistaken for a Queue-it journey.
+            await self._raise_if_access_restricted(page)
             progress = await self._live_extractor.extract(page, session_id=session_id)
             if progress.pre_queue is True or progress.active_queue is True:
                 transfer = await self._transfer_extractor_factory(page.url).extract(page)
@@ -536,6 +573,10 @@ class QueueSessionCreator:
                     raise PermanentCreationError("queue_identity_missing")
                 raise TransientCreationError("queue_page_not_ready")
             await self._sleep(self._observation_interval_seconds)
+
+    async def _raise_if_access_restricted(self, page: Page) -> None:
+        if await self._restriction_detector.detect(page):
+            raise AccessRestrictedError()
 
     async def _persist_failed(
         self,
@@ -828,6 +869,8 @@ class SessionCreationController:
             self.metrics.duplicates += 1
         elif outcome.kind is CreationOutcomeKind.PERMANENT_FAILURE:
             self.metrics.permanent_failures += 1
+            if outcome.failure_code == AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.code:
+                self.metrics.access_restricted += 1
         elif outcome.kind is CreationOutcomeKind.TEMPORARY_FAILURE:
             self.metrics.temporary_failure_outcomes += 1
         if outcome.failure_code == "unexpected_creation_error":

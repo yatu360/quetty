@@ -887,6 +887,18 @@ saves HYBRID state, persists, and releases the context. SQLite's unique nullable
 creates an explicit `FAILED` attempt without a Queue ID, and leaves the existing
 session unchanged.
 
+Before any Queue ID exists, the creator checks the rendered body text for the
+access-restriction page ("We are sorry, your access has been restricted"). It checks
+before every live-queue observation, and also on a 4xx response before the status is
+classified. A match raises `AccessRestrictedError` (`AcquisitionFailure.
+ACCESS_RESTRICTED_BEFORE_QUEUE`, code `access_restricted_before_queue`). It is not retried
+inside the work item: the context closes, no state is saved, and a `FAILED` row with no
+Queue ID is written. The controller counts it in `access_restricted` and schedules
+ordinary replacement work. `queue_creation_access_restricted_total` counts these
+attempts. There is no restriction-specific routing or egress change. A replacement work
+item gets its proxy assignment from the existing allocator, the same as after any other
+failure.
+
 Manual Add and Replace call this same creator once from a fixed-size operator pool.
 Failed action attempts are removed rather than shown as phantom managed sessions.
 Replace deletes its leased old row only after the replacement has a valid persisted

@@ -396,6 +396,12 @@ class _Page:
             return response
         return _Response()
 
+    def locator(self, _selector: str) -> SimpleNamespace:
+        async def inner_text(**_: object) -> str:
+            return "Queue-it waiting room"
+
+        return SimpleNamespace(first=SimpleNamespace(inner_text=inner_text))
+
 
 class _Context:
     def __init__(self, manager: "_BrowserManager") -> None:
