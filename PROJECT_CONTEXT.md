@@ -1570,9 +1570,16 @@ IPRoyal sticky-session ID.
     CONNECT. `tests/integration/test_iproyal_proxy_routing.py` adds a test-only
     `<-loopback>` bypass rule so Chromium proxies the local simulator.
 
-Known limitation: a process crash between reservation and completion leaves a CREATING
-row without a Queue ID that holds its (never reused) proxy ID. That row is not counted
-as a valid identity and is not monitored.
+Interrupted reservations: a crash or a graceful shutdown that cancels a creation
+mid-acquisition leaves a CREATING row with no Queue ID and no owner.
+`ApplicationRunRuntime.start_run` calls
+`SQLiteSessionRepository.discard_orphaned_reservations()` before any creation or
+operator work starts. It deletes exactly those rows (progress and Direct status
+cascade, and state and Direct files are removed) and logs
+`orphaned_creation_reservations_discarded{count}`. The population target is untouched,
+so the deficit refill re-creates the visitor with a fresh proxy ID. Rows from manual
+adoption are never matched, because they carry a Queue ID, and neither are leased or
+manually owned rows.
 
 - Prompt 3 (2026-10-01) adds proxy-IP observation and runs the final acceptance.
   - `proxy/ip_observer.py`: `ProxyIpObserver` makes one bounded httpx request to

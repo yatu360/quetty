@@ -213,7 +213,9 @@ proxying.
   enforced by SQLite. Monitoring, restore, Refresh Now, Manual Open, retries, and
   restarts reuse the persisted ID. Replace never reuses the old ID, and a failed Replace
   leaves the old session and its ID untouched. Delete and Stop & Reset remove the local
-  assignments.
+  assignments. If a crash or shutdown interrupts a creation, its unfinished reservation
+  (CREATING, no Queue ID, no owner) is discarded at the next startup. The deficit
+  refill then re-creates the visitor with a fresh ID.
 - Queue ID remains the authoritative journey identity. The proxy session ID is routing
   provenance only.
 - Credentials are environment-only. They are never persisted, logged, rendered, or

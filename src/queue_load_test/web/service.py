@@ -337,6 +337,9 @@ class ApplicationRunRuntime:
                 else None
             )
             state_store = FileSystemStateStore(settings.state_directory)
+            # Before any creation or operator work starts in this runtime, so no live
+            # creator can own a matching row.
+            await self._discard_orphaned_reservations(state_store, settings)
             shared_capacity = BrowserContextCapacity(settings.max_active_contexts)
             browser_manager = BrowserManager.from_settings(
                 settings,
@@ -516,6 +519,31 @@ class ApplicationRunRuntime:
             self._direct_handler = direct_handler
             self._metrics = metrics
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
+
+    async def _discard_orphaned_reservations(
+        self, state_store: FileSystemStateStore, settings: Settings
+    ) -> None:
+        """Remove creation reservations a previous process left unfinished."""
+
+        discard = getattr(self._repository, "discard_orphaned_reservations", None)
+        if discard is None:
+            return
+        session_ids: tuple[str, ...] = await discard()
+        if not session_ids:
+            return
+        direct_store = DirectMonitorStateStore(settings.direct_monitor_directory)
+        for session_id in session_ids:
+            # A crash between saving state and persisting the Queue ID can leave a file.
+            with contextlib.suppress(Exception):
+                await state_store.delete(session_id)
+            with contextlib.suppress(Exception):
+                await direct_store.delete(session_id)
+        log_event(
+            logger,
+            logging.WARNING,
+            "orphaned_creation_reservations_discarded",
+            count=len(session_ids),
+        )
 
     async def capacity(self) -> RuntimeCapacity:
         manager = self._browser_manager

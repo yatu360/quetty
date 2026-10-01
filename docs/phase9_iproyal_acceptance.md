@@ -164,8 +164,8 @@ disconnected. It is **not** evidenced for 60, 90, or 115 minutes or the configur
 
 ## Known limitations
 
-- A crash between creation reservation and completion leaves a CREATING row without a
-  Queue ID (Prompt 1). It is not counted or monitored.
+- (Resolved after acceptance.) Creation reservations interrupted by a crash or
+  shutdown are now discarded at startup (`discard_orphaned_reservations`).
 - The gated benchmark harnesses remain proxy-disabled.
 - Live provider continuity beyond the measured intervals is not claimed. A 30-minute
   PASS does not prove the configured `2h` lifetime.

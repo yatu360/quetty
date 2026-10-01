@@ -789,6 +789,43 @@ class SQLiteSessionRepository:
 
         return await self._run(operation)
 
+    async def discard_orphaned_reservations(self) -> tuple[str, ...]:
+        """Delete creation reservations whose creator died before completing.
+
+        An IPRoyal creator persists a CREATING row (holding the new sticky-session ID)
+        before its first navigation. If the process stops mid-creation, the row has no
+        Queue ID and no owner and nothing will ever finish it. Only such rows match:
+        manual adoption sets the Queue ID before CREATING, and in-flight work holds a
+        lease. Call this only at startup, before creation begins. The persisted
+        population target is untouched, so the normal deficit refill re-creates the
+        visitor with a fresh, never-used proxy session ID.
+        """
+
+        def operation() -> tuple[str, ...]:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT session_id FROM queue_sessions
+                    WHERE status = 'CREATING' AND queue_id IS NULL
+                      AND worker_id IS NULL AND manual_owner_id IS NULL
+                    """
+                ).fetchall()
+                session_ids = tuple(str(row["session_id"]) for row in rows)
+                connection.executemany(
+                    "DELETE FROM queue_sessions WHERE session_id = ? AND status = 'CREATING' "
+                    "AND queue_id IS NULL AND worker_id IS NULL AND manual_owner_id IS NULL",
+                    [(session_id,) for session_id in session_ids],
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return session_ids
+
+        return await self._run(operation)
+
     async def acquire_manual_ownership(
         self,
         session_id: str,

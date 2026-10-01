@@ -6237,3 +6237,49 @@ Phase 8 authorised Queue-it staging validation.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Discard interrupted IPRoyal creation reservations at startup
+
+### Agent / Model
+
+Claude Opus 5.5.
+
+### Goal
+
+Fix the Prompt 1 known issue. An IPRoyal creation reservation (a CREATING row persisted
+before the first navigation) was left behind forever if the process crashed or shut
+down mid-creation. It appeared on the dashboard and in `sessions_requiring_retry`, and
+was never finished.
+
+### Changes Made
+
+- `SQLiteSessionRepository.discard_orphaned_reservations()` atomically deletes rows
+  that match `status = 'CREATING' AND queue_id IS NULL AND worker_id IS NULL AND
+  manual_owner_id IS NULL`. Progress and Direct status rows cascade.
+- `ApplicationRunRuntime.start_run` calls it before any creation or operator work
+  starts, removes matching state and Direct files, and logs
+  `orphaned_creation_reservations_discarded` with a count only.
+- The persisted population target and operator adjustment are untouched, so the normal
+  deficit refill re-creates the lost visitor with a fresh, never-used proxy ID. Manual
+  adoption rows (CREATING with a Queue ID), leased rows, and manually owned rows are
+  never matched.
+- The interrupted creation was reproduced by cancelling a real IPRoyal creator
+  mid-navigation. This also showed that graceful shutdown during acquisition creates
+  the same orphan, not only a crash.
+
+### Files
+
+- Added `tests/unit/test_orphaned_reservations.py`.
+- Modified `repository/sqlite.py`, `web/service.py`, `README.md`,
+  `PROJECT_CONTEXT.md`, and `docs/phase9_iproyal_acceptance.md`.
+
+### Tests Run
+
+- `tests/unit/test_orphaned_reservations.py`: 2 passed.
+- `python -m pytest`: 931 passed, 1 failed, 4 deselected. The failure was
+  `test_phase5_operator_workflow_passes_every_check[camoufox]`, check
+  `refresh_keeps_queue_id`. That check reads the Refresh operator lease the moment
+  progress is persisted, before the lease is released. It is a pre-existing timing race
+  unrelated to this change: the test passed 2/2 on rerun, and this change runs only at
+  `start_run` on rows that proxy-disabled runs never create.
+- Ruff and strict mypy: PASS.
