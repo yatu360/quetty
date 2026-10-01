@@ -270,6 +270,7 @@ class ApplicationRunRuntime:
         self._operator_actions: OperatorActionManager | None = None
         self._direct_handler: DirectMonitoringHandler | None = None
         self._creator: QueueSessionCreator | None = None
+        self._creation: SessionCreationController | None = None
         self._metrics: PrometheusMetrics | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -388,6 +389,7 @@ class ApplicationRunRuntime:
                 queue_capacity=settings.creation_queue_capacity,
                 observability=metrics,
                 identity_replacement_limit=settings.identity_replacement_limit,
+                access_restricted_max_consecutive=settings.access_restricted_max_consecutive,
             )
             restorer = QueueSessionRestorer(
                 browser_manager=browser_manager,
@@ -519,6 +521,7 @@ class ApplicationRunRuntime:
             self._operator_actions = operator_actions
             self._direct_handler = direct_handler
             self._creator = creator
+            self._creation = creation
             self._metrics = metrics
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
@@ -652,8 +655,10 @@ class ApplicationRunRuntime:
         """Aggregate pre-Queue restriction state of the current runtime only."""
 
         creator = self._creator
+        creation = self._creation
         return AccessRestrictionStatus(
             attempts=creator.access_restricted_attempts if creator is not None else 0,
+            halted=creation.metrics.access_restriction_halted if creation is not None else False,
         )
 
     @property
@@ -708,6 +713,7 @@ class ApplicationRunRuntime:
             self._operator_actions = None
             self._direct_handler = None
             self._creator = None
+            self._creation = None
             self._metrics = None
         try:
             await self._repository.reset_all()
@@ -742,6 +748,8 @@ def browser_build_label(run: RunConfig) -> str:
 @dataclass(frozen=True, slots=True)
 class AccessRestrictionStatus:
     attempts: int = 0
+    # Acquisition stopped after ACCESS_RESTRICTED_MAX_CONSECUTIVE restrictions in a row.
+    halted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -794,6 +802,8 @@ class DashboardService:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
+        elif restriction.halted:
+            creation = "HALTED"
         else:
             creation = "RUNNING"
         return DashboardSummary(

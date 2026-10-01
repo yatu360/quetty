@@ -628,6 +628,11 @@ controlled evidence and the staging assumptions that remain unknown.
   session. The controller immediately schedules an ordinary replacement work item,
   which gets a fresh context and its own proxy assignment from the existing allocator.
   The dashboard shows the count as "Access-restricted attempts".
+- `ACCESS_RESTRICTED_MAX_CONSECUTIVE=25`. After this many access restrictions in a row,
+  acquisition stops for the runtime. A successful Queue ID resets the count. Work already
+  in flight finishes, `queue_creation_access_restricted_halted` is set to 1, and the
+  dashboard shows Creation `HALTED`. Restarting the run resumes acquisition from the
+  persisted successful IDs.
 - `MONITOR_WORKERS=1`
 - `MONITOR_QUEUE_CAPACITY=5`
 - `MONITOR_CLAIM_BATCH_SIZE=5`

@@ -182,6 +182,7 @@ class CreationMetrics:
     permanent_failures: int = 0
     access_restricted: int = 0
     consecutive_access_restricted: int = 0
+    access_restriction_halted: bool = False
     retries: int = 0
     currently_creating: int = 0
     maximum_concurrent_creating: int = 0
@@ -705,7 +706,10 @@ class SessionCreationController:
         queue_capacity: int | None = None,
         observability: PrometheusMetrics | None = None,
         identity_replacement_limit: int | None = None,
+        access_restricted_max_consecutive: int = 25,
     ) -> None:
+        if access_restricted_max_consecutive < 1:
+            raise ValueError("access_restricted_max_consecutive must be at least 1")
         if identity_replacement_limit is not None and identity_replacement_limit < 0:
             raise ValueError("identity_replacement_limit cannot be negative")
         if target_queue_ids < 0:
@@ -720,6 +724,7 @@ class SessionCreationController:
         self._worker_count = worker_count
         self._queue_capacity = queue_capacity or worker_count
         self._identity_replacement_limit = identity_replacement_limit
+        self._access_restricted_max_consecutive = access_restricted_max_consecutive
         self.metrics = CreationMetrics()
         self._observability = observability
         if observability is not None:
@@ -749,6 +754,7 @@ class SessionCreationController:
             queue_capacity=settings.creation_queue_capacity,
             observability=observability,
             identity_replacement_limit=settings.identity_replacement_limit,
+            access_restricted_max_consecutive=settings.access_restricted_max_consecutive,
         )
 
     async def run(self, stop_event: asyncio.Event | None = None) -> CreationMetrics:
@@ -794,6 +800,11 @@ class SessionCreationController:
                         self._observability.set_creation_rate(
                             self.metrics.unique_ids_acquired / elapsed
                         )
+                    if self.metrics.access_restriction_halted:
+                        break
+
+                if self.metrics.access_restriction_halted:
+                    break
 
                 # Successful outcomes are persisted by the handler, so they can drive
                 # the hot loop without an O(target) sequence of COUNT queries. Verify
@@ -839,11 +850,28 @@ class SessionCreationController:
         elif _is_access_restricted(outcome):
             self.metrics.access_restricted += 1
             self.metrics.consecutive_access_restricted += 1
+            if (
+                not self.metrics.access_restriction_halted
+                and self.metrics.consecutive_access_restricted
+                >= self._access_restricted_max_consecutive
+            ):
+                # Stop scheduling new work; in-flight items drain. A run restart resumes
+                # from the persisted successful IDs.
+                self.metrics.access_restriction_halted = True
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "acquisition_halted_access_restricted",
+                    classification=AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.value,
+                    count=self.metrics.consecutive_access_restricted,
+                    valid_queue_ids=self.metrics.successful_unique_ids,
+                )
         else:
             return
         if self._observability is not None:
-            self._observability.set_access_restriction_consecutive(
-                self.metrics.consecutive_access_restricted
+            self._observability.set_access_restriction_state(
+                consecutive=self.metrics.consecutive_access_restricted,
+                halted=self.metrics.access_restriction_halted,
             )
 
     async def _effective_target(self) -> int:

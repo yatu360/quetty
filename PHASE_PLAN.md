@@ -987,9 +987,10 @@ Restricted pre-Queue attempts are classified as `ACCESS_RESTRICTED_BEFORE_QUEUE`
 discarded and immediately replaced by ordinary bounded work items. See
 `docs/access_restriction_acceptance.md`.
 
-Open item: there is no time-based pacing when every attempt is restricted (Q11 FAIL,
-operator decision). Re-adding bounded backoff (see commit `c341d5e`) remains optional
-future work. Queue-it staging is NOT RUN.
+Acquisition halts after `ACCESS_RESTRICTED_MAX_CONSECUTIVE` (default 25) restrictions in
+a row; restart the run to resume. There is no delay between attempts. Optional future
+work: an in-runtime "Resume Acquisition" control, or bounded backoff (see `c341d5e`).
+Queue-it staging is NOT RUN.
 
 ## Scaling Gates
 

@@ -274,6 +274,13 @@ def test_summary_reports_aggregate_access_restriction_status(tmp_path: Path) -> 
         after = client.get("/partials/summary").text
         assert "<dt>Access-restricted attempts</dt><dd>3</dd>" in after
         assert '<strong class="state">RUNNING</strong>' in after
+
+        runtime.access_restriction_status = AccessRestrictionStatus(  # type: ignore[attr-defined]
+            attempts=25, halted=True
+        )
+        halted = client.get("/partials/summary").text
+        assert "<dt>Access-restricted attempts</dt><dd>25</dd>" in halted
+        assert '<strong class="state">HALTED</strong>' in halted
         # Successful-ID counts remain persisted unique Queue IDs only.
         assert "<dt>Valid Queue IDs</dt><dd>0</dd>" in after
         assert "sorry" not in after.casefold()
@@ -288,8 +295,11 @@ def test_run_runtime_access_restriction_status_is_aggregate_and_safe(tmp_path: P
     assert runtime.access_restriction_status == AccessRestrictionStatus(0)
 
     runtime._creator = cast(Any, SimpleNamespace(access_restricted_attempts=4))
+    runtime._creation = cast(
+        Any, SimpleNamespace(metrics=SimpleNamespace(access_restriction_halted=True))
+    )
 
-    assert runtime.access_restriction_status == AccessRestrictionStatus(4)
+    assert runtime.access_restriction_status == AccessRestrictionStatus(4, True)
 
 
 def test_new_run_is_refused_when_legacy_sessions_have_no_target(tmp_path: Path) -> None:

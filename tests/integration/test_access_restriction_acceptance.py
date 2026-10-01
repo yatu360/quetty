@@ -238,3 +238,29 @@ async def test_shutdown_after_repeated_restrictions_leaves_nothing_behind(
     assert len(failed) == metrics.access_restricted
     assert all(row.queue_id is None and row.last_error == CODE for row in failed)
     await repository.close()
+
+
+async def test_real_browser_acquisition_halts_at_consecutive_maximum(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "halt.sqlite3")
+    state_store = FileSystemStateStore(tmp_path / "state")
+    with _serve([]) as (url, server):
+        async with BrowserManager() as manager:
+            controller = SessionCreationController(
+                repository=repository,
+                handler=_creator(manager, repository, state_store, url),
+                target_queue_ids=10,
+                worker_count=3,
+                queue_capacity=3,
+            )
+
+            # No stop event: the run must end by itself at the maximum.
+            metrics = await asyncio.wait_for(controller.run(), timeout=60)
+
+            assert manager.active_context_count == 0
+
+    assert metrics.access_restriction_halted is True
+    assert 25 <= metrics.access_restricted <= 27
+    assert server.restricted_served == metrics.access_restricted
+    assert await repository.count_successful_queue_ids() == 0
+    assert _state_names(state_store) == set()
+    await repository.close()

@@ -12,6 +12,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager
+from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import JsonLogFormatter
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
@@ -736,10 +737,12 @@ async def test_replacement_starts_without_any_controller_delay(
     await repository.close()
 
 
-async def test_persistent_restriction_keeps_retrying_until_success(tmp_path: Path) -> None:
+async def test_restrictions_below_the_maximum_keep_retrying_until_success(
+    tmp_path: Path,
+) -> None:
     repository = SQLiteSessionRepository(tmp_path / "persistent.sqlite3")
     await _seed(repository, 1)
-    restricted = 25
+    restricted = 24  # one below the default maximum of 25
     manager = _BrowserManager(
         [_Page(200, [RESTRICTED]) for _ in range(restricted)] + [_Page(200, [QUEUE_PAGE])]
     )
@@ -757,9 +760,102 @@ async def test_persistent_restriction_keeps_retrying_until_success(tmp_path: Pat
     assert manager.maximum_active == 1
     assert manager.active == 0
     assert len(_state_files(state_store)) == 1
+    assert metrics.access_restriction_halted is False
     sample = observability.registry.get_sample_value
     assert sample("queue_creation_access_restricted_total") == restricted
     assert sample("queue_creation_access_restricted_consecutive") == 0
+    assert sample("queue_creation_access_restricted_halted") == 0
+    await repository.close()
+
+
+@pytest.mark.parametrize("workers", [1, 3])
+async def test_acquisition_halts_at_the_consecutive_maximum(
+    tmp_path: Path,
+    workers: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / f"halt-{workers}.sqlite3")
+    seeded = await _seed(repository, 1)
+    manager = _EndlessBrowserManager()
+    observability = PrometheusMetrics()
+    creator, state_store = _creator(tmp_path, repository, manager, observability=observability)
+    controller = _controller(
+        repository,
+        creator,
+        target=10,
+        workers=workers,
+        capacity=workers,
+        observability=observability,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="queue_load_test.scheduler.creation"):
+        metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.access_restriction_halted is True
+    # Halts at exactly 25; only work already in flight may drain afterwards.
+    assert 25 <= metrics.access_restricted <= 25 + workers - 1
+    assert len(manager.contexts) == metrics.access_restricted
+    assert manager.active == 0
+    assert manager.maximum_active <= workers
+    assert metrics.currently_creating == 0
+    assert metrics.successful_unique_ids == 1
+    assert await repository.get(seeded[0].session_id) == seeded[0]
+    assert _state_files(state_store) == []
+    halted = [r for r in caplog.records if r.getMessage() == "acquisition_halted_access_restricted"]
+    assert len(halted) == 1
+    sample = observability.registry.get_sample_value
+    assert sample("queue_creation_access_restricted_halted") == 1
+    assert sample("queue_creation_access_restricted_consecutive") == metrics.access_restricted
+    await repository.close()
+
+
+async def test_success_resets_the_consecutive_count_before_the_maximum(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "reset.sqlite3")
+    pages = (
+        [_Page(200, [RESTRICTED]) for _ in range(20)]
+        + [_Page(200, [QUEUE_PAGE])]
+        + [_Page(200, [RESTRICTED]) for _ in range(20)]
+        + [_Page(200, [QUEUE_PAGE])]
+    )
+    manager = _BrowserManager(pages)
+    creator, _ = _creator(tmp_path, repository, manager, queue_ids=["q-1", "q-2"])
+    controller = _controller(repository, creator, target=2)
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    # 40 restrictions in total, but never 25 in a row.
+    assert metrics.access_restricted == 40
+    assert metrics.access_restriction_halted is False
+    assert metrics.successful_unique_ids == 2
+    await repository.close()
+
+
+async def test_maximum_is_configurable_and_validated(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "configured.sqlite3")
+    settings = Settings(_env_file=None, ACCESS_RESTRICTED_MAX_CONSECUTIVE=3)
+    assert Settings(_env_file=None).access_restricted_max_consecutive == 25
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, ACCESS_RESTRICTED_MAX_CONSECUTIVE=0)
+    manager = _EndlessBrowserManager()
+    creator, _ = _creator(tmp_path, repository, manager)
+    with pytest.raises(ValueError):
+        SessionCreationController(
+            repository=repository,
+            handler=creator,
+            target_queue_ids=1,
+            worker_count=1,
+            access_restricted_max_consecutive=0,
+        )
+    controller = SessionCreationController.from_settings(
+        settings.model_copy(update={"target_queue_ids": 5}),
+        repository=repository,
+        handler=creator,
+    )
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.access_restriction_halted is True
+    assert metrics.access_restricted == 3
     await repository.close()
 
 
@@ -924,6 +1020,7 @@ async def test_access_restriction_metrics_have_no_labels(tmp_path: Path) -> None
     assert {sample.name for sample in restriction_samples} >= {
         "queue_creation_access_restricted_total",
         "queue_creation_access_restricted_consecutive",
+        "queue_creation_access_restricted_halted",
     }
     assert all(sample.labels == {} for sample in restriction_samples)
     sensitive = {"queue-secret", *(context.page.url for context in manager.contexts)}

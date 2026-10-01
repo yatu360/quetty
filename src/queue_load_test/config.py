@@ -194,6 +194,11 @@ class Settings(BaseSettings):
     creation_workers: int = Field(default=1, alias="CREATION_WORKERS", ge=1)
     creation_queue_capacity: int = Field(default=5, alias="CREATION_QUEUE_CAPACITY", ge=1)
     identity_replacement_limit: int = Field(default=0, alias="IDENTITY_REPLACEMENT_LIMIT", ge=0)
+    # Acquisition stops for the runtime after this many consecutive pre-Queue
+    # access-restriction outcomes; a successful Queue ID resets the count.
+    access_restricted_max_consecutive: int = Field(
+        default=25, alias="ACCESS_RESTRICTED_MAX_CONSECUTIVE", ge=1
+    )
     monitor_workers: int = Field(default=1, alias="MONITOR_WORKERS", ge=1)
     monitor_queue_capacity: int = Field(default=5, alias="MONITOR_QUEUE_CAPACITY", ge=1)
     monitor_claim_batch_size: int = Field(default=5, alias="MONITOR_CLAIM_BATCH_SIZE", ge=1)

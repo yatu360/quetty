@@ -7016,3 +7016,86 @@ protection is wanted.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Halt acquisition after 25 consecutive access restrictions
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Operator request: add a consecutive-retry maximum of 25 for pre-Queue access
+restrictions, with still no delay between attempts.
+
+### Changes Made
+
+- New setting `ACCESS_RESTRICTED_MAX_CONSECUTIVE` (default 25, minimum 1). It is passed to
+  the `SessionCreationController(access_restricted_max_consecutive=...)` parameter, with
+  the same default, through `from_settings` and the web `ApplicationRunRuntime`.
+- When `consecutive_access_restricted` reaches the maximum, the controller:
+  - sets `metrics.access_restriction_halted` and starts no new work;
+  - drains in-flight items and returns;
+  - logs `acquisition_halted_access_restricted` once at ERROR, with `classification`,
+    `count` and `valid_queue_ids`.
+- Only a successful Queue ID resets the count. Duplicates and other failures leave it
+  unchanged.
+- The gauge `queue_creation_access_restricted_halted` is back. The setter is
+  `set_access_restriction_state(consecutive=, halted=)`.
+- Dashboard: `AccessRestrictionStatus.halted`. Creation shows `HALTED` when halted below
+  target.
+- Restarting the run resumes acquisition from persisted successful IDs. Operator
+  Add/Replace are not blocked.
+- Docs updated: `README.md`, `.env.example`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, and
+  `docs/access_restriction_acceptance.md`. In the acceptance doc, Q11 was re-validated
+  and is now PASS (count-bounded); the decision is now 14/14 PASS.
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/metrics/prometheus.py`
+- `src/queue_load_test/web/service.py`
+- `tests/unit/test_access_restriction.py`
+- `tests/unit/test_web_ui.py`
+- `tests/integration/test_access_restriction_acceptance.py`
+- `README.md`, `.env.example`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`,
+  `docs/access_restriction_acceptance.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- New tests:
+  - halt at the maximum with 1 and 3 workers: 25 to 25 + (workers − 1) attempts, one ERROR
+    event, gauge reads 1, nothing leaks, seeded row unchanged;
+  - a success resets the count, with 40 restrictions but never 25 in a row;
+  - the setting is configurable (3) and validated (0 rejected);
+  - real Chrome: a fully restricted run ends by itself at the maximum.
+  - The 24-restriction retry test (just below the maximum) was renamed, and the dashboard
+    `HALTED` test was added.
+- Focused restriction, web, IPRoyal, creation, config and observability suites, plus the
+  restriction integration tests: 211 passed; the acceptance integration file passed 3.
+- `python -m ruff check src tests`: All checks passed!
+- `python -m mypy src`: Success: no issues found in 112 source files.
+- `python -m pytest -q`: 1005 passed, 4 deselected, 1 warning.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- "Consecutive retry max" is implemented as a runtime halt with restart-to-resume, the
+  same mechanism as the earlier halt. There is still no delay between attempts.
+
+### Known Issues
+
+- The up to 25 restricted attempts before a halt run back to back, at about 10/s locally.
+- There is no in-runtime resume control.
+
+### Follow-Up
+
+Optional: add a dashboard "Resume Acquisition" control for a halted runtime.
+
+### Git State
+
+- Branch: main
