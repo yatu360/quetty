@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from queue_load_test.browser import BrowserManager
 from queue_load_test.metrics import PrometheusMetrics
@@ -973,3 +974,135 @@ async def test_restart_counts_only_persisted_successes_and_never_resurrects_rest
         assert row.status is QueueStatus.FAILED and row.queue_id is None
     assert await resumed_repository.count_successful_queue_ids() == 3
     await resumed_repository.close()
+
+
+# --- Acceptance: exact sequences, unchanged semantics, immutability, exposition -----
+
+
+@pytest.mark.parametrize("workers", [1, 2, 3])
+async def test_acceptance_sequence_reaches_exact_target_without_overshoot(
+    tmp_path: Path,
+    workers: int,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / f"sequence-{workers}.sqlite3")
+    sequence = [RESTRICTED, RESTRICTED, QUEUE_PAGE, RESTRICTED, QUEUE_PAGE]
+    # Extra restriction pages prove that no work beyond the target is ever started.
+    manager = _BrowserManager([_Page(200, [body]) for body in sequence + [RESTRICTED] * 5])
+    creator, state_store = _creator(tmp_path, repository, manager, queue_ids=["q-1", "q-2"])
+    controller = _controller(repository, creator, target=2, workers=workers, capacity=workers)
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.successful_unique_ids == 2
+    assert await repository.count_successful_queue_ids() == 2
+    assert metrics.unique_ids_acquired == 2
+    assert metrics.access_restricted == 3
+    assert len(manager.contexts) == metrics.completed_work_items == 5
+    assert len(manager.pages) == 5
+    assert all(context.closed for context in manager.contexts)
+    assert manager.maximum_active <= min(workers, 2)
+    failed = await repository.list(QueueStatus.FAILED)
+    assert len(failed) == 3
+    assert all(row.queue_id is None and row.last_error == CODE for row in failed)
+    parked = await repository.list(QueueStatus.PARKED)
+    assert sorted(row.queue_id or "" for row in parked) == ["q-1", "q-2"]
+    assert sorted(path.stem for path in _state_files(state_store)) == sorted(
+        row.session_id for row in parked
+    )
+    await repository.close()
+
+
+class _TimeoutPage(_Page):
+    async def goto(self, *_: object, **__: object) -> _Response:
+        raise PlaywrightTimeoutError("Timeout 30000ms exceeded.")
+
+
+class _ReportingBrowserManager(_BrowserManager):
+    def __init__(self, pages: list[_Page]) -> None:
+        super().__init__(pages)
+        self.navigation_reports: list[bool] = []
+
+    def report_navigation(self, context: object, *, responsive: bool) -> None:
+        self.navigation_reports.append(responsive)
+
+
+async def test_navigation_timeout_semantics_are_unchanged(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "timeout.sqlite3")
+    manager = _ReportingBrowserManager([_TimeoutPage(200, [RESTRICTED]), _Page(200, [QUEUE_PAGE])])
+    observability = PrometheusMetrics()
+    creator, _ = _creator(
+        tmp_path, repository, manager, queue_ids=["q-1"], observability=observability
+    )
+
+    outcome = await creator.create(CreationWorkItem(sequence=1, session_id="timeout"))
+
+    assert outcome.kind is CreationOutcomeKind.SUCCESS
+    assert outcome.attempts == 2
+    assert outcome.temporary_failures == 1
+    assert manager.navigation_reports == [False, True]
+    assert all(context.closed for context in manager.contexts)
+    sample = observability.registry.get_sample_value
+    assert sample("queue_creation_access_restricted_total") == 0
+    await repository.close()
+
+
+async def test_successful_rows_and_state_are_immutable_under_restricted_attempts(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "immutable.sqlite3")
+    seeded = await _seed(repository, 3)
+    manager = _BrowserManager(
+        [_Page(200, [RESTRICTED]) for _ in range(6)] + [_Page(200, [QUEUE_PAGE])]
+    )
+    creator, state_store = _creator(tmp_path, repository, manager, queue_ids=["q-new"])
+    for session in seeded:
+        await state_store.save(session.session_id, {"cookies": [], "origins": []})
+    before_rows = {s.session_id: await repository.get(s.session_id) for s in seeded}
+    before_state = {
+        path.name: path.read_bytes() for path in _state_files(state_store)
+    }
+    controller = _controller(repository, creator, target=4, workers=2, capacity=2)
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.successful_unique_ids == 4
+    assert metrics.access_restricted == 6
+    for session in seeded:
+        assert await repository.get(session.session_id) == before_rows[session.session_id]
+    after_state = {path.name: path.read_bytes() for path in _state_files(state_store)}
+    for name, content in before_state.items():
+        assert after_state[name] == content
+    # Only the one new success added state; restricted items added none.
+    assert len(after_state) == len(before_state) + 1
+    await repository.close()
+
+
+async def test_metrics_exposition_contains_no_sensitive_values(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "exposition.sqlite3")
+    manager = _BrowserManager(
+        [_Page(200, [RESTRICTED]), _Page(403, [RESTRICTED]), _Page(200, [QUEUE_PAGE])]
+    )
+    observability = PrometheusMetrics()
+    creator, _ = _creator(
+        tmp_path, repository, manager, queue_ids=["queue-sensitive-1"], observability=observability
+    )
+    controller = _controller(repository, creator, target=1, observability=observability)
+
+    await controller.run()
+
+    text = observability.render().decode()
+    assert "queue_creation_access_restricted_total 2.0" in text
+    sessions = await repository.list()
+    forbidden = {
+        "queue-sensitive-1",
+        "journey",
+        "https://",
+        "127.0.0.1",
+        "cookies",
+        "origins",
+        "sorry",
+        *(session.session_id for session in sessions),
+    }
+    for value in forbidden:
+        assert value not in text, value
+    await repository.close()

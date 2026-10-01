@@ -981,6 +981,16 @@ leakage, and cleanup). T+60, T+90, T+115, and full `2h` continuity are **NOT RUN
 duration evidence is reported separately: only the live intervals actually measured
 (see the acceptance doc) are claimed. The full configured `2h` lifetime is not proven.
 
+## Cross-Phase — Acquisition-Time Access-Restriction Handling — **ACCEPTED (local, 2026-10-01)**
+
+Restricted pre-Queue attempts are classified as `ACCESS_RESTRICTED_BEFORE_QUEUE`,
+discarded and immediately replaced by ordinary bounded work items. See
+`docs/access_restriction_acceptance.md`.
+
+Open item: there is no time-based pacing when every attempt is restricted (Q11 FAIL,
+operator decision). Re-adding bounded backoff (see commit `c341d5e`) remains optional
+future work. Queue-it staging is NOT RUN.
+
 ## Scaling Gates
 
 ### Phase 1 → Phase 2

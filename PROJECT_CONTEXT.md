@@ -914,6 +914,11 @@ since the last successful Queue ID. Duplicates and other failures leave it uncha
 Restarting the run resumes from persisted successful IDs only, and restricted `FAILED`
 rows are never counted or revived.
 
+Acceptance (2026-10-01, `docs/access_restriction_acceptance.md`): 13 of 14 questions
+PASS on local evidence. Q11 FAILs by operator decision: there is no time-based pacing.
+When every attempt is restricted, the local measurement was about 10 attempts/s with real
+Chrome on 127.0.0.1. Queue-it staging is NOT RUN.
+
 Observability:
 - Low-cardinality, unlabelled metrics: `queue_creation_access_restricted_total` and
   `queue_creation_access_restricted_consecutive`.

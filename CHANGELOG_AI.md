@@ -6926,3 +6926,93 @@ None.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Acceptance validation: acquisition-time access-restriction handling
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Acceptance and regression validation of `ACCESS_RESTRICTED_BEFORE_QUEUE` handling
+against 14 acceptance questions, using deterministic local tests and no Queue-it
+traffic.
+
+### Changes Made
+
+- New `docs/access_restriction_acceptance.md`. It records expected behaviour, the evidence
+  boundary, a per-question PASS/FAIL/UNKNOWN table, remaining risks and staging status.
+- New tests; production code is unchanged.
+  - `tests/unit/test_access_restriction.py`:
+    - the exact R,R,S,R,S sequence with 1, 2 and 3 workers, no overshoot and unused
+      pages left;
+    - navigation-timeout semantics unchanged;
+    - successful rows and state byte-identical under restricted attempts;
+    - the rendered `/metrics` text is free of Queue IDs, session IDs, URLs, IPs, cookies,
+      storage-state keys and page text.
+  - New `tests/integration/test_access_restriction_acceptance.py`, using real Chrome, the
+    production creator and controller, SQLite and the state store against a scripted
+    127.0.0.1 server:
+    - the exact sequence reaches target 2 in exactly 5 requests;
+    - shutdown after repeated restrictions leaves zero contexts, no leases and no orphan
+      or temporary state, with seeded sessions and state intact.
+- During development the scripted server first counted Chrome's `/favicon.ico` requests
+  as attempts. It now answers non-root paths separately. This was a test-harness issue,
+  not an application defect.
+- Local measurement with a scratch script: real Chrome and every attempt restricted on
+  127.0.0.1. 1 worker gave 10.2 attempts/s and 3 workers gave 10.0 attempts/s. In both
+  cases 0 contexts remained, and there was one FAILED row per attempt.
+- `PROJECT_CONTEXT.md`: acceptance summary. `PHASE_PLAN.md`: a cross-phase entry with the
+  open Q11 item.
+
+### Files Added
+
+- `docs/access_restriction_acceptance.md`
+- `tests/integration/test_access_restriction_acceptance.py`
+
+### Files Modified
+
+- `tests/unit/test_access_restriction.py`
+- `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- `tests/unit/test_access_restriction.py`: 50 passed.
+- `tests/integration/test_access_restriction_acceptance.py`: 2 passed.
+- `python -m ruff check src tests`: All checks passed!
+- `python -m mypy src`: Success: no issues found in 112 source files.
+- `python -m pytest -q`: 1000 passed, 4 deselected, 1 warning.
+
+### Results
+
+- Q1–Q10 and Q12–Q14: **PASS** (local evidence).
+- Q11, tight-retry-storm protection: **FAIL (operator decision)**. Workers, queue and
+  contexts are bounded, but backoff was removed on request in `00c6364`. A persistent
+  restriction retries at navigation speed, measured locally at about 10 attempts/s.
+- Real Queue-it restriction behaviour: **UNKNOWN / NOT RUN**.
+
+### Staging Tests
+
+- NOT RUN. No authorised staging environment was configured or gated, so Queue-it was not
+  contacted.
+
+### Important Decisions
+
+- Q11 is reported as FAIL rather than PASS. Bounded concurrency is not time-based storm
+  protection, and the operator chose to remove the backoff.
+
+### Known Issues
+
+- No time-based pacing when every attempt is restricted (Q11).
+- Only the single known English phrase is detected.
+- The dashboard count is per runtime.
+
+### Follow-Up
+
+Optional: restore bounded backoff for consecutive restrictions (see `c341d5e`) if storm
+protection is wanted.
+
+### Git State
+
+- Branch: main
