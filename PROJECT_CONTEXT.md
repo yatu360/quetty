@@ -906,20 +906,13 @@ The restricted path is cancellation-safe:
 - It writes a `FAILED` row without a lease, which monitoring never claims.
 - Existing successful rows are never touched.
 
-`SessionCreationController` paces restrictions with `AccessRestrictionPolicy`. Each
-consecutive restriction delays the next work item using `CreationRetryPolicy`'s bounded
-exponential backoff and jitter. The settings are `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS`
-(default 5) and `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` (default 120). The wait returns at
-once on a graceful stop. While it waits, no new work item starts, and workers and queues
-stay fixed and bounded.
-
-There is no halt. Acquisition keeps retrying, with at most one restricted attempt per
-`ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` once the backoff is at its cap, until the target
-is met or the runtime stops. While the streak is above zero, the dashboard shows Creation
-`BACKING OFF`. Only a successful Queue ID resets the streak; other failures neither reset
-nor extend it.
+`SessionCreationController` replaces a restricted work item immediately, with no delay.
+The replacement is an ordinary work item: a fresh context and its own proxy assignment
+from the existing allocator. Workers, the queue and near-target contraction stay
+bounded as for any other failure. `consecutive_access_restricted` counts restrictions
+since the last successful Queue ID. Duplicates and other failures leave it unchanged.
 Restarting the run resumes from persisted successful IDs only, and restricted `FAILED`
-rows are never counted or revived. Operator Add/Replace are not paced by this policy.
+rows are never counted or revived.
 
 Observability:
 - Low-cardinality, unlabelled metrics: `queue_creation_access_restricted_total` and

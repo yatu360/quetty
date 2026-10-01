@@ -49,7 +49,6 @@ from queue_load_test.queue_monitor import AdmissionDetector
 from queue_load_test.repository import DirectMonitorMetadataRepository, SessionRepository
 from queue_load_test.runtime import ApplicationRuntime
 from queue_load_test.scheduler import (
-    AccessRestrictionPolicy,
     MonitoringHandler,
     MonitoringRetryPolicy,
     ParkedSessionScheduler,
@@ -271,7 +270,6 @@ class ApplicationRunRuntime:
         self._operator_actions: OperatorActionManager | None = None
         self._direct_handler: DirectMonitoringHandler | None = None
         self._creator: QueueSessionCreator | None = None
-        self._creation: SessionCreationController | None = None
         self._metrics: PrometheusMetrics | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -390,7 +388,6 @@ class ApplicationRunRuntime:
                 queue_capacity=settings.creation_queue_capacity,
                 observability=metrics,
                 identity_replacement_limit=settings.identity_replacement_limit,
-                access_restriction_policy=AccessRestrictionPolicy.from_settings(settings),
             )
             restorer = QueueSessionRestorer(
                 browser_manager=browser_manager,
@@ -522,7 +519,6 @@ class ApplicationRunRuntime:
             self._operator_actions = operator_actions
             self._direct_handler = direct_handler
             self._creator = creator
-            self._creation = creation
             self._metrics = metrics
             self._task = asyncio.create_task(runtime.run(), name=f"run-{run.run_id}")
 
@@ -656,12 +652,8 @@ class ApplicationRunRuntime:
         """Aggregate pre-Queue restriction state of the current runtime only."""
 
         creator = self._creator
-        creation = self._creation
         return AccessRestrictionStatus(
             attempts=creator.access_restricted_attempts if creator is not None else 0,
-            consecutive=(
-                creation.metrics.consecutive_access_restricted if creation is not None else 0
-            ),
         )
 
     @property
@@ -716,7 +708,6 @@ class ApplicationRunRuntime:
             self._operator_actions = None
             self._direct_handler = None
             self._creator = None
-            self._creation = None
             self._metrics = None
         try:
             await self._repository.reset_all()
@@ -751,8 +742,6 @@ def browser_build_label(run: RunConfig) -> str:
 @dataclass(frozen=True, slots=True)
 class AccessRestrictionStatus:
     attempts: int = 0
-    # Restrictions since the last successful Queue ID; > 0 means creation is backing off.
-    consecutive: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -805,8 +794,6 @@ class DashboardService:
             creation = "ERROR"
         elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
-        elif restriction.consecutive > 0:
-            creation = "BACKING OFF"
         else:
             creation = "RUNNING"
         return DashboardSummary(

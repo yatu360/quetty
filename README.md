@@ -623,13 +623,11 @@ controlled evidence and the staging assumptions that remain unknown.
 - `IDENTITY_REPLACEMENT_LIMIT=0` — acquired Queue IDs that later become `FAILED` (for
   example after an identity mismatch) are not refilled with new identities beyond this
   many replacements; creation stops and sets `queue_identity_replacement_blocked`
-- `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=5.0`,
-  `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=120.0`. Each attempt that renders the pre-Queue
-  access-restriction page is recorded as `FAILED` with `access_restricted_before_queue`.
-  New creation work then waits with bounded exponential backoff, doubling up to the
-  maximum. Acquisition keeps retrying at that pace until the target is met or the run
-  stops; it never halts. While restrictions continue, the dashboard shows Creation
-  `BACKING OFF`. A successful Queue ID resets the delay.
+- An attempt that renders the pre-Queue access-restriction page is recorded as `FAILED`
+  with `access_restricted_before_queue`. It is not retried on its own context or proxy
+  session. The controller immediately schedules an ordinary replacement work item,
+  which gets a fresh context and its own proxy assignment from the existing allocator.
+  The dashboard shows the count as "Access-restricted attempts".
 - `MONITOR_WORKERS=1`
 - `MONITOR_QUEUE_CAPACITY=5`
 - `MONITOR_CLAIM_BATCH_SIZE=5`

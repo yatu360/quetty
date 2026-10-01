@@ -11,7 +11,6 @@ import pytest
 from playwright.async_api import Error as PlaywrightError
 
 from queue_load_test.browser import BrowserManager
-from queue_load_test.config import Settings
 from queue_load_test.metrics import PrometheusMetrics
 from queue_load_test.metrics.logging import JsonLogFormatter
 from queue_load_test.models import QueueProgress, QueueSession, QueueStatus, SessionMode
@@ -23,7 +22,6 @@ from queue_load_test.queue_monitor import (
 from queue_load_test.repository import SQLiteSessionRepository
 from queue_load_test.scheduler import (
     AccessRestrictedError,
-    AccessRestrictionPolicy,
     AcquisitionFailure,
     CreationOutcomeKind,
     CreationRetryPolicy,
@@ -492,7 +490,6 @@ async def test_controller_replaces_restricted_attempts_until_target_without_over
     controller = SessionCreationController(
         repository=repository,
         handler=creator,
-        sleep=_no_wait,
         target_queue_ids=6,
         worker_count=3,
         queue_capacity=3,
@@ -532,7 +529,6 @@ async def test_restricted_attempts_near_target_cannot_overshoot(tmp_path: Path) 
     controller = SessionCreationController(
         repository=repository,
         handler=creator,
-        sleep=_no_wait,
         target_queue_ids=5,
         worker_count=10,
         queue_capacity=10,
@@ -568,7 +564,6 @@ async def test_duplicates_and_restrictions_are_counted_separately(tmp_path: Path
     controller = SessionCreationController(
         repository=repository,
         handler=creator,
-        sleep=_no_wait,
         target_queue_ids=2,
         worker_count=1,
     )
@@ -598,7 +593,6 @@ async def test_controller_cancellation_during_restricted_attempts_leaks_no_conte
     controller = SessionCreationController(
         repository=repository,
         handler=creator,
-        sleep=_no_wait,
         target_queue_ids=100,
         worker_count=3,
         queue_capacity=3,
@@ -623,20 +617,42 @@ async def test_controller_cancellation_during_restricted_attempts_leaks_no_conte
 # --- Hardening: pacing, halting, cleanup, observability, restart --------------------
 
 
-class _RecordingSleep:
-    def __init__(self) -> None:
-        self.delays: list[float] = []
+class _EndlessBrowserManager(_BrowserManager):
+    """Serves ``successes`` queue pages, then restriction pages without end.
 
-    async def __call__(self, delay: float) -> None:
-        self.delays.append(delay)
+    Sets ``stop_event`` once ``stop_after`` restricted contexts have been created, so
+    a test can bound an otherwise unbounded restriction stream.
+    """
 
+    def __init__(
+        self,
+        *,
+        successes: int = 0,
+        stop_after: int | None = None,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        super().__init__([])
+        self._successes = successes
+        self._stop_after = stop_after
+        self._stop_event = stop_event
+        self.restricted_contexts = 0
 
-def _policy() -> AccessRestrictionPolicy:
-    return AccessRestrictionPolicy(
-        initial_backoff_seconds=5,
-        maximum_backoff_seconds=40,
-        jitter_seconds=0,
-    )
+    @asynccontextmanager
+    async def context(self):  # type: ignore[no-untyped-def,override]
+        if self._successes > 0:
+            self._successes -= 1
+            self.pages.append(_Page(200, [QUEUE_PAGE]))
+        else:
+            self.restricted_contexts += 1
+            self.pages.append(_Page(200, [RESTRICTED]))
+            if (
+                self._stop_event is not None
+                and self._stop_after is not None
+                and self.restricted_contexts >= self._stop_after
+            ):
+                self._stop_event.set()
+        async with super().context() as context:
+            yield context
 
 
 def _controller(
@@ -646,8 +662,6 @@ def _controller(
     target: int,
     workers: int = 1,
     capacity: int | None = None,
-    policy: AccessRestrictionPolicy | None = None,
-    sleep: Any = _no_wait,
     observability: PrometheusMetrics | None = None,
 ) -> SessionCreationController:
     return SessionCreationController(
@@ -656,42 +670,13 @@ def _controller(
         target_queue_ids=target,
         worker_count=workers,
         queue_capacity=capacity,
-        access_restriction_policy=policy or _policy(),
-        sleep=sleep,
-        jitter=lambda _start, _end: 0,
         observability=observability,
     )
 
 
-def test_policy_reuses_bounded_exponential_backoff_and_validates() -> None:
-    policy = _policy()
-
-    assert [policy.delay(n, lambda _a, _b: 0) for n in range(1, 6)] == [5, 10, 20, 40, 40]
-    with pytest.raises(ValueError):
-        AccessRestrictionPolicy(initial_backoff_seconds=10, maximum_backoff_seconds=1)
-
-
-def test_policy_from_settings_and_settings_validation() -> None:
-    settings = Settings(
-        _env_file=None,
-        ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=2,
-        ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=30,
-    )
-
-    policy = AccessRestrictionPolicy.from_settings(settings)
-
-    assert (policy.initial_backoff_seconds, policy.maximum_backoff_seconds) == (2, 30)
-    defaults = AccessRestrictionPolicy.from_settings(Settings(_env_file=None))
-    assert (defaults.initial_backoff_seconds, defaults.maximum_backoff_seconds) == (5, 120)
-    with pytest.raises(ValueError):
-        Settings(
-            _env_file=None,
-            ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS=10,
-            ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS=1,
-        )
-
-
-async def test_restrictions_then_success_back_off_and_reset_the_streak(tmp_path: Path) -> None:
+async def test_restrictions_then_success_are_replaced_immediately_and_reset_the_streak(
+    tmp_path: Path,
+) -> None:
     repository = SQLiteSessionRepository(tmp_path / "streak.sqlite3")
     pages = [_Page(200, [RESTRICTED]) for _ in range(4)] + [
         _Page(200, [QUEUE_PAGE]),
@@ -703,37 +688,57 @@ async def test_restrictions_then_success_back_off_and_reset_the_streak(tmp_path:
     creator, _ = _creator(
         tmp_path, repository, manager, queue_ids=["q-1", "q-2"], observability=observability
     )
-    sleep = _RecordingSleep()
-    controller = _controller(
-        repository, creator, target=2, sleep=sleep, observability=observability
-    )
+    controller = _controller(repository, creator, target=2, observability=observability)
 
-    metrics = await controller.run()
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
 
     # Target counts only persisted unique Queue IDs, never restricted attempts.
     assert metrics.successful_unique_ids == 2
     assert await repository.count_successful_queue_ids() == 2
     assert metrics.access_restricted == 5
-    # Exponential pacing for the first streak; the success resets it to the start.
-    assert sleep.delays == [5, 10, 20, 40, 5]
-    assert metrics.access_restriction_backoffs == 5
-    assert metrics.access_restriction_backoff_seconds == 80
     assert metrics.consecutive_access_restricted == 0
     assert creator.access_restricted_attempts == 5
+    # Each restricted work item was replaced by a new work item with its own context.
+    assert len(manager.contexts) == metrics.completed_work_items == 7
+    assert all(context.closed for context in manager.contexts)
     sample = observability.registry.get_sample_value
     assert sample("queue_creation_access_restricted_total") == 5
     assert sample("queue_creation_access_restricted_consecutive") == 0
-    assert all(context.closed for context in manager.contexts)
     await repository.close()
 
 
-async def test_persistent_restriction_keeps_retrying_at_a_bounded_pace(
+async def test_replacement_starts_without_any_controller_delay(
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "no-delay.sqlite3")
+    manager = _BrowserManager(
+        [_Page(200, [RESTRICTED]) for _ in range(5)] + [_Page(200, [QUEUE_PAGE])]
+    )
+    creator, _ = _creator(tmp_path, repository, manager, queue_ids=["q-1"])
+    controller = _controller(repository, creator, target=1)
+    slept: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def recording_sleep(delay: float, *args: Any, **kwargs: Any) -> Any:
+        slept.append(delay)
+        return await real_sleep(delay, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "sleep", recording_sleep)
+
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
+
+    assert metrics.successful_unique_ids == 1
+    assert metrics.access_restricted == 5
+    # The fakes sleep for 0 s at most; the controller itself never waits.
+    assert all(delay == 0 for delay in slept)
+    await repository.close()
+
+
+async def test_persistent_restriction_keeps_retrying_until_success(tmp_path: Path) -> None:
     repository = SQLiteSessionRepository(tmp_path / "persistent.sqlite3")
     await _seed(repository, 1)
-    restricted = 12
+    restricted = 25
     manager = _BrowserManager(
         [_Page(200, [RESTRICTED]) for _ in range(restricted)] + [_Page(200, [QUEUE_PAGE])]
     )
@@ -741,29 +746,16 @@ async def test_persistent_restriction_keeps_retrying_at_a_bounded_pace(
     creator, state_store = _creator(
         tmp_path, repository, manager, queue_ids=["q-late"], observability=observability
     )
-    sleep = _RecordingSleep()
-    controller = _controller(
-        repository,
-        creator,
-        target=2,
-        workers=1,
-        sleep=sleep,
-        observability=observability,
-    )
+    controller = _controller(repository, creator, target=2, observability=observability)
 
-    with caplog.at_level(logging.WARNING, logger="queue_load_test.scheduler.creation"):
-        metrics = await asyncio.wait_for(controller.run(), timeout=5)
+    metrics = await asyncio.wait_for(controller.run(), timeout=5)
 
-    # No halt: it keeps retrying until the later success satisfies the target.
     assert metrics.successful_unique_ids == 2
     assert metrics.access_restricted == restricted
     assert len(manager.contexts) == restricted + 1
-    # Never spins: every restriction is followed by a bounded, capped delay.
-    assert sleep.delays == [5, 10, 20] + [40] * (restricted - 3)
     assert manager.maximum_active == 1
     assert manager.active == 0
     assert len(_state_files(state_store)) == 1
-    assert not [r for r in caplog.records if "halt" in r.getMessage()]
     sample = observability.registry.get_sample_value
     assert sample("queue_creation_access_restricted_total") == restricted
     assert sample("queue_creation_access_restricted_consecutive") == 0
@@ -779,17 +771,13 @@ async def test_concurrent_restricted_workers_stay_bounded(tmp_path: Path) -> Non
     creator, _ = _creator(
         tmp_path, repository, manager, queue_ids=[f"q-{n}" for n in range(10)]
     )
-    sleep = _RecordingSleep()
-    controller = _controller(
-        repository, creator, target=3, workers=3, capacity=3, sleep=sleep
-    )
+    controller = _controller(repository, creator, target=3, workers=3, capacity=3)
 
     metrics = await asyncio.wait_for(controller.run(), timeout=5)
 
     assert metrics.successful_unique_ids == 3
     assert await repository.count_successful_queue_ids() == 3
     assert metrics.access_restricted == 20
-    assert len(sleep.delays) == 20
     assert manager.maximum_active <= 3
     assert metrics.maximum_queue_depth <= 3
     assert metrics.currently_creating == 0
@@ -797,54 +785,24 @@ async def test_concurrent_restricted_workers_stay_bounded(tmp_path: Path) -> Non
     await repository.close()
 
 
-async def test_graceful_stop_during_backoff_is_responsive(tmp_path: Path) -> None:
-    repository = SQLiteSessionRepository(tmp_path / "stop-backoff.sqlite3")
-    manager = _BrowserManager([_Page(200, [RESTRICTED]) for _ in range(5)])
-    creator, _ = _creator(tmp_path, repository, manager)
-    long_policy = AccessRestrictionPolicy(
-        initial_backoff_seconds=3_600, maximum_backoff_seconds=3_600, jitter_seconds=0
-    )
-    controller = _controller(
-        repository, creator, target=10, policy=long_policy, sleep=asyncio.sleep
-    )
+async def test_graceful_stop_during_endless_restrictions_is_responsive(tmp_path: Path) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "stop.sqlite3")
     stop_event = asyncio.Event()
-
-    run_task = asyncio.create_task(controller.run(stop_event))
-    while controller.metrics.access_restriction_backoffs == 0:
-        await asyncio.sleep(0.001)
-    stop_event.set()
-    metrics = await asyncio.wait_for(run_task, timeout=1)
-
-    assert len(manager.contexts) == 1
-    assert metrics.currently_creating == 0
-    assert manager.active == 0
-    await repository.close()
-
-
-async def test_cancellation_during_backoff_leaks_no_worker_or_context(tmp_path: Path) -> None:
-    repository = SQLiteSessionRepository(tmp_path / "cancel-backoff.sqlite3")
-    manager = _BrowserManager([_Page(200, [RESTRICTED]) for _ in range(5)])
+    manager = _EndlessBrowserManager(stop_after=10, stop_event=stop_event)
     creator, state_store = _creator(tmp_path, repository, manager)
-    long_policy = AccessRestrictionPolicy(
-        initial_backoff_seconds=3_600, maximum_backoff_seconds=3_600, jitter_seconds=0
-    )
-    controller = _controller(
-        repository, creator, target=10, workers=2, policy=long_policy, sleep=asyncio.sleep
-    )
-    stop_event = asyncio.Event()
+    controller = _controller(repository, creator, target=5, workers=3, capacity=3)
 
-    run_task = asyncio.create_task(controller.run(stop_event))
-    while controller.metrics.access_restriction_backoffs == 0:
-        await asyncio.sleep(0.001)
-    run_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(run_task, timeout=1)
+    metrics = await asyncio.wait_for(controller.run(stop_event), timeout=2)
 
-    assert all(context.closed for context in manager.contexts)
+    # Only already-issued work drains after the stop.
+    assert 10 <= len(manager.contexts) <= 10 + 3
+    assert metrics.access_restricted == len(manager.contexts)
+    assert metrics.consecutive_access_restricted == len(manager.contexts)
+    assert metrics.successful_unique_ids == 0
+    assert manager.maximum_active <= 3
     assert manager.active == 0
-    assert controller.metrics.currently_creating == 0
+    assert metrics.currently_creating == 0
     assert _state_files(state_store) == []
-    assert [task for task in asyncio.all_tasks() if "creation-worker" in task.get_name()] == []
     await repository.close()
 
 
@@ -980,17 +938,10 @@ async def test_restart_counts_only_persisted_successes_and_never_resurrects_rest
 ) -> None:
     database = tmp_path / "restart.sqlite3"
     repository = SQLiteSessionRepository(database)
-    first_manager = _BrowserManager(
-        [_Page(200, [QUEUE_PAGE])] + [_Page(200, [RESTRICTED]) for _ in range(10)]
-    )
-    first_creator, _ = _creator(tmp_path, repository, first_manager, queue_ids=["q-1"])
     stop_event = asyncio.Event()
-
-    async def stop_after_three_backoffs(_: float) -> None:
-        if first.metrics.access_restriction_backoffs >= 3:
-            stop_event.set()
-
-    first = _controller(repository, first_creator, target=3, sleep=stop_after_three_backoffs)
+    first_manager = _EndlessBrowserManager(successes=1, stop_after=3, stop_event=stop_event)
+    first_creator, _ = _creator(tmp_path, repository, first_manager, queue_ids=["q-1"])
+    first = _controller(repository, first_creator, target=3)
 
     first_metrics = await first.run(stop_event)
 

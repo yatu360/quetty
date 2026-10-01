@@ -269,11 +269,11 @@ def test_summary_reports_aggregate_access_restriction_status(tmp_path: Path) -> 
         assert '<strong class="state">RUNNING</strong>' in before
 
         runtime.access_restriction_status = AccessRestrictionStatus(  # type: ignore[attr-defined]
-            attempts=3, consecutive=2
+            attempts=3
         )
         after = client.get("/partials/summary").text
         assert "<dt>Access-restricted attempts</dt><dd>3</dd>" in after
-        assert '<strong class="state">BACKING OFF</strong>' in after
+        assert '<strong class="state">RUNNING</strong>' in after
         # Successful-ID counts remain persisted unique Queue IDs only.
         assert "<dt>Valid Queue IDs</dt><dd>0</dd>" in after
         assert "sorry" not in after.casefold()
@@ -285,14 +285,11 @@ def test_run_runtime_access_restriction_status_is_aggregate_and_safe(tmp_path: P
         settings=settings(database), repository=SQLiteSessionRepository(database)
     )
 
-    assert runtime.access_restriction_status == AccessRestrictionStatus(0, 0)
+    assert runtime.access_restriction_status == AccessRestrictionStatus(0)
 
     runtime._creator = cast(Any, SimpleNamespace(access_restricted_attempts=4))
-    runtime._creation = cast(
-        Any, SimpleNamespace(metrics=SimpleNamespace(consecutive_access_restricted=2))
-    )
 
-    assert runtime.access_restriction_status == AccessRestrictionStatus(4, 2)
+    assert runtime.access_restriction_status == AccessRestrictionStatus(4)
 
 
 def test_new_run_is_refused_when_legacy_sessions_have_no_target(tmp_path: Path) -> None:

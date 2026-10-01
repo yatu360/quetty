@@ -2,7 +2,6 @@
 
 from queue_load_test.scheduler.creation import (
     AccessRestrictedError,
-    AccessRestrictionPolicy,
     AcquisitionFailure,
     CreationMetrics,
     CreationOutcome,
@@ -30,7 +29,6 @@ from queue_load_test.scheduler.monitoring import (
 
 __all__ = [
     "AccessRestrictedError",
-    "AccessRestrictionPolicy",
     "AcquisitionFailure",
     "CreationMetrics",
     "CreationOutcome",

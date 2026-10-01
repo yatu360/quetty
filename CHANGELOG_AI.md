@@ -6834,3 +6834,95 @@ None.
 ### Git State
 
 - Branch: main
+
+## 2026-10-01 — Replace restricted acquisition attempts immediately (remove backoff)
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Operator request: remove the delay between attempts. A restricted attempt should be
+replaced immediately with a fresh context and proxy.
+
+### Changes Made
+
+- Removed:
+  - `AccessRestrictionPolicy`;
+  - the controller's `access_restriction_policy`, `sleep` and `jitter` parameters, its
+    backoff wait and `_wait_unless_stopped`;
+  - `CreationMetrics.access_restriction_backoffs` and `access_restriction_backoff_seconds`;
+  - the `ACCESS_RESTRICTED_BACKOFF_INITIAL_SECONDS` and
+    `ACCESS_RESTRICTED_BACKOFF_MAX_SECONDS` settings and their validation (`extra="ignore"`,
+    so old `.env` entries are harmless);
+  - the `backoff_seconds` log field.
+- A restricted work item is now replaced on the controller's next loop iteration. The
+  replacement is an ordinary work item: a fresh BrowserContext and its own IPRoyal sticky
+  session from the existing `_reserve_proxy_assignment` allocator. No code was added that
+  rotates or selects proxies because of a restriction.
+- The restricted item itself is still not retried on its own context or proxy.
+- Dashboard: the `BACKING OFF` state was removed. `AccessRestrictionStatus` carries only
+  `attempts`. "Access-restricted attempts" is unchanged.
+- Kept:
+  - classification and cleanup;
+  - the FAILED row;
+  - `queue_creation_access_restricted_total` and
+    `queue_creation_access_restricted_consecutive`;
+  - the `acquisition_access_restricted` event;
+  - fixed workers, the bounded queue and near-target contraction.
+- `README.md`, `.env.example` and `PROJECT_CONTEXT.md` updated.
+
+### Files Modified
+
+- `src/queue_load_test/scheduler/creation.py`
+- `src/queue_load_test/scheduler/__init__.py`
+- `src/queue_load_test/config.py`
+- `src/queue_load_test/metrics/logging.py`
+- `src/queue_load_test/web/service.py`
+- `tests/unit/test_access_restriction.py`
+- `tests/unit/test_web_ui.py`
+- `tests/unit/test_iproyal_proxy.py`
+- `README.md`, `.env.example`, `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- New and reworked tests:
+  - Restrictions followed by success are replaced immediately, and the streak resets.
+  - The controller performs no non-zero sleep (`asyncio.sleep` was monkeypatched to check).
+  - 25 consecutive restrictions then a success: the target is met, with a single active
+    context.
+  - Concurrent workers stay bounded.
+  - A graceful stop during an endless restriction stream returns promptly. Only issued
+    work drains, and no context or state leaks.
+  - Restart after a stop counts only persisted successes.
+  - IPRoyal: two restricted work items then a success give 3 contexts and 3 distinct valid
+    sticky sessions. Each context's proxy password carries its own work item's session.
+- Focused restriction, web, IPRoyal, creation, config, observability and integration
+  suites: 199 passed.
+- `ruff check src tests`: PASS. `mypy src`: PASS.
+- `python -m pytest` (full): 992 passed, 4 deselected.
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- A fresh context and proxy already come from treating each replacement as a normal new
+  work item, so no restriction-specific routing logic was introduced.
+
+### Known Issues
+
+- With no delay, a persistent restriction makes acquisition retry continuously at
+  `CREATION_WORKERS` concurrency, paced only by how long each navigation takes. Each
+  attempt adds one `FAILED` row, and on IPRoyal one new sticky session.
+- Operator Add/Replace are unchanged.
+
+### Follow-Up
+
+None.
+
+### Git State
+
+- Branch: main

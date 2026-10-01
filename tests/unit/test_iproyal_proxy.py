@@ -44,6 +44,7 @@ from queue_load_test.scheduler import (
     CreationRetryPolicy,
     CreationWorkItem,
     QueueSessionCreator,
+    SessionCreationController,
 )
 from queue_load_test.state import FileSystemStateStore, StateConsistencyChecker
 from queue_load_test.transfer import TransferExtractionResult
@@ -397,7 +398,13 @@ class _Page:
         return _Response()
 
     def locator(self, _selector: str) -> SimpleNamespace:
+        restricted = self._manager.restricted_navigations >= len(
+            self._manager.assignments_at_navigation
+        )
+
         async def inner_text(**_: object) -> str:
+            if restricted:
+                return "We are sorry, your access has been restricted"
             return "Queue-it waiting room"
 
         return SimpleNamespace(first=SimpleNamespace(inner_text=inner_text))
@@ -417,9 +424,17 @@ class _Context:
 class _BrowserManager:
     """Records what SQLite held at the moment each external navigation started."""
 
-    def __init__(self, repository: SQLiteSessionRepository, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        repository: SQLiteSessionRepository,
+        *,
+        fail: bool = False,
+        restricted_navigations: int = 0,
+    ) -> None:
         self.repository = repository
         self.fail = fail
+        # The first N navigations render the pre-Queue access-restriction page.
+        self.restricted_navigations = restricted_navigations
         self.assignments_at_navigation: list[dict[str, str | None]] = []
         self.context_proxies: list[object] = []
 
@@ -586,6 +601,41 @@ async def wait_for(manager: OperatorActionManager, session_id: str | None) -> Op
             return action.status
         await asyncio.sleep(0.01)
     raise AssertionError("operator action did not finish")
+
+
+async def test_restricted_attempt_is_replaced_with_a_fresh_context_and_assignment(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteSessionRepository(tmp_path / "restricted.sqlite3")
+    browser = _BrowserManager(repository, restricted_navigations=2)
+    creator = creator_for(tmp_path, repository, browser)
+    controller = SessionCreationController(
+        repository=repository,
+        handler=creator,
+        target_queue_ids=1,
+        worker_count=1,
+    )
+
+    metrics = await controller.run()
+
+    assert metrics.successful_unique_ids == 1
+    assert metrics.access_restricted == 2
+    # One context per work item; a restricted item is never retried on its own proxy.
+    assert len(browser.context_proxies) == 3
+    sessions = await repository.list()
+    failed = [s for s in sessions if s.status is QueueStatus.FAILED]
+    parked = [s for s in sessions if s.status is QueueStatus.PARKED]
+    assert len(failed) == 2 and len(parked) == 1
+    assert all(s.last_error == "access_restricted_before_queue" for s in failed)
+    assignments = [s.proxy_session_id for s in sessions]
+    assert all(is_valid_proxy_session_id(a) for a in assignments)
+    assert len(set(assignments)) == 3
+    # Each context was routed through its own work item's sticky session.
+    passwords = [cast(dict[str, str], proxy)["password"] for proxy in browser.context_proxies]
+    routed = {a for a in assignments if a and any(f"_session-{a}_" in p for p in passwords)}
+    assert routed == set(assignments)
+    assert len(set(passwords)) == 3
+    await repository.close()
 
 
 async def test_add_allocates_a_new_distinct_assignment(tmp_path: Path) -> None:

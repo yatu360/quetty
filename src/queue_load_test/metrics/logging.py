@@ -18,7 +18,6 @@ _CONTEXT_FIELDS = (
     "error_type",
     "classification",
     "retryable",
-    "backoff_seconds",
     "operation",
     "count",
     "recovered_leases",
