@@ -23,6 +23,7 @@ from queue_load_test.models.run import (
     RunStatus,
     SessionSummary,
     SessionSummaryPage,
+    normalize_session_name,
 )
 from queue_load_test.models.session import QueueSession, QueueStatus, SessionMode
 from queue_load_test.models.work_item import WorkItem
@@ -53,5 +54,6 @@ __all__ = [
     "evaluate_queue_status",
     "has_valid_queue_identity",
     "identity_only_status",
+    "normalize_session_name",
     "validate_transition",
 ]

@@ -1704,6 +1704,36 @@ manually owned rows.
   - Phase 9 is ACCEPTED for application integration. Live provider continuity is
     claimed only for the measured intervals in `docs/phase9_iproyal_acceptance.md`.
 
+## Dashboard Session Names (2026-10-04)
+
+- Every session in every strategy can have an operator-chosen name. It is a local
+  dashboard label only, never an identity.
+- **Storage.** It lives in the nullable `queue_sessions.display_name` column, an additive
+  migration that leaves existing rows NULL.
+  - `SQLiteSessionRepository.rename_session` is the only writer. Ordinary row I/O
+    (`update`, monitoring, adoption, lease writes) never includes the column, so no
+    check can overwrite a name.
+  - Naming needs no lease or manual ownership. It works while a session is checked,
+    open in a browser, or paused.
+- **Validation.** `normalize_session_name`:
+  - whitespace runs are collapsed;
+  - blank clears the name;
+  - at most 80 characters;
+  - control characters are rejected.
+- **Dashboard.**
+  - The name is shown in its own leading "Name" column (HTML-escaped); the
+    `session_id` cell is unchanged.
+  - Search matches names.
+  - Each row has a **Rename** button. `dashboard.js` opens a `window.prompt`,
+    pre-filled with the current name, and posts the value as a form body
+    (`POST /sessions/{id}/name`), so Unicode names work.
+  - A modal prompt is used because the 2-second refresh would wipe an inline field.
+  - Names are never logged.
+- **Not carried over.** Replace creates a new, unnamed session, and Stop & Reset deletes
+  names with their rows.
+- Tests: `tests/unit/test_session_names.py` and
+  `tests/integration/test_dashboard_rename_browser.py` (real `dashboard.js`).
+
 ## Dashboard Copy URL Operator Action (2026-10-01)
 
 - Each dashboard session row has a **Copy URL** button (`title`/`aria-label`

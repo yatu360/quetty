@@ -606,6 +606,49 @@ def create_app(
             message="Browser session closed" if closed else None,
         )
 
+    @app.post("/sessions/{session_id}/name", response_class=HTMLResponse)
+    async def rename_session(
+        request: Request,
+        session_id: str,
+        page: int = Query(1, ge=1),
+        search: str = "",
+        status: str = "",
+        runtime_state: str = "",
+    ) -> Response:
+        """Set or clear an operator label for one session, in any runtime state.
+
+        Local dashboard metadata only: one dedicated column write, with no lease,
+        manual ownership, browser, monitoring, or Queue-it traffic. The name is never
+        logged and is HTML-escaped wherever it is rendered.
+        """
+
+        if await require_run() is None:
+            return RedirectResponse("/setup", status_code=303)
+        if not lifecycle["accepting"]:
+            return feedback(request, _SHUTTING_DOWN)
+        form = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+        raw_name = form.get("name", [""])[0]
+        message: str | None = None
+        error: str | None = None
+        try:
+            renamed = await repository.rename_session(session_id, raw_name)
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            if not renamed:
+                error = "Session no longer exists"
+            else:
+                message = "Session name saved" if raw_name.strip() else "Session name cleared"
+        return await mutation_response(
+            request,
+            page=page,
+            search=search,
+            status=status,
+            runtime_state=runtime_state,
+            error=error,
+            message=message,
+        )
+
     @app.get("/sessions/{session_id}/transfer-url")
     async def session_transfer_url(session_id: str) -> Response:
         """Return one session's persisted transfer URL for an explicit Copy URL click.

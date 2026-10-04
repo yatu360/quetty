@@ -7218,3 +7218,77 @@ Optional: operator-owned Add/Replace windows for Manual runs.
 ### Git State
 
 - Branch: main
+
+## 2026-10-04 — Dashboard session names
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Operator request: give each queue session a custom name from the dashboard, either for
+Manual Strategy only or for every strategy, whichever is easier. Universal was chosen:
+it needs no strategy-specific branching.
+
+### Changes Made
+
+- **Storage.** Additive nullable column `queue_sessions.display_name`. It is migrated in
+  place, and existing rows stay NULL.
+- **Writer.** `SQLiteSessionRepository.rename_session(session_id, name)` is the only
+  writer; ordinary row I/O never touches the column. It is also on the repository
+  protocol. It needs no lease or ownership.
+- **Validation.** `models.normalize_session_name`:
+  - whitespace runs are collapsed;
+  - blank clears the name;
+  - at most 80 characters;
+  - control characters are rejected.
+- **Dashboard projection.** `SessionSummary.display_name` has been added, and dashboard
+  search also matches names.
+- **Route.** `POST /sessions/{id}/name` (form field `name`) renders the session partial
+  with sanitized feedback and refuses during shutdown.
+- **UI.** A new leading "Name" column (the `session_id` cell is unchanged, which the
+  Phase 5 harness scrapes) and a per-row **Rename** button.
+  - `dashboard.js` prompts with the current name and posts it through `htmx.ajax`.
+  - A modal prompt survives the 2-second refresh.
+- Names are HTML-escaped and never logged.
+
+### Files Added
+
+- `tests/unit/test_session_names.py`
+- `tests/integration/test_dashboard_rename_browser.py`
+
+### Files Modified
+
+- `src/queue_load_test/models/run.py`, `models/__init__.py`
+- `src/queue_load_test/repository/base.py`, `repository/sqlite.py`
+- `src/queue_load_test/web/app.py`, `web/templates/_sessions.html`,
+  `web/static/dashboard.js`, `web/static/app.css`
+- `PROJECT_CONTEXT.md`, `CHANGELOG_AI.md`
+
+### Tests Run
+
+- New tests (19), covering:
+  - normalization;
+  - set and clear;
+  - a name surviving monitoring writes;
+  - rename while open in a browser;
+  - search;
+  - legacy migration;
+  - the route for every strategy, including XSS escaping and errors;
+  - a real-browser prompt flow with a Unicode name, across refreshes and a cancel.
+- `python -m ruff check src tests`: All checks passed!
+- `python -m mypy src`: Success: no issues found in 113 source files.
+- `python -m pytest -q`: 1093 passed, 4 deselected.
+
+### Staging Tests
+
+- NOT RUN (local dashboard metadata only; no Queue-it traffic).
+
+### Known Issues
+
+- Replace creates a new, unnamed session; names are not carried over.
+
+### Git State
+
+- Branch: main

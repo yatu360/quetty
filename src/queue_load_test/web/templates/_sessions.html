@@ -15,7 +15,7 @@
 <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>session_id</th><th>queue_id</th><th>Queue-it status</th><th>Progress</th>
+      <th>Name</th><th>session_id</th><th>queue_id</th><th>Queue-it status</th><th>Progress</th>
       <th>Proxy IP</th><th>Last Queue-it update</th><th>Queue Checked</th><th>IP Checked</th>
       <th>Next check</th>
       <th>Browser/runtime</th><th>Actions</th>
@@ -26,6 +26,7 @@
       {% set pending = action and action.status.value in ("REQUESTED", "RUNNING") %}
       {% set base = "/sessions/" ~ session.session_id %}
       <tr>
+        <td>{% if session.display_name %}<span class="session-name">{{ session.display_name }}</span>{% else %}—{% endif %}</td>
         <td class="mono">{{ session.session_id }}</td>
         <td class="mono">{{ session.queue_id or "—" }}</td>
         <td><span class="badge">{{ session.status.value }}</span></td>
@@ -54,6 +55,11 @@
                   hx-confirm="Delete this managed session? This does not cancel anything at Queue-it."
                   {{ mutate | safe }}>Delete</button>
           {% endif %}
+          {#- Local label, editable in every runtime state; dashboard.js prompts for it. -#}
+          <button type="button" class="rename-session"
+                  data-rename-url="{{ base }}/name?{{ query }}"
+                  data-current-name="{{ session.display_name or '' }}"
+                  title="Give this session a name" aria-label="Rename session">Rename</button>
           {#- Read-only in every runtime state. Only an availability flag is rendered;
               dashboard.js fetches the URL on click and hands it to the clipboard. -#}
           {% if session.has_transfer_url %}

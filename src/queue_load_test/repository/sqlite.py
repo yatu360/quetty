@@ -21,6 +21,7 @@ from queue_load_test.models import (
     SessionMode,
     SessionSummary,
     SessionSummaryPage,
+    normalize_session_name,
     validate_transition,
 )
 from queue_load_test.repository.base import (
@@ -129,6 +130,7 @@ CREATE TABLE IF NOT EXISTS queue_sessions (
     proxy_ip_checked_at TEXT,
     proxy_ip_changed_count INTEGER NOT NULL DEFAULT 0,
     proxy_ip_changed_at TEXT,
+    display_name TEXT,
     status TEXT NOT NULL,
     state_path TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -1065,6 +1067,7 @@ class SQLiteSessionRepository:
             ("proxy_ip_checked_at", "TEXT"),
             ("proxy_ip_changed_count", "INTEGER NOT NULL DEFAULT 0"),
             ("proxy_ip_changed_at", "TEXT"),
+            ("display_name", "TEXT"),
         ):
             if column not in columns:
                 connection.execute(
@@ -1570,9 +1573,11 @@ class SQLiteSessionRepository:
         parameters: list[object] = []
         normalized_search = search.strip() if search is not None else ""
         if normalized_search:
-            clauses.append("(s.session_id LIKE ? OR s.queue_id LIKE ?)")
+            clauses.append(
+                "(s.session_id LIKE ? OR s.queue_id LIKE ? OR s.display_name LIKE ?)"
+            )
             pattern = f"%{normalized_search}%"
-            parameters.extend((pattern, pattern))
+            parameters.extend((pattern, pattern, pattern))
         if parsed_status is not None:
             clauses.append("s.status = ?")
             parameters.append(parsed_status.value)
@@ -1604,7 +1609,8 @@ class SQLiteSessionRepository:
                        s.last_queue_update, s.last_checked_at, s.next_check_at,
                        s.worker_id, s.lease_until, s.manual_owner_id, s.manual_lease_until,
                        s.proxy_ip, s.proxy_ip_checked_at, s.proxy_ip_changed_count,
-                       TRIM(COALESCE(s.transfer_url, '')) <> '' AS has_transfer_url
+                       TRIM(COALESCE(s.transfer_url, '')) <> '' AS has_transfer_url,
+                       s.display_name
                 FROM queue_sessions AS s
                 LEFT JOIN queue_progress AS p ON p.session_id = s.session_id
                 """
@@ -1625,6 +1631,7 @@ class SQLiteSessionRepository:
                     proxy_ip_checked_at=_from_storage(row["proxy_ip_checked_at"]),
                     proxy_ip_changed_count=int(row["proxy_ip_changed_count"] or 0),
                     has_transfer_url=bool(row["has_transfer_url"]),
+                    display_name=row["display_name"],
                     runtime_state=_row_runtime_state(row, now=now),
                 )
                 for row in rows
@@ -1635,6 +1642,26 @@ class SQLiteSessionRepository:
                 page=page,
                 page_size=page_size,
             )
+
+        return await self._run(operation)
+
+    async def rename_session(self, session_id: str, display_name: str | None) -> bool:
+        """Set or clear one session's operator label; the only writer of the column.
+
+        Ordinary row updates never include it, so monitoring, adoption, and lease
+        writes cannot overwrite a name, and naming needs no lease or ownership.
+        """
+
+        name = normalize_session_name(display_name)
+
+        def operation() -> bool:
+            connection = self._connect()
+            cursor = connection.execute(
+                "UPDATE queue_sessions SET display_name = ? WHERE session_id = ?",
+                (name, session_id),
+            )
+            connection.commit()
+            return cursor.rowcount == 1
 
         return await self._run(operation)
 

@@ -91,6 +91,33 @@ class RunConfig:
     status: RunStatus = RunStatus.ACTIVE
 
 
+SESSION_NAME_MAX_LENGTH = 80
+
+
+def normalize_session_name(value: str | None) -> str | None:
+    """Validate an operator-chosen session name; blank clears it.
+
+    Whitespace runs collapse to one space. Control characters are rejected rather
+    than stripped so a pasted value is never silently altered beyond whitespace.
+    """
+
+    if value is None:
+        return None
+    if any(
+        (ord(character) < 32 or ord(character) == 127) and not character.isspace()
+        for character in value
+    ):
+        raise ValueError("Session names cannot contain control characters.")
+    collapsed = " ".join(value.split())
+    if not collapsed:
+        return None
+    if len(collapsed) > SESSION_NAME_MAX_LENGTH:
+        raise ValueError(
+            f"Session names can be at most {SESSION_NAME_MAX_LENGTH} characters."
+        )
+    return collapsed
+
+
 @dataclass(frozen=True, slots=True)
 class SessionSummary:
     """Safe, bounded dashboard projection; sensitive session fields are excluded."""
@@ -109,6 +136,8 @@ class SessionSummary:
     proxy_ip_changed_count: int = 0
     # Availability marker for the explicit Copy URL action; never the URL itself.
     has_transfer_url: bool = False
+    # Operator-chosen label; local dashboard metadata only, never an identity.
+    display_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

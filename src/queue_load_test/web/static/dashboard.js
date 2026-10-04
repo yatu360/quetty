@@ -148,3 +148,31 @@
 
   document.addEventListener("htmx:afterSwap", function () { render(); });
 })();
+
+// Rename: prompt for an operator label and post it as a form value (so any Unicode
+// name works), swapping the session table like other row actions. A modal prompt is
+// unaffected by the 2-second refresh, which would wipe an inline text field.
+(function () {
+  "use strict";
+  document.addEventListener("click", function (event) {
+    var button = event.target && event.target.closest
+      ? event.target.closest("button[data-rename-url]")
+      : null;
+    if (!button || button.disabled || !window.htmx) {
+      return;
+    }
+    event.preventDefault();
+    var name = window.prompt(
+      "Session name (leave blank to clear)",
+      button.getAttribute("data-current-name") || ""
+    );
+    if (name === null) {
+      return;
+    }
+    window.htmx.ajax("POST", button.getAttribute("data-rename-url"), {
+      target: "#session-results",
+      swap: "outerHTML",
+      values: { name: name },
+    });
+  });
+})();
