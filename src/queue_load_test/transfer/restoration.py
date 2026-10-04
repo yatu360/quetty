@@ -286,8 +286,18 @@ class QueueSessionRestorer:
         self._observe_restore_result(session, result, time.perf_counter() - started)
         return result
 
-    async def restore_open(self, session: QueueSession) -> OpenedSessionRestore:
-        """Restore a session while retaining only a verified live context."""
+    async def restore_open(
+        self,
+        session: QueueSession,
+        *,
+        keep_open_on_navigation_failure: bool = False,
+    ) -> OpenedSessionRestore:
+        """Restore a session while retaining only a verified live context.
+
+        ``keep_open_on_navigation_failure`` applies to a session without a Queue ID
+        (a Manual Strategy acquisition window): a failed first navigation leaves the
+        operator-owned window open instead of discarding it.
+        """
 
         started = time.perf_counter()
         mismatch = self._backend_mismatch_result(session)
@@ -304,7 +314,11 @@ class QueueSessionRestorer:
             self._observe_restore_result(session, proxy_failure, time.perf_counter() - started)
             return OpenedSessionRestore(proxy_failure)
         if expected_queue_id is None:
-            return await self._open_unidentified(session, proxy=proxy)
+            return await self._open_unidentified(
+                session,
+                proxy=proxy,
+                keep_open_on_navigation_failure=keep_open_on_navigation_failure,
+            )
         if not session.transfer_url.strip():
             opened = OpenedSessionRestore(
                 self._result(
@@ -376,11 +390,15 @@ class QueueSessionRestorer:
         session: QueueSession,
         *,
         proxy: ResolvedSessionProxy | None,
+        keep_open_on_navigation_failure: bool = False,
     ) -> OpenedSessionRestore:
         """Open a window for a session that never acquired a Queue ID.
 
         There is no identity to verify, so nothing is recorded: the persisted
-        status and error stay as they are until an identity is adopted.
+        status and error stay as they are until an identity is adopted. With
+        ``keep_open_on_navigation_failure`` a failed navigation (timeout, network or
+        proxy error) is classified and counted, but the window stays open for the
+        operator, who may reload it or close it.
         """
 
         navigation_url = self._storage_navigation_url
@@ -411,10 +429,34 @@ class QueueSessionRestorer:
             try:
                 page = await owned.context.new_page()
                 auth_watch = self._watch_proxy_auth(page, proxy)
+            except BaseException:
+                await owned.close()
+                raise
+            try:
                 await page.goto(
                     navigation_url,
                     wait_until="domcontentloaded",
                     timeout=self._navigation_timeout_ms,
+                )
+            except asyncio.CancelledError:
+                await owned.close()
+                raise
+            except Exception as exc:  # browser adapter boundary, includes timeouts
+                if not keep_open_on_navigation_failure:
+                    await owned.close()
+                    raise
+                failure = (
+                    self._proxy_navigation_failure(proxy, exc, auth_watch)
+                    or RestoreFailure.NAVIGATION_FAILED
+                )
+                if self._observability is not None:
+                    self._observability.record_navigation_failure()
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "manual_window_navigation_failed",
+                    session_id=session.session_id,
+                    error_type=failure.value,
                 )
             except BaseException:
                 await owned.close()
@@ -455,18 +497,27 @@ class QueueSessionRestorer:
         *,
         context: BrowserContext,
         page: Page,
+        require_live_queue: bool = True,
     ) -> SessionRestoreResult | None:
         """Adopt a live Queue-it identity observed in an unidentified open window.
 
         Returns ``None`` while no live queue with a transfer identity is visible.
         The session is updated in memory only; the caller persists the result.
         A live page that stops answering is bounded and reported as "nothing seen".
+        With ``require_live_queue=False`` (Manual Strategy acquisition) a valid page
+        transfer identity is adopted even when no pre-queue or active-queue marker
+        is visible; the identity-only lifecycle fallback then applies.
         """
 
         original = (session.queue_id, session.transfer_url, session.last_error)
         try:
             return await await_bounded(
-                self._adopt_open(session, context=context, page=page),
+                self._adopt_open(
+                    session,
+                    context=context,
+                    page=page,
+                    require_live_queue=require_live_queue,
+                ),
                 timeout=self._attempt_timeout_seconds,
             )
         except TimeoutError as exc:
@@ -488,9 +539,14 @@ class QueueSessionRestorer:
         *,
         context: BrowserContext,
         page: Page,
+        require_live_queue: bool = True,
     ) -> SessionRestoreResult | None:
         progress = await self._live_extractor.extract(page, session_id=session.session_id)
-        if progress.pre_queue is not True and progress.active_queue is not True:
+        if (
+            require_live_queue
+            and progress.pre_queue is not True
+            and progress.active_queue is not True
+        ):
             return None
         transfer = await self._transfer_extractor_factory(
             self._expected_journey_url or page.url

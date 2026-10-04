@@ -118,6 +118,13 @@ First-run setup persists an immutable strategy independently from the browser ba
   browser-established sessions with direct visitor-status checking where available and
   browser fallback. In Prompt 1 it uses the existing browser fallback for every check;
   no direct Queue-it request is implemented yet.
+- **Manual Strategy** (`manual`) opens one visible acquisition window at a time and
+  waits, with no timeout, for you to close it before opening the next. A Queue ID that
+  appears is persisted while the window stays open; closing a window without one
+  records a FAILED attempt that does not count toward the target. Creation concurrency
+  is 1 for these runs regardless of `CREATION_WORKERS`. Once closed, sessions are
+  parked and monitored by the Headed Window browser path. See
+  `docs/manual_strategy_acceptance.md`.
 
 `MONITORING_STRATEGY` controls only the default selected for a new setup. Existing runs
 restart with `run_config.monitoring_strategy`; changing the environment cannot migrate

@@ -376,7 +376,11 @@ class QueueSessionMonitor:
             observed_status = QueueStatus.FAILED
             session.status = observed_status
         elif is_verified_observation(result) and result.progress is not None:
-            observed_status = evaluate_monitoring_observation(observation)
+            # A verified identity with no usable state falls back to PRE_QUEUE in the
+            # shared evaluator, never CHECKING, FAILED, or CONNECTION_LOST.
+            observed_status = evaluate_monitoring_observation(
+                observation, current_status=previous_status
+            )
             session.status = observed_status
             progress_changed = _record_progress(
                 session, previous_progress, result.progress, observed_at
@@ -406,7 +410,9 @@ class QueueSessionMonitor:
         # The browser restorer stamps this for browser checks; a direct check is an
         # equally real observation of the visitor.
         session.last_checked_at = observed_at
-        observed_status = evaluate_monitoring_observation(observation)
+        observed_status = evaluate_monitoring_observation(
+            observation, current_status=previous_status
+        )
         session.status = observed_status
         progress_changed = _record_progress(
             session, previous_progress, observation.progress, observed_at

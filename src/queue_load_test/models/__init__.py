@@ -10,6 +10,8 @@ from queue_load_test.models.lifecycle import (
     can_transition,
     evaluate_monitoring_observation,
     evaluate_queue_status,
+    has_valid_queue_identity,
+    identity_only_status,
     validate_transition,
 )
 from queue_load_test.models.progress import QueueExtractionDiagnostics, QueueProgress
@@ -49,5 +51,7 @@ __all__ = [
     "can_transition",
     "evaluate_monitoring_observation",
     "evaluate_queue_status",
+    "has_valid_queue_identity",
+    "identity_only_status",
     "validate_transition",
 ]

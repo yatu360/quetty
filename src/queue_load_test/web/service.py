@@ -65,7 +65,12 @@ from queue_load_test.web.actions import (
     OperatorActionKind,
     OperatorActionManager,
 )
-from queue_load_test.web.manual import ManualChromeSessionManager, ManualOpenResult
+from queue_load_test.web.manual import (
+    ManualAcquisitionState,
+    ManualChromeSessionManager,
+    ManualOpenResult,
+)
+from queue_load_test.web.manual_acquisition import ManualAcquisitionHandler
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +86,11 @@ def _automatic_monitor_for_strategy(
     Headed Window Strategy uses the browser monitor exactly as before. Direct
     Monitoring Strategy uses the direct handler, whose browser fallback is that
     same browser monitor; a Direct run is never silently reassembled as Headed.
+    Manual Strategy differs only in acquisition; once its operator-owned window is
+    closed the parked session is monitored by the same browser monitor.
     """
 
-    if strategy is MonitoringStrategy.HEADED_WINDOW:
+    if strategy in {MonitoringStrategy.HEADED_WINDOW, MonitoringStrategy.MANUAL}:
         return browser_monitor
     if strategy is MonitoringStrategy.DIRECT:
         if direct_handler is None:
@@ -378,19 +385,6 @@ class ApplicationRunRuntime:
                 proxy_ip_tracker=proxy_ip_tracker,
                 observability=metrics,
             )
-            population_adjustment = (
-                await self._repository.get_operator_population_adjustment()
-            )
-            creation = SessionCreationController(
-                repository=self._repository,
-                handler=creator,
-                target_queue_ids=max(0, run.requested_sessions + population_adjustment),
-                worker_count=settings.creation_workers,
-                queue_capacity=settings.creation_queue_capacity,
-                observability=metrics,
-                identity_replacement_limit=settings.identity_replacement_limit,
-                access_restricted_max_consecutive=settings.access_restricted_max_consecutive,
-            )
             restorer = QueueSessionRestorer(
                 browser_manager=browser_manager,
                 repository=self._repository,
@@ -427,13 +421,17 @@ class ApplicationRunRuntime:
                 browser_monitor=monitor,
                 direct_handler=direct_handler,
             )
+            manual_strategy = run.monitoring_strategy is MonitoringStrategy.MANUAL
+            # A Manual Strategy run adds one headed slot for its single acquisition
+            # window beside the operator's Manual Open windows.
+            headed_capacity = settings.max_manual_open_sessions + int(manual_strategy)
             manual_processes, manual_contexts_per_process = manual_pool_topology(
-                settings.browser_backend, settings.max_manual_open_sessions
+                settings.browser_backend, headed_capacity
             )
             headed_manager = BrowserManager(
                 chrome_process_count=manual_processes,
                 max_contexts_per_browser=manual_contexts_per_process,
-                max_active_contexts=settings.max_manual_open_sessions,
+                max_active_contexts=headed_capacity,
                 headless=self._manual_headless,
                 observability=metrics,
                 shared_capacity=shared_capacity,
@@ -460,6 +458,31 @@ class ApplicationRunRuntime:
                 lease_seconds=settings.manual_open_lease_seconds,
             )
             await manual_sessions.recover_stale()
+            population_adjustment = (
+                await self._repository.get_operator_population_adjustment()
+            )
+            # Manual Strategy acquisition is strictly sequential: one worker and one
+            # queue slot, so the next visible window is requested only after the
+            # operator has closed the current one. Other strategies are unchanged.
+            creation = SessionCreationController(
+                repository=self._repository,
+                handler=(
+                    ManualAcquisitionHandler(
+                        creator=creator,
+                        manual_sessions=manual_sessions,
+                        repository=self._repository,
+                        state_store=state_store,
+                    )
+                    if manual_strategy
+                    else creator
+                ),
+                target_queue_ids=max(0, run.requested_sessions + population_adjustment),
+                worker_count=1 if manual_strategy else settings.creation_workers,
+                queue_capacity=1 if manual_strategy else settings.creation_queue_capacity,
+                observability=metrics,
+                identity_replacement_limit=settings.identity_replacement_limit,
+                access_restricted_max_consecutive=settings.access_restricted_max_consecutive,
+            )
             # Refresh Now uses the run's selected strategy (Direct keeps its browser
             # fallback); Manual Open above always uses the browser monitor.
             operator_actions = OperatorActionManager(
@@ -662,6 +685,13 @@ class ApplicationRunRuntime:
         )
 
     @property
+    def manual_acquisition_state(self) -> ManualAcquisitionState | None:
+        """State of the open Manual Strategy acquisition window, if one is open."""
+
+        manager = self._manual_sessions
+        return manager.acquisition_state if manager is not None else None
+
+    @property
     def direct_monitoring_metrics(self) -> DirectMonitoringMetrics | None:
         """In-process Direct strategy counters; ``None`` for a Headed Window run."""
 
@@ -777,6 +807,8 @@ class DashboardSummary:
     direct_checks: str | None = None
     # Pre-Queue access-restriction attempts in the current runtime (aggregate only).
     access_restricted_attempts: int = 0
+    # Manual Strategy only: sanitized state of the open acquisition window.
+    manual_window: str | None = None
 
 
 class DashboardService:
@@ -798,8 +830,14 @@ class DashboardService:
         restriction = getattr(self._runtime, "access_restriction_status", None)
         if not isinstance(restriction, AccessRestrictionStatus):
             restriction = AccessRestrictionStatus()
+        manual_window = getattr(self._runtime, "manual_acquisition_state", None)
+        if not isinstance(manual_window, ManualAcquisitionState):
+            manual_window = None
         if runtime_error is not None:
             creation = "ERROR"
+        elif manual_window is not None:
+            # The operator's window is the continue signal: acquisition waits for it.
+            creation = "WAITING FOR MANUAL CLOSE"
         elif recovery.valid_queue_ids >= effective_target:
             creation = "COMPLETE"
         elif restriction.halted:
@@ -830,6 +868,9 @@ class DashboardService:
             direct_capability=direct_capability,
             direct_checks=direct_checks,
             access_restricted_attempts=restriction.attempts,
+            manual_window=(
+                manual_window.value.replace("_", " ") if manual_window is not None else None
+            ),
         )
 
     async def _direct_summary(

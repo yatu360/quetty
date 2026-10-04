@@ -992,6 +992,24 @@ a row; restart the run to resume. There is no delay between attempts. Optional f
 work: an in-runtime "Resume Acquisition" control, or bounded backoff (see `c341d5e`).
 Queue-it staging is NOT RUN.
 
+## Cross-Phase — Manual Strategy and Identity-Only PRE_QUEUE — **ACCEPTED (local, 2026-10-04)**
+
+- **Manual Strategy** (`manual`) is a third persisted run strategy. Acquisition is
+  strictly sequential: one visible, operator-owned window at a time.
+  - A Queue ID is persisted while the window stays open.
+  - Closing the window is the only continue signal, and there is no acquisition
+    timeout.
+  - An unsuccessful close is a FAILED attempt, never counted, and a fresh window
+    replaces it.
+  - After acquisition the session is monitored by the Headed Window browser monitor.
+- **Identity-only PRE_QUEUE.** A valid, uncontradicted Queue ID whose observation has no
+  usable state is `PRE_QUEUE`, unless a stronger signal or an already-observed later
+  stage exists. The rule lives in the shared evaluator for every path.
+- See `docs/manual_strategy_acceptance.md`. Queue-it staging is NOT RUN.
+- Optional future work:
+  - operator-owned Add/Replace windows for Manual runs;
+  - a headed manual-close run on a display.
+
 ## Scaling Gates
 
 ### Phase 1 → Phase 2

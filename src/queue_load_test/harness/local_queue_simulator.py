@@ -21,6 +21,9 @@ from urllib.parse import parse_qs, urlsplit
 STAGE_PRE = "pre"
 STAGE_ACTIVE = "active"
 STAGE_SERVICED = "serviced"
+# Only the page transfer identity is exposed: no pre-queue marker, progress, position,
+# or lifecycle text. The identity-only lifecycle fallback classifies it PRE_QUEUE.
+STAGE_IDENTITY_ONLY = "identity_only"
 
 # Deterministic faults for the optional visitor-status endpoint (``status_enabled``).
 STATUS_FAULTS = frozenset(
@@ -272,8 +275,14 @@ class LocalQueueSimulator:
         elif fault == "contradictory":
             document.update(preQueue=True, activeQueue=True)
         elif fault == "unknown_lifecycle":
+            # A matching Queue ID alone is now PRE_QUEUE (identity-only rule), so an
+            # unusable lifecycle needs a real signal the direct path cannot persist.
             document.update(
-                preQueue=False, activeQueue=False, servicedSoon=False, usersAhead=None
+                preQueue=False,
+                activeQueue=False,
+                servicedSoon=False,
+                usersAhead=None,
+                connectionLost=True,
             )
         elif fault == "admitted":
             document["redirectUrl"] = self.protected_url
@@ -295,6 +304,7 @@ class LocalQueueSimulator:
                 "pre_queue": ["preQueue"],
                 "active_queue": ["activeQueue"],
                 "serviced_soon": ["servicedSoon"],
+                "connection_lost": ["connectionLost"],
                 "progress_percentage": ["progress"],
                 "users_ahead": ["usersAhead"],
                 "redirect_url": ["redirectUrl"],
@@ -346,6 +356,8 @@ class LocalQueueSimulator:
             )
         transfer += self._status_script(queue_id)
         stage = self.stages.get(queue_id, STAGE_ACTIVE)
+        if stage == STAGE_IDENTITY_ONLY:
+            return f"<body><main>Please wait</main>{transfer}</body>"
         if stage == STAGE_PRE:
             return (
                 '<body class="before">'

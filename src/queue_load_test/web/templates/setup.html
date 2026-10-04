@@ -49,6 +49,9 @@
             <span class="muted">
               {% if strategy.value == "headed_window" %}
               Existing browser-backed restore and live Queue-it page inspection.
+              {% elif strategy.value == "manual" %}
+              Opens one visible acquisition window at a time and waits for you to close
+              it before opening the next.
               {% else %}
               Browser-established sessions with direct visitor-status checking where
               available, with browser fallback.

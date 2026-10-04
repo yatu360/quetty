@@ -10,6 +10,48 @@ live monitoring.
 
 ## Current Status
 
+### Manual Strategy and identity-only PRE_QUEUE (2026-10-04, local evidence)
+
+- **Manual Strategy** (`manual`) is a third persisted run strategy, separate from
+  `headed_window` and `direct`. It is selectable at setup ("opens one visible
+  acquisition window at a time and waits for you to close it before opening the next").
+  - It is stored as `manual`, and restart restores it.
+  - It is never applied to an existing run; switching still requires Stop & Reset.
+- **Acquisition.** `ManualAcquisitionHandler` (`web/manual_acquisition.py`) runs under
+  the existing `SessionCreationController`, forced to 1 worker and a 1-slot queue for
+  Manual runs only, with its own lock as defence in depth.
+  - Each attempt reserves a fresh `CREATING` row, with a new IPRoyal sticky ID on
+    proxied runs.
+  - `ManualChromeSessionManager.run_acquisition_window` opens one visible window at the
+    target through the existing headed pool and `restore_open` no-ID path. A failed
+    first navigation leaves the window open.
+  - It then waits with no deadline. The window ends only when the operator closes it
+    (last page or context `close` event, or dashboard Close), the browser is lost,
+    ownership is lost, or the app shuts down.
+  - A valid page identity is adopted and persisted while the window stays open
+    (`adopt_open(require_live_queue=False)`), then inspected through the shared
+    evaluator. The manual lease keeps the scheduler away until close.
+  - A window closed without an ID becomes a FAILED row: `manual_window_closed_*`,
+    `manual_browser_lost_*`, `access_restricted_before_queue` or `duplicate_queue_id`.
+    It is never counted, and a fresh window opens for the unmet target.
+- **Access restriction** is surfaced and never closes the window. The consecutive halt
+  (25) still applies, counting operator-closed restricted windows.
+- **After close,** sessions are ordinary parked rows monitored by the Headed Window
+  browser monitor (automatic and Refresh Now).
+- **Dashboard.** Creation shows `WAITING FOR MANUAL CLOSE`, and a "Manual window" line
+  shows the window state.
+- **Shutdown** ends the window (`SHUTDOWN`), keeps any persisted ID, discards an
+  interrupted reservation, and opens no next window. Restart resumes only the deficit.
+- **Identity-only PRE_QUEUE.** `evaluate_monitoring_observation(...,
+  current_status=...)` returns `PRE_QUEUE` instead of `CHECKING` when no explicit state
+  exists and the observation carries a valid, uncontradicted Queue ID.
+  - A session already at a later explicit stage keeps it, so there is no backward
+    transition.
+  - Stronger signals, identity mismatch and genuine restore failures are unaffected.
+  - It applies to browser checks, Direct observations and validation, Refresh Now,
+    Manual Open close, and Manual Strategy.
+- See `docs/manual_strategy_acceptance.md`. Queue-it staging is **NOT RUN / UNKNOWN**.
+
 ### Monitoring-strategy policy (authoritative, Phase 8 acceptance 2026-09-29)
 
 - **Phase 8 result: PARTIAL.** The run-level interchangeable monitoring-strategy
@@ -112,7 +154,8 @@ live monitoring.
 
 - Every run now persists one immutable monitoring strategy independently from its
   browser backend: `headed_window` (**Headed Window Strategy**) or `direct`
-  (**Direct Monitoring Strategy**).
+  (**Direct Monitoring Strategy**). Since 2026-10-04 `manual` (**Manual Strategy**) is
+  a third value; see the section above.
 - Headed Window Strategy is the historical automatic path: restore through the
   persisted backend, inspect the live page/DOM, persist, and park. Its operator-facing
   name does not force the automatic pool to become visibly headed; `HEADLESS` is
@@ -955,7 +998,9 @@ Supported side/interruption states are `PARKED`, `CHECKING`, `PAUSED`,
 transition validation rejects suspicious backward transitions. State evaluation gives
 priority to connection loss, expiry, admission, turn started, first-in-line/ready,
 serviced soon, paused, pre-queue, and active-queue evidence. Progress percentage alone
-does not establish lifecycle state.
+does not establish lifecycle state. When none of that evidence exists but the
+observation carries a valid, uncontradicted Queue ID, the result is `PRE_QUEUE` (or the
+session's already-observed later in-queue stage) instead of `CHECKING`.
 
 ## Queue-it Extraction
 
@@ -984,7 +1029,8 @@ mismatch without replacing the expected ID.
 ## Monitoring Model
 
 `RunConfig.monitoring_strategy` selects one immutable run-level automatic-monitoring
-strategy. `headed_window` is the existing browser restore/live-DOM path. `direct`
+strategy. `headed_window` is the existing browser restore/live-DOM path. `manual` uses
+that same browser monitor; it differs only in its operator-paced acquisition. `direct`
 selects `DirectMonitoringHandler` (Phase 8 Prompt 5): a direct visitor-status check for
 `DIRECT_CAPABLE` sessions, with the same browser monitor as its classified fallback;
 see `docs/phase8_direct_runtime_integration.md`. When

@@ -7099,3 +7099,122 @@ Optional: add a dashboard "Resume Acquisition" control for a halted runtime.
 ### Git State
 
 - Branch: main
+
+## 2026-10-04 — Manual Strategy and identity-only PRE_QUEUE fallback
+
+### Agent / Model
+
+Claude Opus 5.5 (Claude Code)
+
+### Goal
+
+Add a third persisted run strategy, **Manual Strategy** (`manual`). It acquires
+sequentially through one operator-owned visible window at a time, and closing the
+window is the continue signal. Also add the lifecycle rule: a valid Queue ID without
+usable state/progress is `PRE_QUEUE`.
+
+### Changes Made
+
+- **Strategy model.** `MonitoringStrategy.MANUAL` ("Manual Strategy").
+  - Persisted as `manual`. No migration is needed (text column); legacy rows still
+    become `headed_window`.
+  - The setup page shows the explanation. Automatic monitoring and Refresh Now use the
+    browser monitor.
+- **`ManualAcquisitionHandler`** (`web/manual_acquisition.py`) runs under the existing
+  `SessionCreationController`, forced to 1 worker and a 1-slot queue for Manual runs
+  only, plus a handler lock.
+  - Each attempt reserves a `CREATING` row (`QueueSessionCreator.reserve_session`) and
+    calls `ManualChromeSessionManager.run_acquisition_window`.
+  - It classifies the authoritative row afterwards: SUCCESS; FAILED
+    `manual_window_closed_before_queue_id`, `manual_browser_lost_before_queue_id`,
+    `manual_ownership_lost_before_queue_id`, `access_restricted_before_queue`,
+    `duplicate_queue_id` or `manual_window_open_failed`; or an interrupted reservation
+    discarded at shutdown.
+  - It takes a proxy-IP baseline after success.
+- **`ManualChromeSessionManager`** gains acquisition windows:
+  - its own headed slot (+1);
+  - event-driven close detection (last page or context close; tabs and popups
+    tracked);
+  - `ManualCloseReason`, where the first cause wins;
+  - a 2 s observation tick (restriction detection, then adoption without a live-queue
+    marker, then immediate inspection; re-inspection at the heartbeat);
+  - `acquisition_state`;
+  - the window ends on `stop_accepting()`.
+
+  Records now stay in `_open` until ownership is released, so `open_count == 0`
+  implies no lease. This fixed a race exposed in `test_operator_fencing`.
+- **`QueueSessionRestorer`**:
+  - `restore_open(..., keep_open_on_navigation_failure=)` keeps an unidentified
+    window open after a failed navigation;
+  - `adopt_open(..., require_live_queue=)` lets an acquisition window adopt a valid
+    identity without pre/active markers.
+- **Lifecycle.** `evaluate_monitoring_observation(obs, *, current_status=None)`,
+  `has_valid_queue_identity` and `identity_only_status`.
+  - `CHECKING` becomes `PRE_QUEUE` for a valid, uncontradicted Queue ID, unless the
+    session is already at a later explicit stage, which it keeps (no backward
+    transition).
+  - The monitor (browser and Direct persistence) and `validate_direct_observation` pass
+    the persisted status.
+- **Dashboard.** Creation shows `WAITING FOR MANUAL CLOSE`, plus a "Manual window"
+  state line.
+- **Simulator.** New `STAGE_IDENTITY_ONLY`. The `unknown_lifecycle` status fault and
+  schema now carry `connectionLost`, because an identity-only direct response is now
+  accepted.
+
+### Files Added
+
+- `src/queue_load_test/web/manual_acquisition.py`
+- `docs/manual_strategy_acceptance.md`
+- `tests/unit/test_manual_strategy.py`, `test_manual_strategy_web.py`,
+  `test_manual_strategy_restorer.py`, `test_identity_only_lifecycle.py`
+- `tests/integration/test_manual_strategy_browser.py`
+
+### Files Modified
+
+- Source:
+  - `models/run.py`, `models/lifecycle.py`, `models/__init__.py`;
+  - `scheduler/creation.py`, `scheduler/monitoring.py`;
+  - `direct_monitor/checker.py`;
+  - `transfer/restoration.py`;
+  - `web/manual.py`, `web/service.py`, and templates `setup.html` and
+    `_summary.html`;
+  - `harness/local_queue_simulator.py`, `harness/phase8_direct_runtime.py`.
+- Tests: `tests/unit/test_direct_monitor.py`, `tests/unit/test_direct_security.py`.
+- Docs: `README.md`, `.env.example`, `PROJECT_CONTEXT.md`, `PHASE_PLAN.md`,
+  `CHANGELOG_AI.md`.
+
+### Tests Run
+
+- New: 64 unit tests, and 2 integration tests (Patchright and Chrome, real
+  `ApplicationRunRuntime` and simulator).
+- `python -m ruff check src tests`: All checks passed!
+- `python -m mypy src`: Success: no issues found in 113 source files.
+- `python -m pytest -q`: 1074 passed, 4 deselected (baseline 1005).
+
+### Staging Tests
+
+- NOT RUN. No Queue-it traffic.
+
+### Important Decisions
+
+- Manual acquisition reuses the Manual Open headed machinery (lease, adoption, final
+  inspection) instead of adding a new browser engine.
+- The access-restriction consecutive halt (25) is kept for Manual runs. It counts
+  operator-closed restricted windows and never closes a window.
+- The identity-only fallback retains an already-observed later stage, so the transition
+  table is unchanged.
+- Add and Replace on Manual runs still use the automatic creator.
+
+### Known Issues
+
+- See `docs/manual_strategy_acceptance.md` (Remaining unknowns). There is a brief
+  `PARKED` status between adoption and first inspection, and the headed visible-window
+  path was not run on a display in this validation.
+
+### Follow-Up
+
+Optional: operator-owned Add/Replace windows for Manual runs.
+
+### Git State
+
+- Branch: main

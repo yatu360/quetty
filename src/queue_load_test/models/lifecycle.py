@@ -166,7 +166,61 @@ def evaluate_queue_status(
     return QueueStatus.CHECKING
 
 
-def evaluate_monitoring_observation(observation: MonitoringObservation) -> QueueStatus:
-    """Evaluate either source through the existing authoritative lifecycle rules."""
+def has_valid_queue_identity(observation: MonitoringObservation) -> bool:
+    """Return whether the observation carries an uncontradicted valid Queue ID.
 
-    return evaluate_queue_status(observation.progress, observation.page)
+    The expected (persisted) Queue ID, or an observed one that does not contradict
+    it, proves the visitor holds a queue identity. An explicit mismatch never does.
+    """
+
+    if observation.identity_match is False:
+        return False
+    expected = _valid_queue_id(observation.expected_queue_id)
+    observed = _valid_queue_id(observation.observed_queue_id)
+    if expected is not None and observed is not None and expected != observed:
+        return False
+    return expected is not None or observed is not None
+
+
+def _valid_queue_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def identity_only_status(current_status: QueueStatus | None = None) -> QueueStatus:
+    """Lifecycle for a valid Queue ID whose observation exposes no usable state.
+
+    A Queue ID proves a queue identity, so the base in-queue state ``PRE_QUEUE`` is
+    used. A session that has already been explicitly observed at a later in-queue
+    stage (for example ``ACTIVE_QUEUE``) keeps that stage: the earlier explicit
+    signal is stronger evidence, and the transition rules never move it backwards.
+    """
+
+    if current_status is None:
+        return QueueStatus.PRE_QUEUE
+    current_status = QueueStatus.parse(current_status)
+    if can_transition(current_status, QueueStatus.PRE_QUEUE):
+        return QueueStatus.PRE_QUEUE
+    return current_status
+
+
+def evaluate_monitoring_observation(
+    observation: MonitoringObservation,
+    *,
+    current_status: QueueStatus | None = None,
+) -> QueueStatus:
+    """Evaluate either source through the existing authoritative lifecycle rules.
+
+    Every explicit signal (connection loss, expiry, admission, turn started, ready,
+    serviced soon, paused, pre-queue, active queue, or sufficient progress) is
+    evaluated first. Only when none applies and the observation carries a valid,
+    uncontradicted Queue ID does the identity-only fallback replace ``CHECKING``.
+    ``current_status`` is the persisted status the result will be written over.
+    """
+
+    status = evaluate_queue_status(observation.progress, observation.page)
+    if status is QueueStatus.CHECKING and has_valid_queue_identity(observation):
+        return identity_only_status(current_status)
+    return status

@@ -414,9 +414,13 @@ async def test_direct_metrics_are_recorded_without_session_labels(tmp_path: Path
         queue_id = request.url.params["q"]
         kind = next(responses)
         if kind == "unknown":
-            # Direct evaluates CHECKING; the browser says ACTIVE_QUEUE: a disagreement.
+            # Direct evaluates CONNECTION_LOST; the browser says ACTIVE_QUEUE: a
+            # disagreement. (A matching Queue ID alone would now be accepted.)
             return httpx.Response(
-                200, json=status_document(queue_id, activeQueue=False, usersAhead=None)
+                200,
+                json=status_document(
+                    queue_id, activeQueue=False, usersAhead=None, connectionLost=True
+                ),
             )
         if kind == "mismatch":
             return httpx.Response(200, json=status_document("queue-other"))

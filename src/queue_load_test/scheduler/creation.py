@@ -664,6 +664,68 @@ class QueueSessionCreator:
         else:
             await self._repository.update(session)
 
+    async def reserve_session(self, work_item: CreationWorkItem) -> QueueSession:
+        """Persist a CREATING reservation for a Manual Strategy acquisition window.
+
+        Unlike automatic acquisition, the row exists for every provider: it carries
+        the window's manual ownership, and for a proxied run its own new immutable
+        sticky ID, before the window navigates anywhere. Shutdown or a crash leaves
+        it as an ordinary orphaned reservation, discarded at the next run start.
+        """
+
+        reserved = await self._reserve_proxy_assignment(work_item)
+        if reserved is not None:
+            return reserved
+        return await self._repository.create(self._reservation(work_item, None))
+
+    async def record_failed_attempt(
+        self,
+        work_item: CreationWorkItem,
+        failure_code: str,
+        reserved_session: QueueSession,
+    ) -> None:
+        """Record an unsuccessful attempt as FAILED without a Queue ID (audit row)."""
+
+        if self._observability is not None:
+            self._observability.record_creation_permanent_failure()
+        await self._persist_failed(work_item, 1, failure_code, reserved_session)
+
+    async def observe_proxy_ip(self, session: QueueSession) -> None:
+        """Baseline exit-IP lookup after a persisted acquisition; never raises."""
+
+        if self._proxy_ip_tracker is not None:
+            await self._proxy_ip_tracker.observe_after_check(session)
+
+    def record_access_restricted_attempt(self, session_id: str) -> None:
+        """Count a restricted attempt that ended without the creator's own context."""
+
+        self.access_restricted_attempts += 1
+        if self._observability is not None:
+            self._observability.record_creation_access_restricted()
+        log_event(
+            logger,
+            logging.WARNING,
+            "acquisition_access_restricted",
+            session_id=session_id,
+            status=QueueStatus.FAILED.value,
+            classification=AcquisitionFailure.ACCESS_RESTRICTED_BEFORE_QUEUE.value,
+            retryable=False,
+        )
+
+    def _reservation(
+        self, work_item: CreationWorkItem, proxy_session_id: str | None
+    ) -> QueueSession:
+        return QueueSession(
+            session_id=work_item.session_id,
+            queue_id=None,
+            transfer_url="",
+            mode=self._mode,
+            browser_backend=self._browser_backend,
+            proxy_session_id=proxy_session_id,
+            status=QueueStatus.CREATING,
+            state_path=self._state_directory / f"{work_item.session_id}.json",
+        )
+
     async def _reserve_proxy_assignment(
         self,
         work_item: CreationWorkItem,
@@ -676,16 +738,7 @@ class QueueSessionCreator:
             proxy_session_id = validate_proxy_session_id(
                 self._proxy_session_id_factory()
             )
-            session = QueueSession(
-                session_id=work_item.session_id,
-                queue_id=None,
-                transfer_url="",
-                mode=self._mode,
-                browser_backend=self._browser_backend,
-                proxy_session_id=proxy_session_id,
-                status=QueueStatus.CREATING,
-                state_path=self._state_directory / f"{work_item.session_id}.json",
-            )
+            session = self._reservation(work_item, proxy_session_id)
             try:
                 return await self._repository.create(session)
             except ProxySessionIdConflictError:

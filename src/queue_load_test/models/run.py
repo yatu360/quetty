@@ -29,6 +29,9 @@ class MonitoringStrategy(StrEnum):
 
     HEADED_WINDOW = "headed_window"
     DIRECT = "direct"
+    # Operator-paced acquisition: one visible window at a time, advanced only when the
+    # operator closes it. Automatic monitoring afterwards reuses the browser monitor.
+    MANUAL = "manual"
 
     @classmethod
     def parse(cls, value: str | MonitoringStrategy) -> MonitoringStrategy:
@@ -46,6 +49,8 @@ class MonitoringStrategy(StrEnum):
     def label(self) -> str:
         if self is MonitoringStrategy.HEADED_WINDOW:
             return "Headed Window Strategy"
+        if self is MonitoringStrategy.MANUAL:
+            return "Manual Strategy"
         return "Direct Monitoring Strategy"
 
 

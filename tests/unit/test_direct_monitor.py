@@ -429,7 +429,7 @@ FALLBACKS: list[tuple[str, Callable[[httpx.Request], httpx.Response], DirectFall
     ("rejected", _raw(403, b"no", "text/plain"), DirectFallbackReason.REJECTED_SESSION_STATE),
     (
         "unknown_lifecycle",
-        _json(activeQueue=False, usersAhead=None),
+        _json(activeQueue=False, usersAhead=None, connectionLost=True),
         DirectFallbackReason.UNKNOWN_LIFECYCLE,
     ),
     (
@@ -443,6 +443,25 @@ FALLBACKS: list[tuple[str, Callable[[httpx.Request], httpx.Response], DirectFall
         DirectFallbackReason.UNSUPPORTED_ADMISSION,
     ),
 ]
+
+
+async def test_identity_only_direct_response_is_accepted_without_browser_fallback(
+    tmp_path: Path,
+) -> None:
+    # A matching Queue ID with no lifecycle fields is no longer UNKNOWN_LIFECYCLE: the
+    # shared evaluator keeps the session's explicitly observed ACTIVE_QUEUE stage.
+    harness = await build(tmp_path, _json(activeQueue=False, usersAhead=None), harvest=False)
+    session = await add_session(harness)
+
+    outcome = await harness.handler.check(session)
+
+    assert harness.restorer.calls == []
+    assert outcome.success is True
+    assert outcome.observed_status is QueueStatus.ACTIVE_QUEUE
+    assert harness.handler.metrics.fallback_reasons == {}
+    persisted = await harness.repository.get(session.session_id)
+    assert persisted is not None and persisted.queue_id == session.queue_id
+    await harness.repository.close()
 
 
 @pytest.mark.parametrize(

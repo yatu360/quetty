@@ -62,6 +62,7 @@ FAULT_REASONS = {
     "missing_id": "identity_ambiguity",
     "mismatch": "identity_mismatch",
     "rejected": "rejected_session_state",
+    # Connection-lost lifecycle; a matching Queue ID alone is accepted as PRE_QUEUE.
     "unknown_lifecycle": "unknown_lifecycle",
     "contradictory": "contradictory_lifecycle",
     "admitted": "unsupported_admission",

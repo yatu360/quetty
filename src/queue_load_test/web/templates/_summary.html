@@ -21,6 +21,7 @@
     <div><dt>Browser backend</dt><dd>{{ summary.browser_backend }}</dd></div>
     <div><dt>Browser build</dt><dd>{{ summary.browser_build }}</dd></div>
     <div><dt>Monitoring strategy</dt><dd>{{ summary.monitoring_strategy }}</dd></div>
+    {% if summary.manual_window %}<div><dt>Manual window</dt><dd>{{ summary.manual_window }}</dd></div>{% endif %}
     <div><dt>Proxy</dt><dd>{{ summary.proxy_provider }}</dd></div>
     {% if summary.proxy_country %}<div><dt>Country</dt><dd>{{ summary.proxy_country }}</dd></div>{% endif %}
     {% if summary.proxy_lifetime %}<div><dt>Sticky lifetime</dt><dd>{{ summary.proxy_lifetime }}</dd></div>{% endif %}

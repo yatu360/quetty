@@ -348,7 +348,7 @@ def validate_direct_observation(
         return DirectFallbackReason.UNSUPPORTED_ADMISSION
     if progress.connection_lost is True:
         return DirectFallbackReason.UNKNOWN_LIFECYCLE
-    status = evaluate_monitoring_observation(observation)
+    status = evaluate_monitoring_observation(observation, current_status=session.status)
     if status not in DIRECT_PERSISTABLE_STATUSES:
         return DirectFallbackReason.UNKNOWN_LIFECYCLE
     if not can_transition(session.status, status):
